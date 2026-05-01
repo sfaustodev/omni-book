@@ -195,3 +195,74 @@ pub fn parse_frontmatter(raw: &str) -> (Frontmatter, String) {
     }
     (Frontmatter::default(), raw.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::NoteType;
+
+    fn temp_vault() -> (Vault, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Vault::open(dir.path().to_path_buf()).unwrap();
+        (vault, dir)
+    }
+
+    #[test]
+    fn create_and_reload_note() {
+        let (mut v, _d) = temp_vault();
+        v.create_note(None, "Teste", NoteType::Resumo).unwrap();
+        assert_eq!(v.notes.len(), 1);
+        assert_eq!(v.notes[0].title, "Teste");
+        v.reload_notes();
+        assert_eq!(v.notes.len(), 1);
+    }
+
+    #[test]
+    fn frontmatter_roundtrip() {
+        let (mut v, _d) = temp_vault();
+        let mut note = v.create_note(None, "Cita", NoteType::Citacao).unwrap();
+        note.frontmatter.source = "Livro X".into();
+        note.frontmatter.tags = vec!["rust".into()];
+        v.save_note(&note).unwrap();
+        v.reload_notes();
+        let loaded = v.notes.iter().find(|n| n.frontmatter.id == note.frontmatter.id).unwrap();
+        assert_eq!(loaded.frontmatter.note_type, NoteType::Citacao);
+        assert_eq!(loaded.frontmatter.source, "Livro X");
+        assert_eq!(loaded.frontmatter.tags, vec!["rust"]);
+    }
+
+    #[test]
+    fn delete_note_removes_from_disk() {
+        let (mut v, _d) = temp_vault();
+        v.create_note(None, "Del", NoteType::Resumo).unwrap();
+        v.delete_note(0).unwrap();
+        v.reload_notes();
+        assert_eq!(v.notes.len(), 0);
+    }
+
+    #[test]
+    fn create_folder_appears_in_list() {
+        let (mut v, _d) = temp_vault();
+        v.create_folder(None, "Estudos").unwrap();
+        assert!(v.list_folders().iter().any(|f| f.to_string_lossy().contains("Estudos")));
+    }
+
+    #[test]
+    fn note_in_subfolder() {
+        let (mut v, _d) = temp_vault();
+        let abs = v.create_folder(None, "Sub").unwrap();
+        let rel = abs.strip_prefix(&v.root).unwrap().to_path_buf();
+        v.create_note(Some(&rel), "Deep", NoteType::Resumo).unwrap();
+        let note = v.notes.iter().find(|n| n.title == "Deep").unwrap();
+        assert!(note.rel_path.starts_with("Sub"));
+    }
+
+    #[test]
+    fn parse_frontmatter_extracts_fields() {
+        let raw = "---\nid: abc\ntype: codigo\ntags:\n- rust\nsource: ''\nsource_link: ''\ncreated: ''\n---\n\nBody.";
+        let (fm, body) = parse_frontmatter(raw);
+        assert_eq!(fm.id, "abc");
+        assert_eq!(fm.note_type, NoteType::Codigo);
+        assert_eq!(body.trim(), "Body.");
+    }
+}

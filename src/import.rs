@@ -54,3 +54,56 @@ pub fn import_claude_artifact(src: &Path) -> Result<String, String> {
     let title = src.file_stem().and_then(|s| s.to_str()).unwrap_or("artefato");
     Ok(format!("# {}\n\n```{}\n{}\n```\n", title, lang, raw))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn tmp_file(content: &str, ext: &str) -> tempfile::NamedTempFile {
+        let mut f = tempfile::Builder::new().suffix(ext).tempfile().unwrap();
+        f.write_all(content.as_bytes()).unwrap();
+        f.flush().unwrap();
+        f
+    }
+
+    #[test]
+    fn claude_chat_json_produces_markdown() {
+        let json = r#"{"name":"Conversa","chat_messages":[{"sender":"human","text":"Olá"},{"sender":"assistant","text":"Oi!"}]}"#;
+        let f = tmp_file(json, ".json");
+        let out = import_claude_chat(f.path()).unwrap();
+        assert!(out.contains("# Conversa"));
+        assert!(out.contains("**Você:**"));
+        assert!(out.contains("**Claude:**"));
+        assert!(out.contains("Olá"));
+    }
+
+    #[test]
+    fn claude_chat_missing_messages_errors() {
+        let f = tmp_file(r#"{"name":"Vazio"}"#, ".json");
+        assert!(import_claude_chat(f.path()).is_err());
+    }
+
+    #[test]
+    fn md_file_passes_through() {
+        let md = "# Título\n\nConteúdo.";
+        let f = tmp_file(md, ".md");
+        assert_eq!(import_claude_chat(f.path()).unwrap(), md);
+    }
+
+    #[test]
+    fn artifact_rust_wraps_in_fenced_block() {
+        let code = "fn main() {}";
+        let f = tmp_file(code, ".rs");
+        let out = import_claude_artifact(f.path()).unwrap();
+        assert!(out.contains("```rust"));
+        assert!(out.contains("fn main()"));
+    }
+
+    #[test]
+    fn artifact_md_passes_through() {
+        let md = "# Art\n\nConteúdo.";
+        let f = tmp_file(md, ".md");
+        assert_eq!(import_claude_artifact(f.path()).unwrap(), md);
+    }
+}
