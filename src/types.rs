@@ -30,7 +30,6 @@ impl Default for NoteType {
     fn default() -> Self { Self::Resumo }
 }
 
-/// Frontmatter YAML que vai no topo de cada .md
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Frontmatter {
     pub id: String,
@@ -43,14 +42,13 @@ pub struct Frontmatter {
     #[serde(default)] pub created: String,
 }
 
-/// Nota em memória — caminho no filesystem é a "verdade"
 #[derive(Clone, Debug)]
 pub struct Note {
-    pub path: PathBuf,           // caminho absoluto do .md
-    pub rel_path: PathBuf,       // caminho relativo ao vault
+    pub path: PathBuf,
+    pub rel_path: PathBuf,
     pub frontmatter: Frontmatter,
-    pub title: String,           // do nome do arquivo (sem .md)
-    pub content: String,         // markdown sem frontmatter
+    pub title: String,
+    pub content: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -58,4 +56,10 @@ pub struct AppConfig {
     #[serde(default)] pub dark_mode: bool,
     #[serde(default)] pub last_active: Option<String>,
     #[serde(default)] pub recent_vaults: Vec<PathBuf>,
+}
+
+#[derive(Clone, Debug)]
+pub enum ConfirmAction {
+    DeleteNote(String),
+    DeleteFolder(PathBuf),
 }

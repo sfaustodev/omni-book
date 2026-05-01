@@ -12,7 +12,7 @@ pub struct Vault {
 impl Vault {
     pub fn open(root: PathBuf) -> Result<Self, String> {
         if !root.exists() { fs::create_dir_all(&root).map_err(|e| e.to_string())?; }
-        let cfg_dir = root.join(".caderno");
+        let cfg_dir = root.join(".omninote");
         let _ = fs::create_dir_all(&cfg_dir);
         let _ = fs::create_dir_all(root.join("_attachments"));
 
@@ -32,7 +32,7 @@ impl Vault {
             let path = entry.path();
             if !path.is_file() { continue; }
             let path_str = path.to_string_lossy();
-            if path_str.contains("/.caderno/") || path_str.contains("\\.caderno\\") { continue; }
+            if path_str.contains("/.omninote/") || path_str.contains("\\.omninote\\") { continue; }
             if path_str.contains("/_attachments/") || path_str.contains("\\_attachments\\") { continue; }
             if path.extension().and_then(|s| s.to_str()) != Some("md") { continue; }
             if let Ok(note) = self.read_note(path) {
@@ -98,6 +98,13 @@ impl Vault {
         Ok(())
     }
 
+    pub fn rename_note_by_id(&mut self, id: &str, new_title: &str) -> Result<Note, String> {
+        let idx = self.notes.iter().position(|n| n.frontmatter.id == id)
+            .ok_or_else(|| "note not found".to_string())?;
+        self.rename_note(idx, new_title)?;
+        Ok(self.notes[idx].clone())
+    }
+
     pub fn delete_note(&mut self, idx: usize) -> Result<(), String> {
         fs::remove_file(&self.notes[idx].path).map_err(|e| e.to_string())?;
         self.notes.remove(idx);
@@ -134,7 +141,7 @@ impl Vault {
             if !entry.path().is_dir() || entry.path() == self.root { continue; }
             let rel = entry.path().strip_prefix(&self.root).unwrap();
             let s = rel.to_string_lossy();
-            if s.starts_with(".caderno") || s.starts_with("_attachments") { continue; }
+            if s.starts_with(".omninote") || s.starts_with("_attachments") { continue; }
             out.push(rel.to_path_buf());
         }
         out
@@ -158,17 +165,21 @@ impl Vault {
     }
 
     pub fn save_config(&self) -> Result<(), String> {
-        let p = self.root.join(".caderno").join("config.json");
+        let p = self.root.join(".omninote").join("config.json");
         let s = serde_json::to_string_pretty(&self.config).map_err(|e| e.to_string())?;
         fs::write(p, s).map_err(|e| e.to_string())
     }
 }
 
-fn sanitize_filename(name: &str) -> String {
+pub fn sanitize_filename(name: &str) -> String {
     name.chars().map(|c| match c {
         '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
         c => c,
     }).collect::<String>().trim().to_string()
+}
+
+pub fn sanitize_filename_pub(name: &str) -> String {
+    sanitize_filename(name)
 }
 
 pub fn parse_frontmatter(raw: &str) -> (Frontmatter, String) {
