@@ -111,6 +111,48 @@ impl Vault {
         Ok(())
     }
 
+    /// Move a note into a different folder (or root if `new_folder` is None).
+    /// Filename stays the same; only the parent dir changes. Updates path/rel_path
+    /// on the in-memory note. Errors if a file with the same name already exists at target.
+    pub fn move_note_by_id(
+        &mut self,
+        id: &str,
+        new_folder: Option<&Path>,
+    ) -> Result<(), String> {
+        let idx = self
+            .notes
+            .iter()
+            .position(|n| n.frontmatter.id == id)
+            .ok_or_else(|| "note not found".to_string())?;
+        let old_path = self.notes[idx].path.clone();
+        let filename = old_path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| "invalid filename".to_string())?
+            .to_string();
+        let new_dir = new_folder
+            .map(|f| self.root.join(f))
+            .unwrap_or_else(|| self.root.clone());
+        fs::create_dir_all(&new_dir).map_err(|e| e.to_string())?;
+        let new_path = new_dir.join(&filename);
+        if old_path == new_path {
+            return Ok(());
+        }
+        if new_path.exists() {
+            return Err(format!(
+                "Já existe um arquivo \"{}\" no destino",
+                filename
+            ));
+        }
+        fs::rename(&old_path, &new_path).map_err(|e| e.to_string())?;
+        self.notes[idx].path = new_path.clone();
+        self.notes[idx].rel_path = new_path
+            .strip_prefix(&self.root)
+            .unwrap()
+            .to_path_buf();
+        Ok(())
+    }
+
     pub fn create_folder(&mut self, parent: Option<&Path>, name: &str) -> Result<PathBuf, String> {
         let safe = sanitize_filename(name);
         let parent_abs = parent.map(|p| self.root.join(p)).unwrap_or_else(|| self.root.clone());
@@ -238,6 +280,51 @@ mod tests {
         v.delete_note(0).unwrap();
         v.reload_notes();
         assert_eq!(v.notes.len(), 0);
+    }
+
+    #[test]
+    fn move_note_to_folder() {
+        let (mut v, _d) = temp_vault();
+        let note = v.create_note(None, "Mover", NoteType::Resumo).unwrap();
+        v.create_folder(None, "Destino").unwrap();
+        v.move_note_by_id(&note.frontmatter.id, Some(Path::new("Destino")))
+            .unwrap();
+        let moved = v
+            .notes
+            .iter()
+            .find(|n| n.frontmatter.id == note.frontmatter.id)
+            .unwrap();
+        assert!(moved.rel_path.starts_with("Destino"));
+        assert!(moved.path.exists());
+        assert!(!note.path.exists());
+    }
+
+    #[test]
+    fn move_note_to_root() {
+        let (mut v, _d) = temp_vault();
+        let abs = v.create_folder(None, "Sub").unwrap();
+        let rel = abs.strip_prefix(&v.root).unwrap().to_path_buf();
+        let note = v.create_note(Some(&rel), "Volta", NoteType::Resumo).unwrap();
+        v.move_note_by_id(&note.frontmatter.id, None).unwrap();
+        let moved = v
+            .notes
+            .iter()
+            .find(|n| n.frontmatter.id == note.frontmatter.id)
+            .unwrap();
+        // rel_path at root has no parent component
+        assert_eq!(moved.rel_path.components().count(), 1);
+    }
+
+    #[test]
+    fn move_note_collision_errors() {
+        let (mut v, _d) = temp_vault();
+        let n1 = v.create_note(None, "Igual", NoteType::Resumo).unwrap();
+        v.create_folder(None, "Pasta").unwrap();
+        v.create_note(Some(Path::new("Pasta")), "Igual", NoteType::Resumo)
+            .unwrap();
+        // n1 at root has filename "Igual.md"; Pasta also has "Igual.md" → collision
+        let result = v.move_note_by_id(&n1.frontmatter.id, Some(Path::new("Pasta")));
+        assert!(result.is_err());
     }
 
     #[test]
