@@ -4,6 +4,39 @@
 
 ---
 
+## 2026-05-02 — Q-01..Q-04 resolvidos + merge v0.1-v1.0 → main
+
+**Tickets touched:** CAD-5 (Q-02), todos via merge
+
+**Done:**
+- Merge `feat/omninote-v10-readme-polish` → main com `--no-ff`. Trouxe v0.1 a v1.0 cumulative (10 commits) pra main. Push `0874dbf..b327207`. CI deve rodar.
+- Q-04 resolvido: (a) confirmado — autoformat só linha atual, sem mudança de código.
+- Q-03 resolvido: (b) confirmado — comportamento já implementado no v06-watcher.
+- Q-02 resolvido: (a) — `i.modifiers.ctrl` → `i.modifiers.command` em 3 arquivos (5 sites). Cmd no mac, Ctrl no resto, auto-mapeado pelo egui.
+- Q-01 resolvido: migrate (não delete) — `Vault::open` agora renomeia `.caderno/` → `.omninote/` se legacy existir. Edge case: ambos existem → drop legacy. 2 testes novos.
+- 33 testes passando (+2 vs antes).
+- Branch nova: `feat/omninote-q01-q02-cmd-migrate` off main.
+
+**In flight:**
+- Branch `feat/omninote-q01-q02-cmd-migrate` aguarda smoke macOS humano (Cmd+N/E/K/,/=/Shift+D).
+- Notion tasks CAD-2..CAD-11 ainda em status pré-merge (🚧/🌱/🎯). Não fechar até confirmação humana escrita ("testado, pode fechar") — discipline §13.
+
+**Blocked:**
+- Nenhum bloqueador.
+
+**Files changed:**
+- `src/app.rs` (4 shortcuts → command)
+- `src/ui_editor.rs` (Ctrl+= → command)
+- `src/ui_sidebar.rs` (Ctrl+K → command)
+- `src/vault.rs` (`.caderno/` migration + 2 testes)
+- `discipline/HUMAN.md` (Q-01..Q-04 → Resolved)
+
+**Next session:**
+- Smoke humano em macOS local (`cargo run` na branch q01-q02). Validar Cmd+N abre modal nova nota, Cmd+K foca busca, Cmd+= avalia matemática.
+- Após confirmação: merge q01-q02 → main, fechar Notion CAD tasks via MCP.
+
+---
+
 ## 2026-05-02 — discipline migration: root → discipline/ subfolder
 
 **Tickets touched:** none (housekeeping)

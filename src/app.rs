@@ -300,12 +300,13 @@ impl eframe::App for OmniNoteApp {
         // Request repaint regularly so watcher events are noticed even when idle
         ctx.request_repaint_after(Duration::from_millis(500));
 
+        // Q-02: use `command` modifier (auto-maps Cmd on macOS, Ctrl elsewhere)
         let (new, toggle_edit, settings, toggle_dark) = ctx.input(|i| {
             (
-                i.key_pressed(egui::Key::N) && i.modifiers.ctrl,
-                i.key_pressed(egui::Key::E) && i.modifiers.ctrl,
-                i.key_pressed(egui::Key::Comma) && i.modifiers.ctrl,
-                i.key_pressed(egui::Key::D) && i.modifiers.ctrl && i.modifiers.shift,
+                i.key_pressed(egui::Key::N) && i.modifiers.command,
+                i.key_pressed(egui::Key::E) && i.modifiers.command,
+                i.key_pressed(egui::Key::Comma) && i.modifiers.command,
+                i.key_pressed(egui::Key::D) && i.modifiers.command && i.modifiers.shift,
             )
         });
         if new {

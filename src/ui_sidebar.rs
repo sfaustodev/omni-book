@@ -64,7 +64,7 @@ impl OmniNoteApp {
                         .hint_text("🔍 Buscar... (Ctrl+K)")
                         .desired_width(f32::INFINITY),
                 );
-                if ctx.input(|i| i.key_pressed(egui::Key::K) && i.modifiers.ctrl) {
+                if ctx.input(|i| i.key_pressed(egui::Key::K) && i.modifiers.command) {
                     search.request_focus();
                 }
 

@@ -15,6 +15,14 @@ impl Vault {
             fs::create_dir_all(&root).map_err(|e| e.to_string())?;
         }
         let cfg_dir = root.join(".omninote");
+        // Q-01: migrate legacy `.caderno/` → `.omninote/` if old exists and new doesn't.
+        let legacy = root.join(".caderno");
+        if legacy.is_dir() && !cfg_dir.exists() {
+            let _ = fs::rename(&legacy, &cfg_dir);
+        } else if legacy.is_dir() && cfg_dir.exists() {
+            // Both exist (rare): drop legacy to avoid confusion. Config in .omninote/ wins.
+            let _ = fs::remove_dir_all(&legacy);
+        }
         let _ = fs::create_dir_all(&cfg_dir);
         let _ = fs::create_dir_all(root.join("_attachments"));
 
@@ -416,5 +424,48 @@ mod tests {
         assert_eq!(fm.id, "abc");
         assert_eq!(fm.note_type, NoteType::Codigo);
         assert_eq!(body.trim(), "Body.");
+    }
+
+    #[test]
+    fn migrates_legacy_caderno_dir_to_omninote() {
+        // Q-01: vault with .caderno/ but no .omninote/ → renamed
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let legacy = root.join(".caderno");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(
+            legacy.join("config.json"),
+            r#"{"dark_mode":true,"font_size":18.0}"#,
+        )
+        .unwrap();
+
+        let v = Vault::open(root.clone()).unwrap();
+
+        assert!(!root.join(".caderno").exists(), "legacy dir should be gone");
+        assert!(root.join(".omninote").exists(), "new dir should exist");
+        assert!(
+            root.join(".omninote/config.json").exists(),
+            "config preserved during rename"
+        );
+        assert!(v.config.dark_mode, "config values preserved");
+    }
+
+    #[test]
+    fn drops_legacy_caderno_when_omninote_already_exists() {
+        // Q-01: both dirs exist (rare) → legacy dropped, .omninote/ wins
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        fs::create_dir_all(root.join(".caderno")).unwrap();
+        fs::create_dir_all(root.join(".omninote")).unwrap();
+        fs::write(
+            root.join(".omninote/config.json"),
+            r#"{"dark_mode":false}"#,
+        )
+        .unwrap();
+
+        let _ = Vault::open(root.clone()).unwrap();
+
+        assert!(!root.join(".caderno").exists());
+        assert!(root.join(".omninote").exists());
     }
 }

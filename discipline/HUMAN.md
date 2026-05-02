@@ -7,41 +7,40 @@
 
 ## Open questions
 
-### Q-01 · Renomear `.caderno/` → `.omninote/` quebra vaults antigos · raised 2026-05-01 · context: rebrand
-**Why I'm asking:** mudança em path de configuração no vault — irreversível pra vaults criados com Caderno.
-**Options I considered:**
-- (a) Só usar `.omninote/` daqui pra frente. Vaults antigos perdem config (dark mode, etc) — mas só você usou até agora, então blast radius é zero.
-- (b) Manter compat: ler `.caderno/config.json` se existir, depois migrar pra `.omninote/`. Custo: 10 linhas de código + 1 teste.
-- (c) Suportar os dois lados sempre. Custo: complexidade permanente.
-**My tentative pick (if I had to ship now):** (a) — você é o único usuário e nada foi commitado em vault de produção.
-**Ask:** ok ir com (a) e ignorar vaults pre-rename?
-
-### Q-02 · Atalhos: `Ctrl+...` ou `Modifiers::COMMAND` (Cmd no mac, Ctrl no resto)? · raised 2026-05-01 · context: CAD-5
-**Why I'm asking:** UX em macOS. No Mac usuário espera `Cmd+N`, não `Ctrl+N`. Atual implementação usa `Ctrl` literal — funciona mas é estranho.
-**Options I considered:**
-- (a) Trocar tudo pra `Modifiers::COMMAND` (mapeia automaticamente). Funciona em todas plataformas.
-- (b) Manter `Ctrl` literal — comporta igual em mac/linux/windows. Usuário Mac estranha.
-- (c) Detectar plataforma e branch — boilerplate desnecessário.
-**My tentative pick (if I had to ship now):** (a) — convenção Mac importa, é zero custo trocar.
-**Ask:** trocar pra `Modifiers::COMMAND`?
-
-### Q-03 · CAD-9 watcher: como tratar conflito quando humano edita externamente nota ativa? · raised 2026-05-01 · context: CAD-9 (próximo sprint)
-**Why I'm asking:** decisão de UX impactante. Se você edita no OmniNote enquanto Obsidian/Claude editam o mesmo arquivo, o que ganha?
-**Options I considered:**
-- (a) Última-grava-vence (silent overwrite). Simples, perde dado se desatento.
-- (b) Avisa em modal "arquivo mudou no disco. Recarregar (perde edits) ou ignorar (sobrescreve no save)?". Mais seguro.
-- (c) 3-way merge automático. Complexo, exige diff lib.
-**My tentative pick (if I had to ship now):** (b) — perde-edits-silenciosamente é o pior outcome.
-**Ask:** confirma (b)?
-
-### Q-04 · Ctrl+= autoformat: substituir só na linha atual ou também propagar pra resultados aninhados? · raised 2026-05-01 · context: CAD-5
-**Why I'm asking:** spec atual só substitui na linha do cursor. Caso de uso real: planilhas com `=SOMA(A1:A5)` — não suportado, e provavelmente fora de escopo. Quero confirmar antes de virar feature creep.
-**Options I considered:**
-- (a) Manter só linha atual. Funcional pra cálculos simples (`2+3=`).
-- (b) Adicionar suporte a referências de linhas (`A1`, `B2`). Vira mini-spreadsheet.
-**My tentative pick (if I had to ship now):** (a) — escopo minimalista do MVP.
-**Ask:** confirmar (a) e arquivar (b) como feature pra v2.0?
+(none)
 
 ---
 
 ## Resolved
+
+### Q-04 · Ctrl+= autoformat scope · raised 2026-05-01 · resolved 2026-05-02 · context: CAD-5
+**Resposta humano (Fausto, 2026-05-02):** **(a)** — manter só linha atual por enquanto.
+**Aplicação:** zero código novo. Comportamento atual mantido. (b) arquivado pra v2.0+ se demanda real surgir.
+
+---
+
+### Q-03 · CAD-9 watcher conflict UX · raised 2026-05-01 · resolved 2026-05-02 · context: CAD-9
+**Resposta humano (Fausto, 2026-05-02):** **(b)** confirmado — modal "Recarregar (perde edits) / Manter edits (sobrescreve no save)".
+**Aplicação:** já implementado no `feat/omninote-v06-watcher` (mergeado em main `b327207`). `external_change_pending: bool` em `OmniNoteApp`. Modal renderizado em `ui_modals::show_modal_external_change`. Self-write window 400ms evita reload-loop dos próprios saves.
+
+---
+
+### Q-02 · Atalhos: Ctrl literal vs `Modifiers::COMMAND` · raised 2026-05-01 · resolved 2026-05-02 · context: CAD-5
+**Resposta humano (Fausto, 2026-05-02):** **(a)** — Mac usa Cmd. Trocar pra `Modifiers::COMMAND` (auto-mapeia Cmd no mac, Ctrl no resto).
+**Aplicação:** branch `feat/omninote-q01-q02-cmd-migrate`. Substituído `i.modifiers.ctrl` → `i.modifiers.command` em:
+- `src/app.rs:305-308` (Cmd+N, Cmd+E, Cmd+,, Cmd+Shift+D)
+- `src/ui_editor.rs:193` (Cmd+= autoformat)
+- `src/ui_sidebar.rs:67` (Cmd+K busca)
+
+Sem novo teste — egui mapeia internamente. Validação manual macOS pendente.
+
+---
+
+### Q-01 · Renomear `.caderno/` → `.omninote/` quebra vaults antigos · raised 2026-05-01 · resolved 2026-05-02 · context: rebrand
+**Resposta humano (Fausto, 2026-05-02):** "se for útil renomeia, se for deletar só deleta" → **migrate, não delete** (config.json tem dark_mode + last_active úteis).
+**Aplicação:** branch `feat/omninote-q01-q02-cmd-migrate`. Em `Vault::open`:
+- Se `.caderno/` existe e `.omninote/` não → `fs::rename(.caderno → .omninote)` preserva config
+- Se ambos existem (raro) → drop `.caderno/`, `.omninote/` ganha
+- Se só `.omninote/` existe → fluxo normal
+
+2 testes novos: `migrates_legacy_caderno_dir_to_omninote` + `drops_legacy_caderno_when_omninote_already_exists`.
