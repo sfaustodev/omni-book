@@ -51,11 +51,64 @@ pub struct Note {
     pub content: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum FontFamily {
+    System,
+    Monospace,
+    Serif,
+}
+
+impl Default for FontFamily {
+    fn default() -> Self { Self::System }
+}
+
+impl FontFamily {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::System => "Sistema (sans-serif)",
+            Self::Monospace => "Monospace",
+            Self::Serif => "Serif",
+        }
+    }
+    pub fn all() -> [FontFamily; 3] {
+        [Self::System, Self::Monospace, Self::Serif]
+    }
+    pub fn as_egui_family(&self) -> egui::FontFamily {
+        match self {
+            Self::System | Self::Serif => egui::FontFamily::Proportional,
+            Self::Monospace => egui::FontFamily::Monospace,
+        }
+    }
+}
+
+fn default_font_size() -> f32 { 14.0 }
+fn default_line_height() -> f32 { 1.4 }
+fn default_letter_spacing() -> f32 { 0.0 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default)] pub dark_mode: bool,
     #[serde(default)] pub last_active: Option<String>,
     #[serde(default)] pub recent_vaults: Vec<PathBuf>,
+    #[serde(default)] pub font_family: FontFamily,
+    #[serde(default = "default_font_size")] pub font_size: f32,
+    #[serde(default = "default_line_height")] pub line_height: f32,
+    #[serde(default = "default_letter_spacing")] pub letter_spacing: f32,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            dark_mode: false,
+            last_active: None,
+            recent_vaults: Vec::new(),
+            font_family: FontFamily::default(),
+            font_size: default_font_size(),
+            line_height: default_line_height(),
+            letter_spacing: default_letter_spacing(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

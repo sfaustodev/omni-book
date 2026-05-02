@@ -37,7 +37,7 @@ impl OmniNoteApp {
             });
         }
 
-        Self {
+        let app = Self {
             vault,
             active_note: None,
             editing: false,
@@ -51,7 +51,9 @@ impl OmniNoteApp {
             last_save: std::time::Instant::now(),
             error_msg: None,
             md_cache: egui_commonmark::CommonMarkCache::default(),
-        }
+        };
+        app.apply_style(&cc.egui_ctx);
+        app
     }
 
     pub fn save_last_vault(&self) {
@@ -63,6 +65,56 @@ impl OmniNoteApp {
                     dir.join("last_vault"),
                     v.root.to_string_lossy().as_bytes(),
                 );
+            }
+        }
+    }
+
+    /// Apply font/spacing settings from vault config to egui style.
+    /// Call after vault open and after settings changes.
+    pub fn apply_style(&self, ctx: &egui::Context) {
+        let v = match &self.vault {
+            Some(v) => v,
+            None => return,
+        };
+        let cfg = &v.config;
+        let mut style = (*ctx.style()).clone();
+
+        // Font sizes — scale all text styles relative to base font_size
+        let base = cfg.font_size;
+        let scale = base / 14.0; // 14pt is egui default base
+        for (text_style, font_id) in style.text_styles.iter_mut() {
+            let default_size = match text_style {
+                egui::TextStyle::Heading => 20.0,
+                egui::TextStyle::Body => 14.0,
+                egui::TextStyle::Monospace => 12.0,
+                egui::TextStyle::Button => 14.0,
+                egui::TextStyle::Small => 10.0,
+                _ => 14.0,
+            };
+            font_id.size = (default_size * scale).round();
+            font_id.family = cfg.font_family.as_egui_family();
+        }
+
+        // Line spacing via item_spacing
+        let extra = (base * (cfg.line_height - 1.0)).max(0.0);
+        style.spacing.item_spacing.y = 3.0 + extra;
+
+        ctx.set_style(style);
+    }
+
+    pub fn pick_vault_with_ctx(&mut self, ctx: &egui::Context) {
+        if let Some(path) = rfd::FileDialog::new()
+            .set_title("Escolha (ou crie) uma pasta pra ser seu vault")
+            .pick_folder()
+        {
+            match Vault::open(path) {
+                Ok(v) => {
+                    self.vault = Some(v);
+                    self.active_note = None;
+                    self.save_last_vault();
+                    self.apply_style(ctx);
+                }
+                Err(e) => self.error_msg = Some(e),
             }
         }
     }

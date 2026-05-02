@@ -46,6 +46,8 @@ impl OmniNoteApp {
     fn show_modal_settings(&mut self, ctx: &egui::Context) {
         if !self.show_settings { return; }
         let mut open = self.show_settings;
+        let mut style_dirty = false;
+
         egui::Window::new("Configurações")
             .open(&mut open)
             .collapsible(false)
@@ -53,21 +55,84 @@ impl OmniNoteApp {
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 if let Some(v) = &mut self.vault {
+                    // Tema
                     let mut dark = v.config.dark_mode;
-                    if ui.checkbox(&mut dark, "Modo escuro").changed() {
+                    if ui.checkbox(&mut dark, "🌙 Modo escuro").changed() {
                         v.config.dark_mode = dark;
                         ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
                     }
+                    ui.separator();
+
+                    // Acessibilidade (v0.5)
+                    ui.label(egui::RichText::new("Acessibilidade").strong());
+
+                    // Font family
+                    ui.horizontal(|ui| {
+                        ui.label("Fonte:");
+                        let current = v.config.font_family;
+                        egui::ComboBox::from_id_salt("font_family_combo")
+                            .selected_text(current.label())
+                            .show_ui(ui, |ui| {
+                                for f in crate::types::FontFamily::all() {
+                                    if ui.selectable_label(v.config.font_family == f, f.label()).clicked() {
+                                        if v.config.font_family != f {
+                                            v.config.font_family = f;
+                                            style_dirty = true;
+                                        }
+                                    }
+                                }
+                            });
+                    });
+
+                    // Font size
+                    ui.horizontal(|ui| {
+                        ui.label("Tamanho:");
+                        let prev = v.config.font_size;
+                        if ui
+                            .add(egui::Slider::new(&mut v.config.font_size, 11.0..=24.0).suffix("pt"))
+                            .changed()
+                            && (v.config.font_size - prev).abs() > 0.01
+                        {
+                            style_dirty = true;
+                        }
+                    });
+
+                    // Line height
+                    ui.horizontal(|ui| {
+                        ui.label("Espaço entre linhas:");
+                        let prev = v.config.line_height;
+                        if ui
+                            .add(egui::Slider::new(&mut v.config.line_height, 1.0..=2.2).fixed_decimals(2))
+                            .changed()
+                            && (v.config.line_height - prev).abs() > 0.001
+                        {
+                            style_dirty = true;
+                        }
+                    });
+
+                    // Reset button
+                    if ui.small_button("↩ Restaurar padrões").clicked() {
+                        v.config.font_family = crate::types::FontFamily::default();
+                        v.config.font_size = 14.0;
+                        v.config.line_height = 1.4;
+                        style_dirty = true;
+                    }
+
                     ui.separator();
                     ui.label("Vault atual:");
                     ui.label(egui::RichText::new(v.root.to_string_lossy().as_ref()).size(11.0).weak());
                 }
                 ui.separator();
                 if ui.button("📂 Trocar vault").clicked() {
-                    self.pick_vault();
+                    self.pick_vault_with_ctx(ctx);
                     self.show_settings = false;
                 }
             });
+
+        if style_dirty {
+            self.apply_style(ctx);
+        }
+
         self.show_settings = open;
     }
 
