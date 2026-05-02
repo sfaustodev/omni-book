@@ -46,12 +46,17 @@ impl OmniNoteApp {
                 if let Some(note) = &self.active_note {
                     if let Some(parent) = note.rel_path.parent() {
                         if parent != Path::new("") {
-                            ui.label(RichText::new(parent.to_string_lossy().as_ref()).weak().size(11.0));
+                            ui.label(
+                                RichText::new(parent.to_string_lossy().as_ref())
+                                    .weak()
+                                    .size(11.0),
+                            );
                             ui.label(RichText::new("·").weak());
                         }
                     }
                 }
-                if ui.selectable_label(self.editing, "✎ Editar")
+                if ui
+                    .selectable_label(self.editing, "✎ Editar")
                     .on_hover_text("Ctrl+E")
                     .clicked()
                 {
@@ -67,13 +72,15 @@ impl OmniNoteApp {
             });
             ui.separator();
 
-            egui::ScrollArea::vertical().id_salt("editor_scroll").show(ui, |ui| {
-                if self.editing {
-                    self.show_edit_panel(ui);
-                } else {
-                    self.show_view_panel(ui);
-                }
-            });
+            egui::ScrollArea::vertical()
+                .id_salt("editor_scroll")
+                .show(ui, |ui| {
+                    if self.editing {
+                        self.show_edit_panel(ui);
+                    } else {
+                        self.show_view_panel(ui);
+                    }
+                });
         });
     }
 
@@ -84,12 +91,15 @@ impl OmniNoteApp {
         };
 
         // Title
-        if ui.add(
-            egui::TextEdit::singleline(&mut note.title)
-                .font(egui::TextStyle::Heading)
-                .hint_text("Título da nota")
-                .desired_width(f32::INFINITY),
-        ).changed() {
+        if ui
+            .add(
+                egui::TextEdit::singleline(&mut note.title)
+                    .font(egui::TextStyle::Heading)
+                    .hint_text("Título da nota")
+                    .desired_width(f32::INFINITY),
+            )
+            .changed()
+        {
             self.dirty = true;
         }
 
@@ -101,8 +111,12 @@ impl OmniNoteApp {
                 .selected_text(format!("{} {}", current.icon(), current.label()))
                 .show_ui(ui, |ui| {
                     for t in NoteType::all() {
-                        if ui.selectable_label(note.frontmatter.note_type == t,
-                            format!("{} {}", t.icon(), t.label())).clicked()
+                        if ui
+                            .selectable_label(
+                                note.frontmatter.note_type == t,
+                                format!("{} {}", t.icon(), t.label()),
+                            )
+                            .clicked()
                         {
                             note.frontmatter.note_type = t;
                             self.dirty = true;
@@ -113,11 +127,15 @@ impl OmniNoteApp {
             ui.label("Tags:");
             let tags_str = note.frontmatter.tags.join(", ");
             let mut tags_edit = tags_str.clone();
-            if ui.add(
-                egui::TextEdit::singleline(&mut tags_edit)
-                    .hint_text("rust, prog, ...")
-                    .desired_width(160.0),
-            ).changed() && tags_edit != tags_str {
+            if ui
+                .add(
+                    egui::TextEdit::singleline(&mut tags_edit)
+                        .hint_text("rust, prog, ...")
+                        .desired_width(160.0),
+                )
+                .changed()
+                && tags_edit != tags_str
+            {
                 note.frontmatter.tags = tags_edit
                     .split(',')
                     .map(|s| s.trim().to_string())
@@ -131,11 +149,25 @@ impl OmniNoteApp {
         if note.frontmatter.note_type == NoteType::Citacao {
             ui.horizontal(|ui| {
                 ui.label("Fonte:");
-                if ui.add(egui::TextEdit::singleline(&mut note.frontmatter.source)
-                    .desired_width(150.0)).changed() { self.dirty = true; }
+                if ui
+                    .add(
+                        egui::TextEdit::singleline(&mut note.frontmatter.source)
+                            .desired_width(150.0),
+                    )
+                    .changed()
+                {
+                    self.dirty = true;
+                }
                 ui.label("URL:");
-                if ui.add(egui::TextEdit::singleline(&mut note.frontmatter.source_link)
-                    .desired_width(200.0)).changed() { self.dirty = true; }
+                if ui
+                    .add(
+                        egui::TextEdit::singleline(&mut note.frontmatter.source_link)
+                            .desired_width(200.0),
+                    )
+                    .changed()
+                {
+                    self.dirty = true;
+                }
             });
         }
         ui.separator();
@@ -272,11 +304,7 @@ impl OmniNoteApp {
         }
         ui.separator();
 
-        egui_commonmark::CommonMarkViewer::new().show(
-            ui,
-            &mut self.md_cache,
-            &note.content,
-        );
+        egui_commonmark::CommonMarkViewer::new().show(ui, &mut self.md_cache, &note.content);
         ui.separator();
 
         // Wikilinks + embeds (v0.4 — CAD-10)
@@ -292,8 +320,7 @@ impl OmniNoteApp {
                 .iter()
                 .filter(|n| {
                     n.frontmatter.id != note.frontmatter.id
-                        && (n.frontmatter.linked_note.as_deref()
-                            == Some(&note.frontmatter.id)
+                        && (n.frontmatter.linked_note.as_deref() == Some(&note.frontmatter.id)
                             || n.content.contains(&format!("[[{}]]", note.title)))
                 })
                 .map(|n| (n.frontmatter.id.clone(), n.title.clone()))
@@ -346,48 +373,37 @@ impl OmniNoteApp {
 
         // Notes referenciadas
         if !notes.is_empty() {
-            ui.collapsing(
-                format!("🔗 Notas referenciadas ({})", notes.len()),
-                |ui| {
-                    let mut pending_select: Option<String> = None;
-                    let mut pending_create: Option<String> = None;
-                    for title in &notes {
-                        let exists = self
-                            .vault
-                            .as_ref()
-                            .map(|v| {
-                                v.notes
-                                    .iter()
-                                    .any(|n| n.title.eq_ignore_ascii_case(title))
-                            })
-                            .unwrap_or(false);
+            ui.collapsing(format!("🔗 Notas referenciadas ({})", notes.len()), |ui| {
+                let mut pending_select: Option<String> = None;
+                let mut pending_create: Option<String> = None;
+                for title in &notes {
+                    let exists = self
+                        .vault
+                        .as_ref()
+                        .map(|v| v.notes.iter().any(|n| n.title.eq_ignore_ascii_case(title)))
+                        .unwrap_or(false);
 
-                        ui.horizontal(|ui| {
-                            if exists {
-                                if ui.link(format!("→ {}", title)).clicked() {
-                                    pending_select = Some(title.clone());
-                                }
-                            } else {
-                                ui.label(
-                                    egui::RichText::new(format!("⚠ {}", title))
-                                        .weak()
-                                        .italics(),
-                                )
-                                .on_hover_text("Nota não existe ainda");
-                                if ui.small_button("➕ criar").clicked() {
-                                    pending_create = Some(title.clone());
-                                }
+                    ui.horizontal(|ui| {
+                        if exists {
+                            if ui.link(format!("→ {}", title)).clicked() {
+                                pending_select = Some(title.clone());
                             }
-                        });
-                    }
-                    if let Some(t) = pending_select {
-                        self.select_note_by_title(&t);
-                    }
-                    if let Some(t) = pending_create {
-                        self.create_note_from_wikilink(&t);
-                    }
-                },
-            );
+                        } else {
+                            ui.label(egui::RichText::new(format!("⚠ {}", title)).weak().italics())
+                                .on_hover_text("Nota não existe ainda");
+                            if ui.small_button("➕ criar").clicked() {
+                                pending_create = Some(title.clone());
+                            }
+                        }
+                    });
+                }
+                if let Some(t) = pending_select {
+                    self.select_note_by_title(&t);
+                }
+                if let Some(t) = pending_create {
+                    self.create_note_from_wikilink(&t);
+                }
+            });
         }
 
         // Embeds: imagens
@@ -428,11 +444,8 @@ impl OmniNoteApp {
                                 }
                             } else {
                                 ui.label(
-                                    egui::RichText::new(format!(
-                                        "⚠ {} (não encontrado)",
-                                        filename
-                                    ))
-                                    .weak(),
+                                    egui::RichText::new(format!("⚠ {} (não encontrado)", filename))
+                                        .weak(),
                                 );
                             }
                         });

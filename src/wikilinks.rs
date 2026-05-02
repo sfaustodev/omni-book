@@ -20,7 +20,8 @@ pub fn extract(content: &str) -> Vec<Wikilink> {
 
     while i < bytes.len() {
         // Look for `[[` or `![[`
-        let is_embed = i + 2 < bytes.len() && bytes[i] == b'!' && bytes[i + 1] == b'[' && bytes[i + 2] == b'[';
+        let is_embed =
+            i + 2 < bytes.len() && bytes[i] == b'!' && bytes[i + 1] == b'[' && bytes[i + 2] == b'[';
         let is_link = !is_embed && i + 1 < bytes.len() && bytes[i] == b'[' && bytes[i + 1] == b'[';
 
         if !is_link && !is_embed {

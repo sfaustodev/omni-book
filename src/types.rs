@@ -3,43 +3,67 @@ use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum NoteType {
-    Resumo, Citacao, Codigo, Exercicio, Duvida, Definicao,
+    #[default]
+    Resumo,
+    Citacao,
+    Codigo,
+    Exercicio,
+    Duvida,
+    Definicao,
 }
 
 impl NoteType {
     pub fn label(&self) -> &'static str {
         match self {
-            Self::Resumo => "Resumo", Self::Citacao => "Citação",
-            Self::Codigo => "Código", Self::Exercicio => "Exercício",
-            Self::Duvida => "Dúvida", Self::Definicao => "Definição",
+            Self::Resumo => "Resumo",
+            Self::Citacao => "Citação",
+            Self::Codigo => "Código",
+            Self::Exercicio => "Exercício",
+            Self::Duvida => "Dúvida",
+            Self::Definicao => "Definição",
         }
     }
     pub fn icon(&self) -> &'static str {
         match self {
-            Self::Resumo => "📄", Self::Citacao => "💬", Self::Codigo => "💻",
-            Self::Exercicio => "✏", Self::Duvida => "❓", Self::Definicao => "💡",
+            Self::Resumo => "📄",
+            Self::Citacao => "💬",
+            Self::Codigo => "💻",
+            Self::Exercicio => "✏",
+            Self::Duvida => "❓",
+            Self::Definicao => "💡",
         }
     }
     pub fn all() -> [NoteType; 6] {
-        [Self::Resumo, Self::Citacao, Self::Codigo, Self::Exercicio, Self::Duvida, Self::Definicao]
+        [
+            Self::Resumo,
+            Self::Citacao,
+            Self::Codigo,
+            Self::Exercicio,
+            Self::Duvida,
+            Self::Definicao,
+        ]
     }
-}
-
-impl Default for NoteType {
-    fn default() -> Self { Self::Resumo }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Frontmatter {
     pub id: String,
-    #[serde(rename = "type", default)] pub note_type: NoteType,
-    #[serde(default)] pub tags: Vec<String>,
-    #[serde(default)] pub source: String,
-    #[serde(default)] pub source_link: String,
-    #[serde(default)] pub linked_note: Option<String>,
-    #[serde(default)] pub attachments: Vec<String>,
-    #[serde(default)] pub created: String,
+    #[serde(rename = "type", default)]
+    pub note_type: NoteType,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub source_link: String,
+    #[serde(default)]
+    pub linked_note: Option<String>,
+    #[serde(default)]
+    pub attachments: Vec<String>,
+    #[serde(default)]
+    pub created: String,
 }
 
 #[derive(Clone, Debug)]
@@ -53,14 +77,12 @@ pub struct Note {
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum FontFamily {
+    #[default]
     System,
     Monospace,
     Serif,
-}
-
-impl Default for FontFamily {
-    fn default() -> Self { Self::System }
 }
 
 impl FontFamily {
@@ -82,19 +104,32 @@ impl FontFamily {
     }
 }
 
-fn default_font_size() -> f32 { 14.0 }
-fn default_line_height() -> f32 { 1.4 }
-fn default_letter_spacing() -> f32 { 0.0 }
+fn default_font_size() -> f32 {
+    14.0
+}
+fn default_line_height() -> f32 {
+    1.4
+}
+fn default_letter_spacing() -> f32 {
+    0.0
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppConfig {
-    #[serde(default)] pub dark_mode: bool,
-    #[serde(default)] pub last_active: Option<String>,
-    #[serde(default)] pub recent_vaults: Vec<PathBuf>,
-    #[serde(default)] pub font_family: FontFamily,
-    #[serde(default = "default_font_size")] pub font_size: f32,
-    #[serde(default = "default_line_height")] pub line_height: f32,
-    #[serde(default = "default_letter_spacing")] pub letter_spacing: f32,
+    #[serde(default)]
+    pub dark_mode: bool,
+    #[serde(default)]
+    pub last_active: Option<String>,
+    #[serde(default)]
+    pub recent_vaults: Vec<PathBuf>,
+    #[serde(default)]
+    pub font_family: FontFamily,
+    #[serde(default = "default_font_size")]
+    pub font_size: f32,
+    #[serde(default = "default_line_height")]
+    pub line_height: f32,
+    #[serde(default = "default_letter_spacing")]
+    pub letter_spacing: f32,
 }
 
 impl Default for AppConfig {

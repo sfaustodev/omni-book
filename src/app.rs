@@ -1,9 +1,9 @@
+use crate::types::{ConfirmAction, Note, NoteType};
+use crate::vault::Vault;
+use crate::watcher::VaultWatcher;
 use eframe::egui;
 use egui::RichText;
 use std::path::PathBuf;
-use crate::vault::Vault;
-use crate::types::{ConfirmAction, Note, NoteType};
-use crate::watcher::VaultWatcher;
 
 pub struct OmniNoteApp {
     pub vault: Option<Vault>,
@@ -48,9 +48,7 @@ impl OmniNoteApp {
             });
         }
 
-        let watcher = vault
-            .as_ref()
-            .and_then(|v| VaultWatcher::new(&v.root).ok());
+        let watcher = vault.as_ref().and_then(|v| VaultWatcher::new(&v.root).ok());
 
         let app = Self {
             vault,
@@ -80,10 +78,7 @@ impl OmniNoteApp {
             if let Some(d) = dirs::config_dir() {
                 let dir = d.join("omninote");
                 let _ = std::fs::create_dir_all(&dir);
-                let _ = std::fs::write(
-                    dir.join("last_vault"),
-                    v.root.to_string_lossy().as_bytes(),
-                );
+                let _ = std::fs::write(dir.join("last_vault"), v.root.to_string_lossy().as_bytes());
             }
         }
     }
@@ -171,14 +166,10 @@ impl OmniNoteApp {
         };
 
         // Set self-write window so notify events from our save are ignored
-        self.self_write_until =
-            std::time::Instant::now() + std::time::Duration::from_millis(400);
+        self.self_write_until = std::time::Instant::now() + std::time::Duration::from_millis(400);
 
         if let Some(v) = &mut self.vault {
-            let desired = format!(
-                "{}.md",
-                crate::vault::sanitize_filename_pub(&note.title)
-            );
+            let desired = format!("{}.md", crate::vault::sanitize_filename_pub(&note.title));
             let current = note
                 .path
                 .file_name()
@@ -317,9 +308,15 @@ impl eframe::App for OmniNoteApp {
                 i.key_pressed(egui::Key::D) && i.modifiers.ctrl && i.modifiers.shift,
             )
         });
-        if new { self.show_new = true; }
-        if toggle_edit && self.active_note.is_some() { self.editing = !self.editing; }
-        if settings { self.show_settings = true; }
+        if new {
+            self.show_new = true;
+        }
+        if toggle_edit && self.active_note.is_some() {
+            self.editing = !self.editing;
+        }
+        if settings {
+            self.show_settings = true;
+        }
         if toggle_dark {
             if let Some(v) = &mut self.vault {
                 v.config.dark_mode = !v.config.dark_mode;
@@ -357,12 +354,14 @@ impl eframe::App for OmniNoteApp {
         self.show_modals(ctx);
 
         if let Some(err) = self.error_msg.clone() {
-            egui::Window::new("Erro").collapsible(false).show(ctx, |ui| {
-                ui.label(&err);
-                if ui.button("OK").clicked() {
-                    self.error_msg = None;
-                }
-            });
+            egui::Window::new("Erro")
+                .collapsible(false)
+                .show(ctx, |ui| {
+                    ui.label(&err);
+                    if ui.button("OK").clicked() {
+                        self.error_msg = None;
+                    }
+                });
         }
     }
 
