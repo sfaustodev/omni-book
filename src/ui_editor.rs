@@ -203,6 +203,13 @@ impl OmniNoteApp {
         );
         ui.separator();
 
+        // Wikilinks + embeds (v0.4 — CAD-10)
+        let wikis = crate::wikilinks::extract(&note.content);
+        if !wikis.is_empty() {
+            self.render_wikilinks(ui, &wikis);
+            ui.separator();
+        }
+
         // Backlinks
         let backlinks: Vec<(String, String)> = if let Some(v) = &self.vault {
             v.notes
@@ -231,6 +238,146 @@ impl OmniNoteApp {
                     self.select_note(&id);
                 }
             });
+        }
+    }
+
+    /// Render wikilinks (`[[Title]]`) as clickable links and embeds (`![[file]]`)
+    /// as inline images (for image extensions) or open buttons (for other files).
+    fn render_wikilinks(&mut self, ui: &mut egui::Ui, wikis: &[crate::wikilinks::Wikilink]) {
+        use crate::wikilinks::Wikilink;
+        use std::collections::HashSet;
+
+        // Dedupe by display key while preserving order
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut notes: Vec<String> = Vec::new();
+        let mut images: Vec<String> = Vec::new();
+        let mut files: Vec<String> = Vec::new();
+        for w in wikis {
+            let key = match w {
+                Wikilink::Note(t) => format!("n:{}", t),
+                Wikilink::Image(f) => format!("i:{}", f),
+                Wikilink::File(f) => format!("f:{}", f),
+            };
+            if !seen.insert(key) {
+                continue;
+            }
+            match w {
+                Wikilink::Note(t) => notes.push(t.clone()),
+                Wikilink::Image(f) => images.push(f.clone()),
+                Wikilink::File(f) => files.push(f.clone()),
+            }
+        }
+
+        // Notes referenciadas
+        if !notes.is_empty() {
+            ui.collapsing(
+                format!("🔗 Notas referenciadas ({})", notes.len()),
+                |ui| {
+                    let mut pending_select: Option<String> = None;
+                    let mut pending_create: Option<String> = None;
+                    for title in &notes {
+                        let exists = self
+                            .vault
+                            .as_ref()
+                            .map(|v| {
+                                v.notes
+                                    .iter()
+                                    .any(|n| n.title.eq_ignore_ascii_case(title))
+                            })
+                            .unwrap_or(false);
+
+                        ui.horizontal(|ui| {
+                            if exists {
+                                if ui.link(format!("→ {}", title)).clicked() {
+                                    pending_select = Some(title.clone());
+                                }
+                            } else {
+                                ui.label(
+                                    egui::RichText::new(format!("⚠ {}", title))
+                                        .weak()
+                                        .italics(),
+                                )
+                                .on_hover_text("Nota não existe ainda");
+                                if ui.small_button("➕ criar").clicked() {
+                                    pending_create = Some(title.clone());
+                                }
+                            }
+                        });
+                    }
+                    if let Some(t) = pending_select {
+                        self.select_note_by_title(&t);
+                    }
+                    if let Some(t) = pending_create {
+                        self.create_note_from_wikilink(&t);
+                    }
+                },
+            );
+        }
+
+        // Embeds: imagens
+        if !images.is_empty() {
+            ui.collapsing(format!("🖼 Imagens ({})", images.len()), |ui| {
+                if let Some(v) = &self.vault {
+                    for filename in &images {
+                        let path = v.root.join("_attachments").join(filename);
+                        if path.exists() {
+                            let uri = format!("file://{}", path.to_string_lossy());
+                            ui.label(egui::RichText::new(filename).size(11.0).weak());
+                            ui.add(
+                                egui::Image::new(uri)
+                                    .max_width(ui.available_width().min(600.0))
+                                    .maintain_aspect_ratio(true),
+                            );
+                        } else {
+                            ui.label(
+                                egui::RichText::new(format!("⚠ {} (não encontrado)", filename))
+                                    .weak(),
+                            );
+                        }
+                    }
+                }
+            });
+        }
+
+        // Embeds: arquivos (PDFs, etc)
+        if !files.is_empty() {
+            ui.collapsing(format!("📎 Arquivos ({})", files.len()), |ui| {
+                if let Some(v) = &self.vault {
+                    for filename in &files {
+                        let path = v.root.join("_attachments").join(filename);
+                        ui.horizontal(|ui| {
+                            if path.exists() {
+                                if ui.button(format!("📄 Abrir {}", filename)).clicked() {
+                                    let _ = open::that(&path);
+                                }
+                            } else {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "⚠ {} (não encontrado)",
+                                        filename
+                                    ))
+                                    .weak(),
+                                );
+                            }
+                        });
+                    }
+                }
+            });
+        }
+    }
+
+    /// Create a new note matching a wikilink target title that doesn't exist yet.
+    fn create_note_from_wikilink(&mut self, title: &str) {
+        self.flush_active();
+        if let Some(v) = &mut self.vault {
+            match v.create_note(None, title, crate::types::NoteType::default()) {
+                Ok(note) => {
+                    self.active_note = Some(note);
+                    self.editing = true;
+                    self.dirty = false;
+                }
+                Err(e) => self.error_msg = Some(e),
+            }
         }
     }
 }
