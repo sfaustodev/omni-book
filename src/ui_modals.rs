@@ -7,6 +7,48 @@ impl OmniNoteApp {
         self.show_modal_settings(ctx);
         self.show_modal_confirm(ctx);
         self.show_modal_import(ctx);
+        self.show_modal_external_change(ctx);
+    }
+
+    /// v0.6 CAD-9 — conflict modal when external edit hits a dirty active note.
+    fn show_modal_external_change(&mut self, ctx: &egui::Context) {
+        if !self.external_change_pending {
+            return;
+        }
+        egui::Window::new("Mudança externa detectada")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label("O arquivo da nota ativa foi modificado fora do OmniNote (Obsidian, MCP do Claude, etc.) e você tem edits não salvas.");
+                ui.label(egui::RichText::new("O que fazer?").strong());
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button("📥 Recarregar (perde meus edits)").clicked() {
+                        self.dirty = false;
+                        if let Some(v) = &mut self.vault {
+                            v.reload_notes();
+                        }
+                        if let Some(active) = &self.active_note {
+                            let path = active.path.clone();
+                            if let Some(v) = &self.vault {
+                                if let Some(fresh) =
+                                    v.notes.iter().find(|n| n.path == path).cloned()
+                                {
+                                    self.active_note = Some(fresh);
+                                }
+                            }
+                        }
+                        self.external_change_pending = false;
+                    }
+                    if ui.button("💾 Manter edits (sobrescreve no próximo save)").clicked() {
+                        // Push self-write window forward so next save isn't seen as conflict
+                        self.self_write_until = std::time::Instant::now()
+                            + std::time::Duration::from_millis(400);
+                        self.external_change_pending = false;
+                    }
+                });
+            });
     }
 
     fn show_modal_new(&mut self, ctx: &egui::Context) {

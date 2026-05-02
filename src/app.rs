@@ -3,6 +3,7 @@ use egui::RichText;
 use std::path::PathBuf;
 use crate::vault::Vault;
 use crate::types::{ConfirmAction, Note, NoteType};
+use crate::watcher::VaultWatcher;
 
 pub struct OmniNoteApp {
     pub vault: Option<Vault>,
@@ -18,6 +19,13 @@ pub struct OmniNoteApp {
     pub last_save: std::time::Instant,
     pub error_msg: Option<String>,
     pub md_cache: egui_commonmark::CommonMarkCache,
+    pub watcher: Option<VaultWatcher>,
+    /// Self-write window: events arriving before this instant are ignored
+    /// (they came from our own save).
+    pub self_write_until: std::time::Instant,
+    /// Set when external change detected on the active note while dirty=true.
+    /// Triggers a conflict modal asking user to keep edits or reload.
+    pub external_change_pending: bool,
 }
 
 impl OmniNoteApp {
@@ -37,6 +45,10 @@ impl OmniNoteApp {
             });
         }
 
+        let watcher = vault
+            .as_ref()
+            .and_then(|v| VaultWatcher::new(&v.root).ok());
+
         let app = Self {
             vault,
             active_note: None,
@@ -51,6 +63,9 @@ impl OmniNoteApp {
             last_save: std::time::Instant::now(),
             error_msg: None,
             md_cache: egui_commonmark::CommonMarkCache::default(),
+            watcher,
+            self_write_until: std::time::Instant::now(),
+            external_change_pending: false,
         };
         app.apply_style(&cc.egui_ctx);
         app
@@ -109,10 +124,12 @@ impl OmniNoteApp {
         {
             match Vault::open(path) {
                 Ok(v) => {
+                    let root = v.root.clone();
                     self.vault = Some(v);
                     self.active_note = None;
                     self.save_last_vault();
                     self.apply_style(ctx);
+                    self.watcher = VaultWatcher::new(&root).ok();
                 }
                 Err(e) => self.error_msg = Some(e),
             }
@@ -126,9 +143,11 @@ impl OmniNoteApp {
         {
             match Vault::open(path) {
                 Ok(v) => {
+                    let root = v.root.clone();
                     self.vault = Some(v);
                     self.active_note = None;
                     self.save_last_vault();
+                    self.watcher = VaultWatcher::new(&root).ok();
                 }
                 Err(e) => self.error_msg = Some(e),
             }
@@ -146,6 +165,10 @@ impl OmniNoteApp {
                 return;
             }
         };
+
+        // Set self-write window so notify events from our save are ignored
+        self.self_write_until =
+            std::time::Instant::now() + std::time::Duration::from_millis(400);
 
         if let Some(v) = &mut self.vault {
             let desired = format!(
@@ -221,6 +244,52 @@ impl OmniNoteApp {
             false
         }
     }
+
+    /// Drain any pending filesystem events from the watcher and reload as needed.
+    /// Filters out events arriving during the self-write window.
+    pub fn poll_watcher(&mut self) {
+        let watcher = match &self.watcher {
+            Some(w) => w,
+            None => return,
+        };
+        let changes = watcher.drain_md_changes();
+        if changes.is_empty() {
+            return;
+        }
+        // If we just saved, ignore — these are our own writes echoing back
+        if std::time::Instant::now() < self.self_write_until {
+            return;
+        }
+        // Did the active note's file change?
+        let active_path = self.active_note.as_ref().map(|n| n.path.clone());
+        let active_changed = match &active_path {
+            Some(ap) => changes.iter().any(|p| p == ap),
+            None => false,
+        };
+
+        if active_changed && self.dirty {
+            // Conflict: external change + we have unsaved edits. Ask user.
+            self.external_change_pending = true;
+            return;
+        }
+
+        // Safe to reload silently
+        if let Some(v) = &mut self.vault {
+            v.reload_notes();
+            // If active note was renamed/deleted externally, drop it
+            if let Some(ap) = active_path {
+                let still_exists = v.notes.iter().any(|n| n.path == ap);
+                if !still_exists {
+                    self.active_note = None;
+                } else if active_changed && !self.dirty {
+                    // Refresh active_note content from disk
+                    if let Some(fresh) = v.notes.iter().find(|n| n.path == ap).cloned() {
+                        self.active_note = Some(fresh);
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl eframe::App for OmniNoteApp {
@@ -230,6 +299,11 @@ impl eframe::App for OmniNoteApp {
         if self.dirty && self.last_save.elapsed() > Duration::from_millis(600) {
             self.flush_active();
         }
+
+        // Watcher poll (v0.6 — CAD-9)
+        self.poll_watcher();
+        // Request repaint regularly so watcher events are noticed even when idle
+        ctx.request_repaint_after(Duration::from_millis(500));
 
         let (new, toggle_edit, settings, toggle_dark) = ctx.input(|i| {
             (

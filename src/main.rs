@@ -7,6 +7,7 @@ mod ui_editor;
 mod ui_modals;
 mod ui_sidebar;
 mod vault;
+mod watcher;
 mod wikilinks;
 
 fn main() -> eframe::Result<()> {
