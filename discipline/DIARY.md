@@ -4,6 +4,26 @@
 
 ---
 
+## 2026-05-02 — discipline migration: root → discipline/ subfolder
+
+**Tickets touched:** none (housekeeping)
+
+**Done:**
+- `git mv SPRINT.md DIARY.md HUMAN.md NOTION.md → discipline/` — convenção alinhada com CFO project
+- Atualizado `discipline/NOTION.md` table links: `[SPECS/CAD-X.md](../SPECS/CAD-X.md)` (URL passa pelo parent dir)
+- `SPECS/CAD-5.md` + `SPECS/CAD-9.md`: refs `[../HUMAN.md]` → `[../discipline/HUMAN.md]`
+- SPECS/ permanece em root (mesma convenção do CFO `specs/`)
+
+**Why:** humano apontou inconsistência — CFO usa `discipline/` subfolder, OmniNote estava com files no root. Padronização. Bonitinho.
+
+**Files changed:**
+- moved: `SPRINT.md`, `DIARY.md`, `HUMAN.md`, `NOTION.md` → `discipline/`
+- modified: `discipline/NOTION.md`, `SPECS/CAD-5.md`, `SPECS/CAD-9.md`
+
+**Next session:** root tem só `README.md`, `SPEC.md`, `Cargo.toml`, `src/`, `SPECS/`, `.github/`, `discipline/`. Skill discipline lê `discipline/*.md` automaticamente — sem mudança nas regras.
+
+---
+
 ## 2026-05-01 — bootstrap + v0.1 a v0.3 + CI + discipline
 
 **Tickets touched:** `CAD-2`, `CAD-3`, `CAD-4`, `CAD-5`, `CAD-6`, `CAD-7`, `CAD-8`

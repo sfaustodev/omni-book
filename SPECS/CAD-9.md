@@ -13,7 +13,7 @@ Detectar mudanças externas no vault (Obsidian ou MCP do Claude Desktop edita um
 - [ ] Watcher inicializado em `App::new()` apontando pra `vault.root` recursivo
 - [ ] Mudanças drenadas no `update()` via `mpsc::channel`
 - [ ] Em mudança detectada: `vault.reload_notes()` chamado
-- [ ] Se a nota ativa foi modificada externamente: conflict resolution (vide [HUMAN.md Q-03](../HUMAN.md))
+- [ ] Se a nota ativa foi modificada externamente: conflict resolution (vide [HUMAN.md Q-03](../discipline/HUMAN.md))
 - [ ] Eventos `Create/Modify/Remove` tratados
 - [ ] Self-write filter: nosso próprio save não dispara reload
 
@@ -30,7 +30,7 @@ watcher.watch(&vault.root, RecursiveMode::Recursive)?;
 **De-bounce:** notify pode emitir vários eventos em rajada (Move = Remove + Create). 100ms de janela deve bastar.
 
 ## 💭 Decisão pendente
-[HUMAN.md Q-03](../HUMAN.md) — como tratar conflito quando humano edita externamente nota ativa.
+[HUMAN.md Q-03](../discipline/HUMAN.md) — como tratar conflito quando humano edita externamente nota ativa.
 
 ## 🧪 Como testar
 1. Abrir OmniNote em vault X

@@ -24,7 +24,7 @@ Atalhos de teclado pras ações mais frequentes, no estilo Apple Notes/Obsidian.
 Pra `Ctrl+=` o cursor pos vem de `output.cursor_range` (precisa `TextEdit::show()`, não `ui.add`).
 
 ## 💭 Notas
-No macOS o atalho convencional é `Cmd+...` — vale considerar usar `Modifiers::COMMAND` que mapeia automaticamente Cmd no mac e Ctrl no resto. **Pergunta aberta no [HUMAN.md Q-02](../HUMAN.md).**
+No macOS o atalho convencional é `Cmd+...` — vale considerar usar `Modifiers::COMMAND` que mapeia automaticamente Cmd no mac e Ctrl no resto. **Pergunta aberta no [HUMAN.md Q-02](../discipline/HUMAN.md).**
 
 ## 🧪 Como testar
 1. Abrir app → Ctrl+N → modal aparece
