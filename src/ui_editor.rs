@@ -3,6 +3,27 @@ use crate::types::{ConfirmAction, NoteType};
 use egui::RichText;
 use std::path::Path;
 
+/// v0.8 — items shown in the slash menu when user types `/` at start of a line.
+/// Returns (label, snippet). Snippet replaces the `/` character.
+fn slash_menu_items() -> &'static [(&'static str, &'static str)] {
+    &[
+        ("# H1", "# "),
+        ("## H2", "## "),
+        ("### H3", "### "),
+        ("**negrito**", "****"),
+        ("_itálico_", "__"),
+        ("`código inline`", "``"),
+        ("```bloco de código```", "```\n\n```"),
+        ("> citação", "> "),
+        ("- lista", "- "),
+        ("1. lista numerada", "1. "),
+        ("- [ ] todo", "- [ ] "),
+        ("[link](url)", "[](url)"),
+        ("[[wikilink]]", "[[]]"),
+        ("--- divisor", "---\n"),
+    ]
+}
+
 impl OmniNoteApp {
     pub fn show_editor(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -145,6 +166,61 @@ impl OmniNoteApp {
                 note.content.replace_range(start..end, &new_line);
                 self.dirty = true;
             }
+        }
+
+        // v0.8 — Slash menu: detect "/" at start of a line
+        if has_focus {
+            if let Some(pos) = cursor_pos {
+                let bytes = note.content.as_bytes();
+                if pos > 0 && bytes[pos - 1] == b'/' {
+                    let at_line_start = pos == 1 || bytes[pos - 2] == b'\n';
+                    if at_line_start && self.slash_menu_pos != Some(pos - 1) {
+                        self.slash_menu_pos = Some(pos - 1);
+                    }
+                } else if let Some(slash_at) = self.slash_menu_pos {
+                    // Close if cursor moved away from the slash position area
+                    let still_valid = pos >= slash_at
+                        && pos <= note.content.len()
+                        && bytes.get(slash_at).copied() == Some(b'/');
+                    if !still_valid {
+                        self.slash_menu_pos = None;
+                    }
+                }
+            }
+        }
+
+        // Esc closes the slash menu
+        if self.slash_menu_pos.is_some() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.slash_menu_pos = None;
+        }
+
+        // Render slash menu popup
+        let mut pending_replacement: Option<(usize, &'static str)> = None;
+        if let Some(slash_at) = self.slash_menu_pos {
+            egui::Window::new("Inserir bloco")
+                .id(egui::Id::new("slash_menu"))
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_TOP, [0.0, 80.0])
+                .show(ui.ctx(), |ui| {
+                    ui.label(
+                        egui::RichText::new("/ no início da linha — Esc fecha")
+                            .size(10.0)
+                            .weak(),
+                    );
+                    ui.separator();
+                    for (label, snippet) in slash_menu_items() {
+                        if ui.button(*label).clicked() {
+                            pending_replacement = Some((slash_at, *snippet));
+                        }
+                    }
+                });
+        }
+        if let Some((slash_at, snippet)) = pending_replacement {
+            // Replace the "/" with the snippet
+            note.content.replace_range(slash_at..slash_at + 1, snippet);
+            self.dirty = true;
+            self.slash_menu_pos = None;
         }
 
         // Attach file

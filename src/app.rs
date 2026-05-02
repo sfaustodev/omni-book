@@ -26,6 +26,9 @@ pub struct OmniNoteApp {
     /// Set when external change detected on the active note while dirty=true.
     /// Triggers a conflict modal asking user to keep edits or reload.
     pub external_change_pending: bool,
+    /// v0.8 — index of the `/` that opened the slash menu, in note.content.
+    /// None when menu is closed. Set when `/` is typed at start of line.
+    pub slash_menu_pos: Option<usize>,
 }
 
 impl OmniNoteApp {
@@ -66,6 +69,7 @@ impl OmniNoteApp {
             watcher,
             self_write_until: std::time::Instant::now(),
             external_change_pending: false,
+            slash_menu_pos: None,
         };
         app.apply_style(&cc.egui_ctx);
         app
