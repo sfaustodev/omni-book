@@ -33,13 +33,36 @@ pub struct OmniNoteApp {
 
 impl OmniNoteApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let last_vault = dirs::config_dir()
-            .map(|d| d.join("omninote").join("last_vault"))
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .map(PathBuf::from)
-            .filter(|p| p.exists());
+        let last_vault_file = dirs::config_dir().map(|d| d.join("omninote").join("last_vault"));
+        if let Some(p) = &last_vault_file {
+            eprintln!("[omninote] last_vault file path: {}", p.display());
+            eprintln!("[omninote] last_vault file exists: {}", p.exists());
+        }
+        let last_vault = last_vault_file
+            .and_then(|p| std::fs::read_to_string(&p).ok().map(|s| (p, s)))
+            .and_then(|(file, s)| {
+                let trimmed = s.trim().to_string();
+                eprintln!("[omninote] read last_vault content (len {}): {:?}", trimmed.len(), trimmed);
+                let pb = PathBuf::from(trimmed);
+                if pb.exists() {
+                    eprintln!("[omninote] vault path exists, will open");
+                    Some(pb)
+                } else {
+                    eprintln!("[omninote] vault path does NOT exist on disk: {} (file ref: {})", pb.display(), file.display());
+                    None
+                }
+            });
 
-        let vault = last_vault.and_then(|p| Vault::open(p).ok());
+        let vault = last_vault.and_then(|p| match Vault::open(p.clone()) {
+            Ok(v) => {
+                eprintln!("[omninote] opened vault: {}", v.root.display());
+                Some(v)
+            }
+            Err(e) => {
+                eprintln!("[omninote] Vault::open failed for {}: {}", p.display(), e);
+                None
+            }
+        });
         if let Some(v) = &vault {
             cc.egui_ctx.set_visuals(if v.config.dark_mode {
                 egui::Visuals::dark()
@@ -74,12 +97,30 @@ impl OmniNoteApp {
     }
 
     pub fn save_last_vault(&self) {
-        if let Some(v) = &self.vault {
-            if let Some(d) = dirs::config_dir() {
-                let dir = d.join("omninote");
-                let _ = std::fs::create_dir_all(&dir);
-                let _ = std::fs::write(dir.join("last_vault"), v.root.to_string_lossy().as_bytes());
+        let v = match &self.vault {
+            Some(v) => v,
+            None => {
+                eprintln!("[omninote] save_last_vault: vault is None, skipping");
+                return;
             }
+        };
+        let d = match dirs::config_dir() {
+            Some(d) => d,
+            None => {
+                eprintln!("[omninote] save_last_vault: dirs::config_dir() returned None");
+                return;
+            }
+        };
+        let dir = d.join("omninote");
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            eprintln!("[omninote] save_last_vault: mkdir {} failed: {}", dir.display(), e);
+            return;
+        }
+        let dest = dir.join("last_vault");
+        let path_str = v.root.to_string_lossy().to_string();
+        match std::fs::write(&dest, &path_str) {
+            Ok(()) => eprintln!("[omninote] saved last_vault: {} → {}", path_str, dest.display()),
+            Err(e) => eprintln!("[omninote] save_last_vault: write to {} failed: {}", dest.display(), e),
         }
     }
 
@@ -300,13 +341,23 @@ impl eframe::App for OmniNoteApp {
         // Request repaint regularly so watcher events are noticed even when idle
         ctx.request_repaint_after(Duration::from_millis(500));
 
-        // Q-02: use `command` modifier (auto-maps Cmd on macOS, Ctrl elsewhere)
-        let (new, toggle_edit, settings, toggle_dark) = ctx.input(|i| {
+        // Q-02: use `consume_shortcut` (auto-maps Cmd↔Ctrl, consumes input so TextEdit
+        // doesn't intercept Cmd+E etc on macOS).
+        let new_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::N);
+        let edit_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::E);
+        let settings_sc =
+            egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Comma);
+        let dark_sc = egui::KeyboardShortcut::new(
+            egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+            egui::Key::D,
+        );
+
+        let (new, toggle_edit, settings, toggle_dark) = ctx.input_mut(|i| {
             (
-                i.key_pressed(egui::Key::N) && i.modifiers.command,
-                i.key_pressed(egui::Key::E) && i.modifiers.command,
-                i.key_pressed(egui::Key::Comma) && i.modifiers.command,
-                i.key_pressed(egui::Key::D) && i.modifiers.command && i.modifiers.shift,
+                i.consume_shortcut(&new_sc),
+                i.consume_shortcut(&edit_sc),
+                i.consume_shortcut(&settings_sc),
+                i.consume_shortcut(&dark_sc),
             )
         });
         if new {

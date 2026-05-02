@@ -55,7 +55,8 @@ impl OmniNoteApp {
         if !self.show_new {
             return;
         }
-        let mut open = self.show_new;
+        let mut open = true;
+        let mut action_taken = false;
         egui::Window::new("Nova Nota")
             .open(&mut open)
             .collapsible(false)
@@ -87,7 +88,7 @@ impl OmniNoteApp {
                                         Err(e) => self.error_msg = Some(e),
                                     }
                                 }
-                                self.show_new = false;
+                                action_taken = true;
                             }
                             if (i + 1) % 3 == 0 {
                                 ui.end_row();
@@ -95,14 +96,17 @@ impl OmniNoteApp {
                         }
                     });
             });
-        self.show_new = open;
+        if !open || action_taken {
+            self.show_new = false;
+        }
     }
 
     fn show_modal_settings(&mut self, ctx: &egui::Context) {
         if !self.show_settings {
             return;
         }
-        let mut open = self.show_settings;
+        let mut open = true;
+        let mut action_taken = false;
         let mut style_dirty = false;
 
         egui::Window::new("Configurações")
@@ -198,7 +202,7 @@ impl OmniNoteApp {
                 ui.separator();
                 if ui.button("📂 Trocar vault").clicked() {
                     self.pick_vault_with_ctx(ctx);
-                    self.show_settings = false;
+                    action_taken = true;
                 }
             });
 
@@ -206,7 +210,9 @@ impl OmniNoteApp {
             self.apply_style(ctx);
         }
 
-        self.show_settings = open;
+        if !open || action_taken {
+            self.show_settings = false;
+        }
     }
 
     fn show_modal_confirm(&mut self, ctx: &egui::Context) {
@@ -283,7 +289,8 @@ impl OmniNoteApp {
         if !self.show_import {
             return;
         }
-        let mut open = self.show_import;
+        let mut open = true;
+        let mut action_taken = false;
         egui::Window::new("Importar")
             .open(&mut open)
             .collapsible(false)
@@ -304,7 +311,7 @@ impl OmniNoteApp {
                         {
                             self.import_pdf(&path);
                         }
-                        self.show_import = false;
+                        action_taken = true;
                     }
                     if ui
                         .add_sized([220.0, 36.0], egui::Button::new("🤖 Chat Claude (JSON)"))
@@ -316,7 +323,7 @@ impl OmniNoteApp {
                         {
                             self.import_chat(&path);
                         }
-                        self.show_import = false;
+                        action_taken = true;
                     }
                     if ui
                         .add_sized(
@@ -328,11 +335,13 @@ impl OmniNoteApp {
                         if let Some(path) = rfd::FileDialog::new().pick_file() {
                             self.import_artifact(&path);
                         }
-                        self.show_import = false;
+                        action_taken = true;
                     }
                 });
             });
-        self.show_import = open;
+        if !open || action_taken {
+            self.show_import = false;
+        }
     }
 
     // Import helpers

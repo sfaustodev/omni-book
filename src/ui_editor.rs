@@ -190,7 +190,9 @@ impl OmniNoteApp {
         let has_focus = output.response.has_focus();
         drop(output);
 
-        if has_focus && ui.input(|i| i.key_pressed(egui::Key::Equals) && i.modifiers.command) {
+        let math_sc =
+            egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Equals);
+        if has_focus && ui.ctx().input_mut(|i| i.consume_shortcut(&math_sc)) {
             let pos = cursor_pos.unwrap_or(note.content.len());
             if let Some((new_line, start, end)) =
                 crate::autoformat::try_math_substitute(&note.content, pos)

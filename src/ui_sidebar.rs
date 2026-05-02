@@ -64,7 +64,9 @@ impl OmniNoteApp {
                         .hint_text("🔍 Buscar... (Ctrl+K)")
                         .desired_width(f32::INFINITY),
                 );
-                if ctx.input(|i| i.key_pressed(egui::Key::K) && i.modifiers.command) {
+                let search_sc =
+                    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::K);
+                if ctx.input_mut(|i| i.consume_shortcut(&search_sc)) {
                     search.request_focus();
                 }
 
@@ -232,15 +234,17 @@ impl OmniNoteApp {
         for (id, label) in notes {
             let is_active = active_id.as_deref() == Some(&id);
             let drag_id = egui::Id::new(format!("note_drag_{}", id));
-            let resp = ui
-                .dnd_drag_source(drag_id, NoteIdPayload(id.clone()), |ui| {
-                    ui.selectable_label(is_active, &label)
-                })
-                .response;
-            if resp.clicked() {
+            // Use .inner (the selectable_label response) for click + context menu —
+            // .response is the drag-source frame which doesn't fire click on label.
+            let drag = ui.dnd_drag_source(
+                drag_id,
+                NoteIdPayload(id.clone()),
+                |ui| ui.selectable_label(is_active, &label),
+            );
+            if drag.inner.clicked() {
                 pending_select = Some(id.clone());
             }
-            resp.context_menu(|ui| {
+            drag.inner.context_menu(|ui| {
                 if ui.button("✎ Editar").clicked() {
                     pending_select = Some(id.clone());
                     ui.close_menu();
