@@ -63,3 +63,38 @@ Pra cada CAD-XX considerar pronto somente após:
 - `feat/omninote-vXX` — uma branch por fase (v0.1, v0.2, v0.3)
 - Bugs descobertos em testes do humano = commits adicionais na **mesma** branch da feature, não SCRUM novo
 - Discipline files (SPRINT/DIARY/HUMAN/NOTION/SPECS) **vivem em main** — atualizadas a cada sessão
+
+---
+
+## §4 — PR-first workflow (não merge direto pra main)
+
+**Regra:** toda feature/fix branch fecha por PR no GitHub, nunca por `git merge` local pra main. Fausto quer revisar diff no GitHub UI pra aprender a code review.
+
+**Fluxo:**
+
+1. Criar branch off main: `git checkout -b feat/<scope> main`
+2. Commitar trabalho atomicamente (1 commit por mudança lógica)
+3. Push: `git push -u origin <branch>`
+4. Abrir PR via `gh pr create --base main --head <branch> --title "..." --body "..."`
+   - Title: 1 linha imperativa (ex.: `feat(theme): apply Swiss/Bauhaus dark design`)
+   - Body em pt-BR com seções: **Resumo**, **Mudanças**, **Como testar**, **Riscos**
+5. Aguardar Fausto revisar + mergear no UI ("Merge pull request" → squash ou normal)
+6. Após merge, atualizar local: `git checkout main && git pull && git branch -d <branch>`
+
+**Branches stacked (B saiu de A antes de A mergear):**
+
+- PR de A → main primeiro
+- PR de B → A (não → main) pra diff isolado
+- Após A mergear em main, GitHub auto-atualiza o PR B pra apontar pra main
+
+**Quando NÃO fazer PR:**
+
+- Mudanças apenas em discipline files (SPRINT/DIARY/HUMAN/NOTION/SPECS) → commit direto em main
+- Hotfix crítico em produção (não aplica ainda — sem prod)
+
+**Por que:**
+
+- Fausto está aprendendo code review sistemático
+- PR cria audit trail GitHub (CI run, comments, decisões)
+- Revisão antes de merge previne bugs que só aparecem no smoke
+- Branch protection futura no GitHub (require PR + approval) fica trivial de habilitar
