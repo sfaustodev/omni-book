@@ -83,7 +83,14 @@ pub enum FontFamily {
     System,
     Monospace,
     Serif,
+    /// OpenDyslexic — open-source font designed for dyslexic readers.
+    /// Bundled at `assets/fonts/OpenDyslexic-Regular.otf`, registered as
+    /// egui::FontFamily::Name("OpenDyslexic") on app init.
+    OpenDyslexic,
 }
+
+/// Identifier used to register OpenDyslexic in egui's FontDefinitions.
+pub const OPEN_DYSLEXIC_NAME: &str = "OpenDyslexic";
 
 impl FontFamily {
     pub fn label(&self) -> &'static str {
@@ -91,15 +98,22 @@ impl FontFamily {
             Self::System => "Sistema (sans-serif)",
             Self::Monospace => "Monospace",
             Self::Serif => "Serif",
+            Self::OpenDyslexic => "OpenDyslexic (dislexia)",
         }
     }
-    pub fn all() -> [FontFamily; 3] {
-        [Self::System, Self::Monospace, Self::Serif]
+    pub fn all() -> [FontFamily; 4] {
+        [
+            Self::System,
+            Self::Monospace,
+            Self::Serif,
+            Self::OpenDyslexic,
+        ]
     }
     pub fn as_egui_family(&self) -> egui::FontFamily {
         match self {
             Self::System | Self::Serif => egui::FontFamily::Proportional,
             Self::Monospace => egui::FontFamily::Monospace,
+            Self::OpenDyslexic => egui::FontFamily::Name(OPEN_DYSLEXIC_NAME.into()),
         }
     }
 }

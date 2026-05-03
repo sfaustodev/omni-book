@@ -1,9 +1,29 @@
-use crate::types::{ConfirmAction, Note, NoteType};
+use crate::types::{ConfirmAction, Note, NoteType, OPEN_DYSLEXIC_NAME};
 use crate::vault::Vault;
 use crate::watcher::VaultWatcher;
 use eframe::egui;
 use egui::RichText;
 use std::path::PathBuf;
+
+/// OpenDyslexic font, bundled in the binary. ~305KB.
+/// Source: https://github.com/antijingoist/opendyslexic (OFL).
+const OPEN_DYSLEXIC_OTF: &[u8] =
+    include_bytes!("../assets/fonts/OpenDyslexic-Regular.otf");
+
+/// Register custom fonts in egui. Call once before applying theme/styles.
+fn register_custom_fonts(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        OPEN_DYSLEXIC_NAME.to_owned(),
+        egui::FontData::from_static(OPEN_DYSLEXIC_OTF),
+    );
+    fonts
+        .families
+        .entry(egui::FontFamily::Name(OPEN_DYSLEXIC_NAME.into()))
+        .or_default()
+        .insert(0, OPEN_DYSLEXIC_NAME.to_owned());
+    ctx.set_fonts(fonts);
+}
 
 pub struct OmniNoteApp {
     pub vault: Option<Vault>,
@@ -63,6 +83,9 @@ impl OmniNoteApp {
                 None
             }
         });
+        // Register bundled fonts (OpenDyslexic for accessibility).
+        register_custom_fonts(&cc.egui_ctx);
+
         // Swiss / Bauhaus dark theme — applied unconditionally for v1.0.
         // Light variant is a future variant; dark_mode flag currently ignored.
         crate::theme::apply_swiss(&cc.egui_ctx);
