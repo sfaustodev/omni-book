@@ -63,13 +63,9 @@ impl OmniNoteApp {
                 None
             }
         });
-        if let Some(v) = &vault {
-            cc.egui_ctx.set_visuals(if v.config.dark_mode {
-                egui::Visuals::dark()
-            } else {
-                egui::Visuals::light()
-            });
-        }
+        // Swiss / Bauhaus dark theme — applied unconditionally for v1.0.
+        // Light variant is a future variant; dark_mode flag currently ignored.
+        crate::theme::apply_swiss(&cc.egui_ctx);
 
         let watcher = vault.as_ref().and_then(|v| VaultWatcher::new(&v.root).ok());
 
@@ -370,14 +366,9 @@ impl eframe::App for OmniNoteApp {
             self.show_settings = true;
         }
         if toggle_dark {
-            if let Some(v) = &mut self.vault {
-                v.config.dark_mode = !v.config.dark_mode;
-                ctx.set_visuals(if v.config.dark_mode {
-                    egui::Visuals::dark()
-                } else {
-                    egui::Visuals::light()
-                });
-            }
+            // Swiss is dark-only for v1.0 — toggle is a no-op. Re-apply theme
+            // in case external code (e.g. settings modal) changed visuals.
+            crate::theme::apply_swiss(ctx);
         }
 
         if self.vault.is_none() {

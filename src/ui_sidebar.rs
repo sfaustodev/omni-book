@@ -9,112 +9,203 @@ pub struct NoteIdPayload(pub String);
 
 impl OmniNoteApp {
     pub fn show_sidebar(&mut self, ctx: &egui::Context) {
+        use crate::theme;
         egui::SidePanel::left("sidebar")
+            .resizable(false)
             .exact_width(280.0)
+            .frame(
+                egui::Frame::none()
+                    .fill(theme::BG)
+                    .inner_margin(egui::Margin {
+                        left: 28.0,
+                        right: 28.0,
+                        top: 32.0,
+                        bottom: 24.0,
+                    })
+                    .stroke(egui::Stroke::new(1.0, theme::BORDER)),
+            )
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing.y = 4.0;
+                ui.spacing_mut().button_padding = egui::vec2(0.0, 2.0);
 
-                // Header
+                // Header — orange square + brand + date right-aligned mono
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("📓 OmniNote").strong().size(16.0));
-                    if let Some(v) = &self.vault {
-                        let name = v
-                            .root
-                            .file_name()
-                            .and_then(|s| s.to_str())
-                            .unwrap_or("vault");
-                        ui.label(RichText::new(name).size(10.0).weak());
-                    }
+                    let (rect, _) = ui.allocate_exact_size(
+                        egui::vec2(14.0, 14.0),
+                        egui::Sense::hover(),
+                    );
+                    ui.painter().rect_filled(rect, 0.0, theme::ACCENT);
+                    ui.add_space(8.0);
+                    ui.label(
+                        RichText::new("OmniNote")
+                            .strong()
+                            .size(16.0)
+                            .color(theme::TEXT),
+                    );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .small_button("⚙")
-                            .on_hover_text("Configurações (Ctrl+,)")
-                            .clicked()
-                        {
-                            self.show_settings = true;
-                        }
-                        if ui
-                            .small_button("☀/🌙")
-                            .on_hover_text("Tema (Ctrl+Shift+D)")
-                            .clicked()
-                        {
-                            if let Some(v) = &mut self.vault {
-                                v.config.dark_mode = !v.config.dark_mode;
-                                ctx.set_visuals(if v.config.dark_mode {
-                                    egui::Visuals::dark()
-                                } else {
-                                    egui::Visuals::light()
-                                });
-                            }
-                        }
-                        if ui
-                            .small_button("📂")
-                            .on_hover_text("Trocar vault")
-                            .clicked()
-                        {
-                            self.pick_vault();
-                        }
+                        let date = chrono::Utc::now().format("%d.%m").to_string();
+                        ui.label(
+                            RichText::new(date)
+                                .monospace()
+                                .size(10.0)
+                                .color(theme::DIMMER),
+                        );
                     });
                 });
-                ui.separator();
+                ui.add_space(28.0);
 
-                // Search
+                // Search section
+                theme::section_label(ui, "SEARCH");
                 let search = ui.add(
                     egui::TextEdit::singleline(&mut self.query)
-                        .hint_text("🔍 Buscar... (Ctrl+K)")
+                        .hint_text("")
+                        .frame(false)
                         .desired_width(f32::INFINITY),
                 );
+                theme::hairline(ui);
                 let search_sc =
                     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::K);
                 if ctx.input_mut(|i| i.consume_shortcut(&search_sc)) {
                     search.request_focus();
                 }
+                ui.add_space(24.0);
 
-                // Type filter chips
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-                    if ui
-                        .selectable_label(self.type_filter.is_none(), "todos")
-                        .clicked()
-                    {
-                        self.type_filter = None;
-                    }
-                    for t in NoteType::all() {
-                        let selected = self.type_filter == Some(t);
-                        if ui
-                            .selectable_label(selected, format!("{} {}", t.icon(), t.label()))
-                            .clicked()
-                        {
-                            self.type_filter = if selected { None } else { Some(t) };
-                        }
-                    }
+                // Type filters as numbered list
+                theme::section_label(ui, "VIEWS");
+                let total_count = self.vault.as_ref().map(|v| v.notes.len()).unwrap_or(0);
+                self.swiss_view_item(ui, "01", "Todas", self.type_filter.is_none(), total_count, |s| {
+                    s.type_filter = None;
                 });
-                ui.separator();
+                for (i, t) in NoteType::all().iter().enumerate() {
+                    let n = format!("{:02}", i + 2);
+                    let selected = self.type_filter == Some(*t);
+                    let count = self
+                        .vault
+                        .as_ref()
+                        .map(|v| v.notes.iter().filter(|n| n.frontmatter.note_type == *t).count())
+                        .unwrap_or(0);
+                    let tt = *t;
+                    self.swiss_view_item(ui, &n, t.label(), selected, count, |s| {
+                        s.type_filter = if selected { None } else { Some(tt) };
+                    });
+                }
+                ui.add_space(24.0);
 
-                // Note/folder tree
+                // Folders + notes tree
+                theme::section_label(ui, "FOLDERS");
                 egui::ScrollArea::vertical()
                     .id_salt("sidebar_scroll")
+                    .max_height(ui.available_height() - 90.0)
                     .show(ui, |ui| {
                         self.show_folder_tree(ui, PathBuf::new());
                         self.show_notes_in_folder(ui, &PathBuf::new());
                     });
 
-                // Footer
-                ui.separator();
+                // Footer — accent NEW button + mono Cmd+N hint + small icons
+                ui.add_space(8.0);
+                theme::hairline(ui);
+                ui.add_space(12.0);
                 ui.horizontal(|ui| {
-                    if ui.button("➕ Nota").on_hover_text("Ctrl+N").clicked() {
+                    let new_btn = egui::Button::new(
+                        RichText::new("NEW")
+                            .strong()
+                            .size(12.0)
+                            .color(theme::ACCENT_INK),
+                    )
+                    .fill(theme::ACCENT)
+                    .stroke(egui::Stroke::NONE)
+                    .min_size(egui::vec2(64.0, 32.0));
+                    if ui.add(new_btn).on_hover_text("Nova nota").clicked() {
                         self.show_new = true;
                     }
-                    if ui.button("📁 Pasta").clicked() {
-                        if let Some(v) = &mut self.vault {
-                            let _ = v.create_folder(None, "Nova pasta");
+                    ui.add_space(8.0);
+                    ui.label(
+                        RichText::new("⌘N")
+                            .monospace()
+                            .size(10.0)
+                            .color(theme::DIMMER),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.small_button("⚙").on_hover_text("Configurações (⌘,)").clicked() {
+                            self.show_settings = true;
                         }
-                    }
-                    if ui.button("📥 Importar").clicked() {
-                        self.show_import = true;
-                    }
+                        if ui.small_button("📂").on_hover_text("Trocar vault").clicked() {
+                            self.pick_vault();
+                        }
+                        if ui.small_button("📥").on_hover_text("Importar").clicked() {
+                            self.show_import = true;
+                        }
+                        if ui.small_button("📁").on_hover_text("Nova pasta").clicked() {
+                            if let Some(v) = &mut self.vault {
+                                let _ = v.create_folder(None, "Nova pasta");
+                            }
+                        }
+                    });
                 });
             });
+    }
+
+    /// Swiss-style nav item: `NN  Label                   count`
+    fn swiss_view_item(
+        &mut self,
+        ui: &mut egui::Ui,
+        n: &str,
+        label: &str,
+        active: bool,
+        count: usize,
+        mut on_click: impl FnMut(&mut Self),
+    ) {
+        use crate::theme;
+        let row = ui.horizontal(|ui| {
+            let (line_rect, _) = ui.allocate_exact_size(
+                egui::vec2(ui.available_width(), 1.0),
+                egui::Sense::hover(),
+            );
+            ui.painter().rect_filled(line_rect, 0.0, theme::BORDER);
+        });
+        let _ = row;
+        let resp = ui
+            .scope(|ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    let n_color = if active { theme::ACCENT } else { theme::DIMMER };
+                    ui.add_sized(
+                        [28.0, 22.0],
+                        egui::Label::new(
+                            RichText::new(n).monospace().size(10.0).color(n_color),
+                        ),
+                    );
+                    let label_color = if active { theme::TEXT } else { theme::DIM };
+                    let label_text = if active {
+                        RichText::new(label).size(13.0).color(label_color).strong()
+                    } else {
+                        RichText::new(label).size(13.0).color(label_color)
+                    };
+                    ui.label(label_text);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if count > 0 {
+                            ui.label(
+                                RichText::new(format!("{:02}", count))
+                                    .monospace()
+                                    .size(10.0)
+                                    .color(theme::DIMMER),
+                            );
+                        } else {
+                            ui.label(
+                                RichText::new("—")
+                                    .monospace()
+                                    .size(10.0)
+                                    .color(theme::DIMMER),
+                            );
+                        }
+                    });
+                });
+            })
+            .response
+            .interact(egui::Sense::click());
+        if resp.clicked() {
+            on_click(self);
+        }
     }
 
     fn show_folder_tree(&mut self, ui: &mut egui::Ui, parent: PathBuf) {

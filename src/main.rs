@@ -2,6 +2,7 @@ mod app;
 mod autoformat;
 mod import;
 mod pdf;
+mod theme;
 mod types;
 mod ui_editor;
 mod ui_modals;

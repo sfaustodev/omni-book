@@ -1,6 +1,7 @@
 use crate::app::OmniNoteApp;
 use crate::types::{ConfirmAction, NoteType};
 use egui::RichText;
+#[allow(unused_imports)]
 use std::path::Path;
 
 /// v0.8 — items shown in the slash menu when user types `/` at start of a line.
@@ -26,62 +27,263 @@ fn slash_menu_items() -> &'static [(&'static str, &'static str)] {
 
 impl OmniNoteApp {
     pub fn show_editor(&mut self, ctx: &egui::Context) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            if self.active_note.is_none() {
-                ui.centered_and_justified(|ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(100.0);
-                        ui.label(RichText::new("📓 OmniNote").size(24.0).weak());
-                        ui.add_space(16.0);
-                        ui.label(RichText::new("Ctrl+N  Nova nota").size(12.0).weak());
-                        ui.label(RichText::new("Ctrl+K  Buscar").size(12.0).weak());
-                        ui.label(RichText::new("Ctrl+,  Configurações").size(12.0).weak());
-                    });
-                });
-                return;
-            }
+        use crate::theme;
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none().fill(theme::BG))
+            .show(ctx, |ui| {
+                if self.active_note.is_none() {
+                    self.swiss_empty_state(ui);
+                    return;
+                }
 
-            // Sticky header
-            ui.horizontal(|ui| {
-                if let Some(note) = &self.active_note {
-                    if let Some(parent) = note.rel_path.parent() {
-                        if parent != Path::new("") {
-                            ui.label(
-                                RichText::new(parent.to_string_lossy().as_ref())
-                                    .weak()
-                                    .size(11.0),
+                // Top rule (48px) — three columns: breadcrumb | TITLE | edited time
+                self.swiss_top_rule(ui);
+
+                // Main content area — left rail (120px) + content
+                egui::ScrollArea::vertical()
+                    .id_salt("editor_scroll")
+                    .show(ui, |ui| {
+                        ui.add_space(48.0);
+                        ui.horizontal_top(|ui| {
+                            ui.add_space(48.0);
+                            ui.allocate_ui_with_layout(
+                                egui::vec2(120.0, ui.available_height()),
+                                egui::Layout::top_down(egui::Align::Min),
+                                |ui| self.swiss_left_rail(ui),
                             );
-                            ui.label(RichText::new("·").weak());
+                            ui.add_space(32.0);
+                            ui.allocate_ui_with_layout(
+                                egui::vec2(
+                                    ui.available_width() - 48.0,
+                                    ui.available_height(),
+                                ),
+                                egui::Layout::top_down(egui::Align::Min),
+                                |ui| {
+                                    self.swiss_content(ui);
+                                },
+                            );
+                        });
+                    });
+            });
+    }
+
+    fn swiss_empty_state(&mut self, ui: &mut egui::Ui) {
+        use crate::theme;
+        ui.centered_and_justified(|ui| {
+            ui.vertical_centered(|ui| {
+                ui.add_space(120.0);
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::vec2(48.0, 48.0),
+                    egui::Sense::hover(),
+                );
+                ui.painter().rect_filled(rect, 0.0, theme::ACCENT);
+                ui.add_space(20.0);
+                ui.label(
+                    RichText::new("OmniNote")
+                        .strong()
+                        .size(32.0)
+                        .color(theme::TEXT),
+                );
+                ui.add_space(28.0);
+                for (kc, label) in [
+                    ("⌘ N", "Nova nota"),
+                    ("⌘ K", "Buscar"),
+                    ("⌘ ,", "Configurações"),
+                ] {
+                    ui.horizontal(|ui| {
+                        ui.add_space(ui.available_width() / 2.0 - 80.0);
+                        ui.label(
+                            RichText::new(kc)
+                                .monospace()
+                                .size(11.0)
+                                .color(theme::ACCENT),
+                        );
+                        ui.add_space(12.0);
+                        ui.label(
+                            RichText::new(label)
+                                .size(13.0)
+                                .color(theme::DIM),
+                        );
+                    });
+                }
+            });
+        });
+    }
+
+    fn swiss_top_rule(&mut self, ui: &mut egui::Ui) {
+        use crate::theme;
+        let id_text = self
+            .active_note
+            .as_ref()
+            .map(|n| {
+                let id = &n.frontmatter.id;
+                // last 3 hex chars from uuid simple
+                let tail: String = id.chars().rev().take(3).collect::<String>().chars().rev().collect();
+                let folder = n
+                    .rel_path
+                    .parent()
+                    .and_then(|p| p.file_name())
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("ROOT")
+                    .to_uppercase();
+                format!("{} / {}", folder, tail)
+            })
+            .unwrap_or_else(|| "—".into());
+
+        let title_text = self
+            .active_note
+            .as_ref()
+            .map(|n| n.title.to_uppercase())
+            .unwrap_or_default();
+
+        let edited_text = self
+            .active_note
+            .as_ref()
+            .map(|_| "EDITED NOW".to_string())
+            .unwrap_or_default();
+
+        let bar = egui::Frame::none()
+            .fill(theme::BG)
+            .stroke(egui::Stroke::new(1.0, theme::BORDER))
+            .inner_margin(egui::Margin::symmetric(32.0, 14.0));
+        bar.show(ui, |ui| {
+            ui.set_height(20.0);
+            ui.columns(3, |cols| {
+                cols[0].with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.label(
+                        RichText::new(id_text)
+                            .monospace()
+                            .size(10.0)
+                            .color(theme::DIMMER),
+                    );
+                });
+                cols[1].with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                    let id = self
+                        .active_note
+                        .as_ref()
+                        .map(|n| n.frontmatter.id.clone())
+                        .unwrap_or_default();
+                    ui.horizontal(|ui| {
+                        let editing_label = if self.editing { "EDIT" } else { "READ" };
+                        if ui
+                            .selectable_label(
+                                self.editing,
+                                RichText::new(editing_label)
+                                    .monospace()
+                                    .size(10.0)
+                                    .color(if self.editing { theme::ACCENT } else { theme::DIMMER }),
+                            )
+                            .on_hover_text("⌘E")
+                            .clicked()
+                        {
+                            self.editing = !self.editing;
                         }
-                    }
-                }
-                if ui
-                    .selectable_label(self.editing, "✎ Editar")
-                    .on_hover_text("Ctrl+E")
-                    .clicked()
-                {
-                    self.editing = !self.editing;
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if let Some(id) = self.active_note.as_ref().map(|n| n.frontmatter.id.clone()) {
-                        if ui.button("🗑").on_hover_text("Deletar nota").clicked() {
+                        ui.add_space(12.0);
+                        ui.label(
+                            RichText::new(title_text.clone())
+                                .monospace()
+                                .size(10.0)
+                                .color(theme::TEXT),
+                        );
+                        ui.add_space(12.0);
+                        if !id.is_empty()
+                            && ui
+                                .small_button(
+                                    RichText::new("DELETE")
+                                        .monospace()
+                                        .size(10.0)
+                                        .color(theme::DIMMER),
+                                )
+                                .clicked()
+                        {
                             self.confirm_action = Some(ConfirmAction::DeleteNote(id));
                         }
-                    }
+                    });
+                });
+                cols[2].with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        RichText::new(edited_text)
+                            .monospace()
+                            .size(10.0)
+                            .color(theme::DIMMER),
+                    );
                 });
             });
-            ui.separator();
-
-            egui::ScrollArea::vertical()
-                .id_salt("editor_scroll")
-                .show(ui, |ui| {
-                    if self.editing {
-                        self.show_edit_panel(ui);
-                    } else {
-                        self.show_view_panel(ui);
-                    }
-                });
         });
+    }
+
+    fn swiss_left_rail(&self, ui: &mut egui::Ui) {
+        use crate::theme;
+        let (number, type_label, version, date) = match &self.active_note {
+            Some(note) => {
+                // Use last 3 hex chars of id as the "№"
+                let id = &note.frontmatter.id;
+                let tail: String = id.chars().rev().take(3).collect::<String>().chars().rev().collect();
+                let date = note
+                    .frontmatter
+                    .created
+                    .split('T')
+                    .next()
+                    .unwrap_or("")
+                    .replace('-', "·");
+                (
+                    format!("№ {}", tail.to_uppercase()),
+                    note.frontmatter.note_type.label().to_uppercase(),
+                    "v1.0".to_string(),
+                    if date.is_empty() {
+                        "—".to_string()
+                    } else {
+                        date
+                    },
+                )
+            }
+            None => ("№ —".into(), "".into(), "v1.0".into(), "—".into()),
+        };
+
+        ui.label(
+            RichText::new(number)
+                .monospace()
+                .size(10.0)
+                .color(theme::ACCENT),
+        );
+        ui.add_space(2.0);
+        ui.label(
+            RichText::new(type_label)
+                .monospace()
+                .size(10.0)
+                .color(theme::DIMMER),
+        );
+        ui.add_space(14.0);
+        let (rule_rect, _) =
+            ui.allocate_exact_size(egui::vec2(40.0, 1.0), egui::Sense::hover());
+        ui.painter().rect_filled(rule_rect, 0.0, theme::DIMMER);
+        ui.add_space(14.0);
+        ui.label(
+            RichText::new(version)
+                .monospace()
+                .size(10.0)
+                .color(theme::DIMMER),
+        );
+        ui.label(
+            RichText::new(date)
+                .monospace()
+                .size(10.0)
+                .color(theme::DIMMER),
+        );
+        ui.label(
+            RichText::new("J. FAUSTA")
+                .monospace()
+                .size(10.0)
+                .color(theme::DIMMER),
+        );
+    }
+
+    fn swiss_content(&mut self, ui: &mut egui::Ui) {
+        if self.editing {
+            self.show_edit_panel(ui);
+        } else {
+            self.show_view_panel(ui);
+        }
     }
 
     fn show_edit_panel(&mut self, ui: &mut egui::Ui) {
@@ -278,33 +480,80 @@ impl OmniNoteApp {
     }
 
     fn show_view_panel(&mut self, ui: &mut egui::Ui) {
+        use crate::theme;
         let note = match self.active_note.clone() {
             Some(n) => n,
             None => return,
         };
 
-        ui.heading(&note.title);
+        // Swiss big title — title text in white, type label in accent below
+        ui.label(
+            RichText::new(&note.title)
+                .strong()
+                .size(56.0)
+                .color(theme::TEXT),
+        );
+        ui.label(
+            RichText::new(format!("{}.", note.frontmatter.note_type.label().to_lowercase()))
+                .strong()
+                .size(56.0)
+                .color(theme::ACCENT),
+        );
+        ui.add_space(8.0);
 
         if !note.frontmatter.tags.is_empty() {
             ui.horizontal_wrapped(|ui| {
                 for tag in &note.frontmatter.tags {
-                    if ui.link(format!("#{}", tag)).clicked() {
+                    if ui
+                        .link(
+                            RichText::new(format!("#{}", tag))
+                                .size(13.0)
+                                .color(theme::DIM),
+                        )
+                        .clicked()
+                    {
                         self.query = tag.clone();
                     }
                 }
             });
+            ui.add_space(8.0);
         }
 
         if note.frontmatter.note_type == NoteType::Citacao && !note.frontmatter.source.is_empty() {
             ui.horizontal(|ui| {
-                ui.label("📖");
-                ui.label(&note.frontmatter.source);
+                ui.label(
+                    RichText::new("SOURCE —")
+                        .monospace()
+                        .size(10.0)
+                        .color(theme::ACCENT),
+                );
+                ui.label(
+                    RichText::new(&note.frontmatter.source)
+                        .size(13.0)
+                        .color(theme::TEXT),
+                );
                 if !note.frontmatter.source_link.is_empty() {
-                    ui.hyperlink_to("🔗 link", &note.frontmatter.source_link);
+                    ui.hyperlink_to(
+                        RichText::new("→ link")
+                            .size(13.0)
+                            .color(theme::ACCENT),
+                        &note.frontmatter.source_link,
+                    );
                 }
             });
         }
-        ui.separator();
+        ui.add_space(28.0);
+        theme::hairline(ui);
+        ui.add_space(20.0);
+
+        // Body section label
+        ui.label(
+            RichText::new("01 — CONTENT")
+                .monospace()
+                .size(10.0)
+                .color(theme::ACCENT),
+        );
+        ui.add_space(8.0);
 
         egui_commonmark::CommonMarkViewer::new().show(ui, &mut self.md_cache, &note.content);
         ui.separator();
