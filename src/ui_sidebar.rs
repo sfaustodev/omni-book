@@ -234,25 +234,37 @@ impl OmniNoteApp {
         for (id, label) in notes {
             let is_active = active_id.as_deref() == Some(&id);
             let drag_id = egui::Id::new(format!("note_drag_{}", id));
-            // Use .inner (the selectable_label response) for click + context menu —
-            // .response is the drag-source frame which doesn't fire click on label.
-            let drag = ui.dnd_drag_source(
-                drag_id,
-                NoteIdPayload(id.clone()),
-                |ui| ui.selectable_label(is_active, &label),
-            );
-            if drag.inner.clicked() {
-                pending_select = Some(id.clone());
-            }
-            drag.inner.context_menu(|ui| {
-                if ui.button("✎ Editar").clicked() {
+
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+
+                // Drag handle — small icon, only this is the drag source
+                ui.dnd_drag_source(drag_id, NoteIdPayload(id.clone()), |ui| {
+                    ui.label(
+                        egui::RichText::new("⋮⋮")
+                            .size(10.0)
+                            .weak()
+                            .monospace(),
+                    )
+                    .on_hover_cursor(egui::CursorIcon::Grab)
+                    .on_hover_text("Arraste pra mover entre pastas");
+                });
+
+                // Normal selectable label — clicks + selection + context_menu work normally
+                let label_resp = ui.selectable_label(is_active, &label);
+                if label_resp.clicked() {
                     pending_select = Some(id.clone());
-                    ui.close_menu();
                 }
-                if ui.button("🗑 Deletar").clicked() {
-                    pending_delete = Some(id.clone());
-                    ui.close_menu();
-                }
+                label_resp.context_menu(|ui| {
+                    if ui.button("✎ Editar").clicked() {
+                        pending_select = Some(id.clone());
+                        ui.close_menu();
+                    }
+                    if ui.button("🗑 Deletar").clicked() {
+                        pending_delete = Some(id.clone());
+                        ui.close_menu();
+                    }
+                });
             });
         }
 
