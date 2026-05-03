@@ -12,6 +12,22 @@ mod watcher;
 mod wikilinks;
 
 fn main() -> eframe::Result<()> {
+    // Panic hook so we see the actual panic message even in release builds.
+    std::panic::set_hook(Box::new(|info| {
+        eprintln!("\n[omninote] PANIC: {}", info);
+        if let Some(loc) = info.location() {
+            eprintln!(
+                "[omninote] at {}:{}:{}",
+                loc.file(),
+                loc.line(),
+                loc.column()
+            );
+        }
+        eprintln!("[omninote] backtrace (set RUST_BACKTRACE=1 for full):");
+        let bt = std::backtrace::Backtrace::capture();
+        eprintln!("{}", bt);
+    }));
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1200.0, 800.0])

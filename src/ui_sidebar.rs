@@ -95,7 +95,7 @@ impl OmniNoteApp {
                 theme::section_label(ui, "FOLDERS");
                 egui::ScrollArea::vertical()
                     .id_salt("sidebar_scroll")
-                    .max_height(ui.available_height() - 90.0)
+                    .max_height((ui.available_height() - 90.0).max(0.0))
                     .show(ui, |ui| {
                         self.show_folder_tree(ui, PathBuf::new());
                         self.show_notes_in_folder(ui, &PathBuf::new());

@@ -54,8 +54,8 @@ impl OmniNoteApp {
                             ui.add_space(32.0);
                             ui.allocate_ui_with_layout(
                                 egui::vec2(
-                                    ui.available_width() - 48.0,
-                                    ui.available_height(),
+                                    (ui.available_width() - 48.0).max(0.0),
+                                    ui.available_height().max(0.0),
                                 ),
                                 egui::Layout::top_down(egui::Align::Min),
                                 |ui| {
@@ -91,7 +91,7 @@ impl OmniNoteApp {
                     ("⌘ ,", "Configurações"),
                 ] {
                     ui.horizontal(|ui| {
-                        ui.add_space(ui.available_width() / 2.0 - 80.0);
+                        ui.add_space((ui.available_width() / 2.0 - 80.0).max(0.0));
                         ui.label(
                             RichText::new(kc)
                                 .monospace()
