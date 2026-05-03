@@ -8,10 +8,14 @@ use eframe::egui::{self, Color32};
 pub const BG: Color32 = Color32::from_rgb(0x0e, 0x0e, 0x0e);
 pub const PANEL: Color32 = Color32::from_rgb(0x14, 0x14, 0x14);
 pub const BORDER: Color32 = Color32::from_rgb(0x26, 0x26, 0x26);
+pub const BORDER_HOT: Color32 = Color32::from_rgb(0x3a, 0x24, 0x18);
 pub const TEXT: Color32 = Color32::from_rgb(0xfa, 0xfa, 0xfa);
 pub const DIM: Color32 = Color32::from_rgb(0x8a, 0x8a, 0x8a);
 pub const DIMMER: Color32 = Color32::from_rgb(0x5a, 0x5a, 0x5a);
-pub const ACCENT: Color32 = Color32::from_rgb(0xff, 0x4d, 0x2e);
+pub const ACCENT: Color32 = Color32::from_rgb(0xff, 0x5a, 0x1f);
+pub const ACCENT_SOFT: Color32 = Color32::from_rgb(0xff, 0x7a, 0x47);
+pub const ACCENT_BG: Color32 = Color32::from_rgba_unmultiplied(0xff, 0x5a, 0x1f, 26);
+pub const ACCENT_BG_STRONG: Color32 = Color32::from_rgba_unmultiplied(0xff, 0x5a, 0x1f, 46);
 pub const ACCENT_INK: Color32 = Color32::from_rgb(0x00, 0x00, 0x00);
 
 /// Apply Swiss theme to the egui context. Overrides `Visuals` colors and

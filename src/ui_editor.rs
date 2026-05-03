@@ -112,13 +112,14 @@ impl OmniNoteApp {
 
     fn swiss_top_rule(&mut self, ui: &mut egui::Ui) {
         use crate::theme;
-        let id_text = self
+
+        let (folder_text, id_tail) = self
             .active_note
             .as_ref()
             .map(|n| {
                 let id = &n.frontmatter.id;
-                // last 3 hex chars from uuid simple
-                let tail: String = id.chars().rev().take(3).collect::<String>().chars().rev().collect();
+                let tail: String =
+                    id.chars().rev().take(3).collect::<String>().chars().rev().collect();
                 let folder = n
                     .rel_path
                     .parent()
@@ -126,9 +127,9 @@ impl OmniNoteApp {
                     .and_then(|s| s.to_str())
                     .unwrap_or("ROOT")
                     .to_uppercase();
-                format!("{} / {}", folder, tail)
+                (folder, tail.to_uppercase())
             })
-            .unwrap_or_else(|| "—".into());
+            .unwrap_or_else(|| ("ROOT".into(), "—".into()));
 
         let title_text = self
             .active_note
@@ -136,33 +137,42 @@ impl OmniNoteApp {
             .map(|n| n.title.to_uppercase())
             .unwrap_or_default();
 
-        let edited_text = self
+        let note_id = self
             .active_note
             .as_ref()
-            .map(|_| "EDITED NOW".to_string())
+            .map(|n| n.frontmatter.id.clone())
             .unwrap_or_default();
 
+        let saved_text = if self.dirty { "UNSAVED" } else { "SAVED" };
+
+        // Header bar: accent-tinted background + orange bottom border
         let bar = egui::Frame::none()
-            .fill(theme::BG)
-            .stroke(egui::Stroke::new(1.0, theme::BORDER))
-            .inner_margin(egui::Margin::symmetric(32.0, 14.0));
+            .fill(theme::ACCENT_BG_STRONG)
+            .stroke(egui::Stroke::new(1.0, theme::ACCENT))
+            .inner_margin(egui::Margin::symmetric(32.0, 0.0));
         bar.show(ui, |ui| {
-            ui.set_height(20.0);
+            ui.set_min_height(48.0);
             ui.columns(3, |cols| {
+                // Left: <html> tag + path
                 cols[0].with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     ui.label(
-                        RichText::new(id_text)
+                        RichText::new("<html>")
+                            .monospace()
+                            .size(18.0)
+                            .strong()
+                            .color(theme::ACCENT),
+                    );
+                    ui.add_space(10.0);
+                    ui.label(
+                        RichText::new(format!("{} / {}", folder_text, id_tail))
                             .monospace()
                             .size(10.0)
-                            .color(theme::DIMMER),
+                            .color(theme::ACCENT_SOFT),
                     );
                 });
+
+                // Center: mode toggle + title + delete
                 cols[1].with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                    let id = self
-                        .active_note
-                        .as_ref()
-                        .map(|n| n.frontmatter.id.clone())
-                        .unwrap_or_default();
                     ui.horizontal(|ui| {
                         let editing_label = if self.editing { "EDIT" } else { "READ" };
                         if ui
@@ -178,35 +188,62 @@ impl OmniNoteApp {
                         {
                             self.editing = !self.editing;
                         }
-                        ui.add_space(12.0);
+                        ui.add_space(8.0);
                         ui.label(
-                            RichText::new(title_text.clone())
+                            RichText::new(format!("{}.", title_text))
                                 .monospace()
-                                .size(10.0)
+                                .size(11.0)
+                                .strong()
                                 .color(theme::TEXT),
                         );
-                        ui.add_space(12.0);
-                        if !id.is_empty()
+                        ui.add_space(8.0);
+                        if !note_id.is_empty()
                             && ui
                                 .small_button(
-                                    RichText::new("DELETE")
+                                    RichText::new("⋯")
                                         .monospace()
-                                        .size(10.0)
-                                        .color(theme::DIMMER),
+                                        .size(14.0)
+                                        .color(theme::ACCENT),
                                 )
+                                .on_hover_text("Deletar nota")
                                 .clicked()
                         {
-                            self.confirm_action = Some(ConfirmAction::DeleteNote(id));
+                            self.confirm_action = Some(ConfirmAction::DeleteNote(note_id.clone()));
                         }
                     });
                 });
+
+                // Right: ● SAVED + edited time
                 cols[2].with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
-                        RichText::new(edited_text)
+                        RichText::new("⋯")
+                            .monospace()
+                            .size(14.0)
+                            .color(theme::ACCENT),
+                    );
+                    ui.add_space(8.0);
+                    ui.label(
+                        RichText::new("EDITED NOW")
                             .monospace()
                             .size(10.0)
-                            .color(theme::DIMMER),
+                            .color(theme::ACCENT_SOFT),
                     );
+                    ui.add_space(8.0);
+                    // Orange dot + SAVED/UNSAVED
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        let (dot_rect, _) = ui.allocate_exact_size(
+                            egui::vec2(5.0, 5.0),
+                            egui::Sense::hover(),
+                        );
+                        ui.painter().circle_filled(dot_rect.center(), 2.5, theme::ACCENT);
+                        ui.label(
+                            RichText::new(saved_text)
+                                .monospace()
+                                .size(10.0)
+                                .color(theme::ACCENT_SOFT),
+                        );
+                    });
                 });
             });
         });
@@ -503,16 +540,27 @@ impl OmniNoteApp {
 
         if !note.frontmatter.tags.is_empty() {
             ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
                 for tag in &note.frontmatter.tags {
-                    if ui
-                        .link(
-                            RichText::new(format!("#{}", tag))
-                                .size(13.0)
-                                .color(theme::DIM),
-                        )
-                        .clicked()
-                    {
+                    let chip = egui::Frame::none()
+                        .fill(theme::ACCENT_BG)
+                        .stroke(egui::Stroke::new(1.0, theme::ACCENT))
+                        .inner_margin(egui::Margin::symmetric(7.0, 1.0))
+                        .show(ui, |ui| {
+                            ui.label(
+                                RichText::new(format!("#{}", tag))
+                                    .monospace()
+                                    .size(11.0)
+                                    .color(theme::ACCENT),
+                            );
+                        })
+                        .response
+                        .interact(egui::Sense::click());
+                    if chip.clicked() {
                         self.query = tag.clone();
+                    }
+                    if chip.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                     }
                 }
             });
@@ -593,6 +641,44 @@ impl OmniNoteApp {
                 }
             });
         }
+
+        // Footer meta row
+        ui.add_space(16.0);
+        {
+            let (rule_rect, _) = ui.allocate_exact_size(
+                egui::vec2(ui.available_width(), 1.0),
+                egui::Sense::hover(),
+            );
+            ui.painter().rect_filled(rule_rect, 0.0, theme::BORDER);
+        }
+        ui.add_space(12.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 18.0;
+            let word_count = note.content.split_whitespace().count();
+            ui.label(
+                RichText::new(format!(
+                    "BACKLINKS — {}",
+                    backlinks.len()
+                ))
+                .monospace()
+                .size(10.0)
+                .color(theme::DIMMER),
+            );
+            ui.label(
+                RichText::new(format!("WORDS — {}", word_count))
+                    .monospace()
+                    .size(10.0)
+                    .color(theme::DIMMER),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(
+                    RichText::new("</html>")
+                        .monospace()
+                        .size(10.0)
+                        .color(theme::ACCENT),
+                );
+            });
+        });
     }
 
     /// Render wikilinks (`[[Title]]`) as clickable links and embeds (`![[file]]`)
