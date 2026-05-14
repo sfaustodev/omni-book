@@ -12,11 +12,26 @@ OmniNote — a native Rust desktop notebook app (previously called Caderno). Fil
 cargo build                  # debug build
 cargo build --release        # optimized release (~10MB stripped binary)
 cargo run                    # run the app
-cargo test                   # run all unit tests (vault, autoformat, import)
+cargo test                   # run all unit tests (vault, autoformat, import, wikilinks, pdf, types, actions)
 cargo test vault::           # run only vault tests
 cargo test autoformat::      # run only autoformat tests
 cargo test import::          # run only import tests
+
+# Coverage gate (pure modules ≥90% — CAD-12).
+# One-time install: cargo install cargo-llvm-cov --locked
+cargo llvm-cov --html \
+  --include-files src/vault.rs --include-files src/wikilinks.rs \
+  --include-files src/autoformat.rs --include-files src/import.rs \
+  --include-files src/pdf.rs --include-files src/types.rs --include-files src/app.rs
+open target/llvm-cov/html/index.html      # visual report
+
+cargo llvm-cov --fail-under-lines 90 \
+  --include-files 'src/vault.rs' --include-files 'src/wikilinks.rs' \
+  --include-files 'src/autoformat.rs' --include-files 'src/import.rs' \
+  --include-files 'src/pdf.rs' --include-files 'src/types.rs' --include-files 'src/app.rs'
 ```
+
+UI render layer (`ui_*.rs`) is intentionally excluded — covered by [discipline/MANUAL_TEST_PLAN.md](discipline/MANUAL_TEST_PLAN.md) human checklist.
 
 For macOS `.app` bundle: `cargo install cargo-bundle && cargo bundle --release`
 
