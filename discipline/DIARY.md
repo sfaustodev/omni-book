@@ -4,6 +4,75 @@
 
 ---
 
+## 2026-05-13 — CAD-12 · QA + security coverage hardening
+
+**Tickets touched:** CAD-12 (novo, criado no Notion sob 🚢 Caderno de Bordo, status `🚧 Em obra` → `👀 Revisão` ao fim da sessão)
+
+**Branch:** `feat/cad-12-test-coverage` (off `main`)
+
+**Done:**
+
+- Sacred file `discipline/PLAN.md` criado (rule #15) com escopo, milestones, critical files, verification.
+- Sacred file `discipline/MANUAL_TEST_PLAN.md` criado — checklist humano pra superfícies só-UI (rfd dialogs, watcher, OpenDyslexic visual).
+- `Cargo.toml`: add `proptest = "1"` em `[dev-dependencies]`.
+- `.github/workflows/ci.yml`: novo job `coverage` rodando `cargo llvm-cov --fail-under-lines 90` com `--ignore-filename-regex 'src/(ui_|main\.rs|watcher|theme|app\.rs)'`.
+- `CLAUDE.md`: comandos `cargo llvm-cov` documentados + ponteiro pra MANUAL_TEST_PLAN.
+- **Tests inline expandidos** (§0 #10 honrado, sem `tests/` dir):
+  - `vault.rs` 9 → 45 (+36): sanitize traversal Unix+Win, dangerous chars, unicode/emoji preservation, zero-width gap (Q-05), Vault::open file-as-root (Q-08), traversal containment via canonicalize, collision counter, rename/move edges, delete folder, attachment collision + arbitrary extension (Q-07), parse_frontmatter panic safety + obsidian compat.
+  - `wikilinks.rs` 9 → 26 (+17): bracket adversarial, multiline+null+traversal+scheme strings, very-long inner, unicode titles, embed-in-link, full extension matrix (6 image lower+upper, 8 file), backlash, position order. **+2 proptest** (256 cases each).
+  - `autoformat.rs` 8 → 28 (+18): empty/operator-only/digits-only, deeply-nested parens, very-long expr, exponent notation, div-by-zero, overflow→inf rejected by `is_finite`, FP precision, mixed comma/period, pos OOB, function names blocked by char-whitelist, injection strings non-panic. **+2 proptest** (256 cases each).
+  - `import.rs` 5 → 19 (+14): malformed JSON × 6, deep nesting (depth 200), missing-messages error, unknown role, multimodal content, plain-string variant, missing content, no-name no-H1, separator collision, missing/zero-byte file, full artifact extension matrix (tsx/jsx/ts/js/py/rs/html + unknown), triple-backtick collision.
+  - `pdf.rs` 0 → 7 (+7): in-memory `lopdf::Document` fixtures (no binary check-ins), single+multi-page, zero-byte/random-bytes/non-PDF/missing errors. **+1 proptest** (32 cases, `catch_unwind`).
+  - `types.rs` 0 → 12 (+12): NoteType yaml round-trip × 6, label/icon non-empty, FontFamily round-trip × 3 + egui mapping, AppConfig defaults + serde missing/extra fields, Frontmatter round-trip preserving `linked_note` (§0 #4), ConfirmAction Debug.
+  - `actions.rs` (NOVO) 30 testes: confirm flow (request/confirm/cancel × 2 ops, active-clear semantics), set_type_filter / set_query / filtered_note_indices, toggle_edit, external_change_reload (refresh + drop-when-deleted), external_change_keep, reset_settings + set_font_family persistência, import_pdf/chat/artifact wrappers, attach_file_to_active retorna wikilink, backlinks_to scan + skip embeds, create_link_to_new.
+- **Refactor `src/actions.rs`** — `pub mod actions` extraído (691 linhas + 30 testes). Cada handler aceita só `&mut Vault`/`&mut Option<Note>`/flags simples → testável sem `eframe::CreationContext`.
+- **UI rewiring**: `app.rs` (Cmd+E shortcut), `ui_editor.rs` (✎ Editar, 🗑 delete, 📎 anexar, tag link, create_note_from_wikilink), `ui_sidebar.rs` (chips, 🗑 deletar pasta, delete-note menu), `ui_modals.rs` (external change recarregar/manter, confirm sim/cancelar, import_pdf/chat/artifact thin wrappers).
+- 4 handlers (`filtered_note_indices`, `reset_settings`, `set_font_family`, `backlinks_to`) testados mas ainda não wired — `#[allow(dead_code)]` + comentário pointer pro follow-up.
+- **Coverage local (cargo-llvm-cov 0.8.7):**
+
+```
+File              Lines  Cover
+actions.rs          517  95.16%
+autoformat.rs       179 100.00%
+import.rs           209  99.52%
+pdf.rs               98  98.98%
+types.rs            151 100.00%
+vault.rs            665  94.14%
+wikilinks.rs        186  98.92%
+TOTAL              2005  96.61%
+```
+
+≥90% gate passa.
+
+**Total tests:** 31 → 167 (+136), 0 falhas. cargo clippy clean. cargo fmt clean.
+
+**In flight:**
+
+- PR `feat: CAD-12 — QA + security coverage hardening` aberto pós-DIARY.
+- `/pre-merge-coverage` + `/codex-cross-review` rodam após CI verde.
+- Smoke macOS humano via `MANUAL_TEST_PLAN.md` obrigatório antes de fechar CAD-12 (rule #13).
+
+**Decisões registradas (HUMAN.md adicionado Q-05/06/07/08):**
+
+- **Q-05** coverage gate fail-PR vs warn-only — escolhi (a) fail-PR.
+- **Q-06** lib.rs split — escolhi adiar pra v0.4 com CAD-10.
+- **Q-07** import_attachment sem allow-list — (a) status quo (rfd dialog é o gate).
+- **Q-08** Vault::open root=arquivo retorna Ok vault-vazio — sugiro fix em PR follow-up.
+
+⚠️ **HUMAN.md alarm:** 8 perguntas abertas (Q-01..Q-08), excede threshold de 5.
+
+**Stash WIP:** `stash@{0}` na branch `feat/omninote-swiss-theme` preserva 3 arquivos modificados antes do branch (theme.rs, ui_sidebar.rs, DIARY.md). Restaurar após CAD-12 mergear.
+
+**Next session should start with:**
+
+- Verificar CI verde no PR.
+- Se verde: `/pre-merge-coverage` + `/codex-cross-review`, salvar reports em `reports_fausto/` (gitignored).
+- Esperar Fausto rodar smoke macOS local + escrever "testado, pode fechar CAD-12".
+- Após confirmação: mergear PR via gh UI, mover Notion CAD-12 → ✅ Concluída via MCP.
+- Restaurar `git stash pop` do swiss-theme branch.
+
+---
+
 ## 2026-05-02 — discipline migration: root → discipline/ subfolder
 
 **Tickets touched:** none (housekeeping)
