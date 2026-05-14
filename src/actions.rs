@@ -627,6 +627,102 @@ mod tests {
         assert_eq!(v.notes.len(), 0);
     }
 
+    #[test]
+    fn import_pdf_happy_path_creates_resumo_with_attachment() {
+        // Build a tiny valid PDF in-memory using lopdf so we exercise the full
+        // happy-path branch of import_pdf (text extraction → create_note →
+        // import_attachment → save_note → sync_in_memory → set active).
+        use lopdf::content::{Content, Operation};
+        use lopdf::dictionary;
+        use lopdf::{Document, Object, Stream};
+        use std::io::Write;
+
+        let mut doc = Document::with_version("1.5");
+        let pages_id = doc.new_object_id();
+        let font_id = doc.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => "Helvetica",
+        });
+        let resources_id = doc.add_object(dictionary! {
+            "Font" => dictionary! { "F1" => font_id },
+        });
+        let content = Content {
+            operations: vec![
+                Operation::new("BT", vec![]),
+                Operation::new("Tf", vec!["F1".into(), 12.into()]),
+                Operation::new("Td", vec![100.into(), 700.into()]),
+                Operation::new("Tj", vec![Object::string_literal("ImportedText")]),
+                Operation::new("ET", vec![]),
+            ],
+        };
+        let content_id = doc.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Contents" => content_id,
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![Object::Reference(page_id)],
+                "Count" => 1_i64,
+                "Resources" => resources_id,
+            }),
+        );
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        doc.trailer.set("Root", catalog_id);
+        doc.compress();
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+
+        let mut f = tempfile::Builder::new().suffix(".pdf").tempfile().unwrap();
+        f.write_all(&bytes).unwrap();
+        f.flush().unwrap();
+
+        let (mut v, _d) = temp_vault();
+        let mut active = None;
+        let mut editing = true;
+        let mut err = None;
+        import_pdf(&mut v, &mut active, &mut editing, &mut err, f.path());
+
+        assert!(err.is_none(), "unexpected error: {err:?}");
+        assert!(active.is_some());
+        let note = active.unwrap();
+        assert_eq!(note.frontmatter.note_type, NoteType::Resumo);
+        assert!(note.content.contains("ImportedText"));
+        assert_eq!(note.frontmatter.attachments.len(), 1);
+        assert!(!editing, "import_pdf should leave editing=false");
+        // Note also persists in vault.notes after sync_in_memory
+        assert!(v
+            .notes
+            .iter()
+            .any(|n| n.frontmatter.id == note.frontmatter.id));
+    }
+
+    #[test]
+    fn import_artifact_records_error_on_missing_file() {
+        let (mut v, _d) = temp_vault();
+        let mut active = None;
+        let mut editing = false;
+        let mut err = None;
+        import_artifact(
+            &mut v,
+            &mut active,
+            &mut editing,
+            &mut err,
+            std::path::Path::new("/tmp/does_not_exist_omninote_artifact.rs"),
+        );
+        assert!(err.is_some());
+        assert_eq!(v.notes.len(), 0);
+        assert!(active.is_none());
+    }
+
     // ----- Attachments -----
 
     #[test]

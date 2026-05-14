@@ -554,6 +554,38 @@ mod tests {
     }
 
     #[test]
+    fn rename_note_to_new_name_moves_file_and_updates_state() {
+        let (mut v, _d) = temp_vault();
+        v.create_note(None, "Antigo", NoteType::Resumo).unwrap();
+        let old_path = v.notes[0].path.clone();
+        v.rename_note(0, "Novo").unwrap();
+        assert!(!old_path.exists(), "old file should be gone");
+        assert!(v.notes[0].path.exists(), "new file should exist");
+        assert_eq!(v.notes[0].title, "Novo");
+        assert!(v.notes[0]
+            .path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("Novo"));
+    }
+
+    #[test]
+    fn rename_note_by_id_updates_in_place() {
+        let (mut v, _d) = temp_vault();
+        let note = v.create_note(None, "Old", NoteType::Resumo).unwrap();
+        let renamed = v
+            .rename_note_by_id(&note.frontmatter.id, "Renamed")
+            .unwrap();
+        assert_eq!(renamed.title, "Renamed");
+        assert_eq!(renamed.frontmatter.id, note.frontmatter.id);
+        assert!(v
+            .notes
+            .iter()
+            .any(|n| n.frontmatter.id == note.frontmatter.id && n.title == "Renamed"));
+    }
+
+    #[test]
     fn move_note_by_id_unknown_errors() {
         let (mut v, _d) = temp_vault();
         let res = v.move_note_by_id("n_doesnotexist", None);
