@@ -1,5 +1,5 @@
 use crate::app::OmniNoteApp;
-use crate::types::{ConfirmAction, NoteType};
+use crate::types::NoteType;
 use egui::RichText;
 use std::path::{Path, PathBuf};
 
@@ -75,7 +75,7 @@ impl OmniNoteApp {
                         .selectable_label(self.type_filter.is_none(), "todos")
                         .clicked()
                     {
-                        self.type_filter = None;
+                        crate::actions::set_type_filter(&mut self.type_filter, None);
                     }
                     for t in NoteType::all() {
                         let selected = self.type_filter == Some(t);
@@ -83,7 +83,8 @@ impl OmniNoteApp {
                             .selectable_label(selected, format!("{} {}", t.icon(), t.label()))
                             .clicked()
                         {
-                            self.type_filter = if selected { None } else { Some(t) };
+                            let new_filter = if selected { None } else { Some(t) };
+                            crate::actions::set_type_filter(&mut self.type_filter, new_filter);
                         }
                     }
                 });
@@ -165,7 +166,10 @@ impl OmniNoteApp {
                         ui.close_menu();
                     }
                     if ui.button("🗑 Deletar pasta").clicked() {
-                        self.confirm_action = Some(ConfirmAction::DeleteFolder(folder.clone()));
+                        crate::actions::request_delete_folder(
+                            &mut self.confirm_action,
+                            folder.clone(),
+                        );
                         ui.close_menu();
                     }
                 });
@@ -256,7 +260,7 @@ impl OmniNoteApp {
             self.select_note(&id);
         }
         if let Some(id) = pending_delete {
-            self.confirm_action = Some(ConfirmAction::DeleteNote(id));
+            crate::actions::request_delete_note(&mut self.confirm_action, id);
         }
     }
 }

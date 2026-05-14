@@ -1,5 +1,5 @@
 use crate::app::OmniNoteApp;
-use crate::types::{ConfirmAction, NoteType};
+use crate::types::NoteType;
 use egui::RichText;
 use std::path::Path;
 
@@ -60,12 +60,12 @@ impl OmniNoteApp {
                     .on_hover_text("Ctrl+E")
                     .clicked()
                 {
-                    self.editing = !self.editing;
+                    crate::actions::toggle_edit(&mut self.editing, &self.active_note);
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if let Some(id) = self.active_note.as_ref().map(|n| n.frontmatter.id.clone()) {
                         if ui.button("🗑").on_hover_text("Deletar nota").clicked() {
-                            self.confirm_action = Some(ConfirmAction::DeleteNote(id));
+                            crate::actions::request_delete_note(&mut self.confirm_action, id);
                         }
                     }
                 });
@@ -259,13 +259,14 @@ impl OmniNoteApp {
         ui.horizontal(|ui| {
             if ui.button("📎 Anexar arquivo").clicked() {
                 if let Some(path) = rfd::FileDialog::new().pick_file() {
-                    if let Some(v) = &self.vault {
-                        match v.import_attachment(&path) {
-                            Ok(name) => {
-                                let note = self.active_note.as_mut().unwrap();
-                                note.content.push_str(&format!("\n![[{}]]", name));
-                                note.frontmatter.attachments.push(name);
-                                self.dirty = true;
+                    if let Some(v) = &mut self.vault {
+                        match crate::actions::attach_file_to_active(v, &mut self.active_note, &path)
+                        {
+                            Ok(wikilink) => {
+                                if let Some(note) = self.active_note.as_mut() {
+                                    note.content.push_str(&format!("\n{wikilink}"));
+                                    self.dirty = true;
+                                }
                             }
                             Err(e) => self.error_msg = Some(e),
                         }
@@ -287,7 +288,7 @@ impl OmniNoteApp {
             ui.horizontal_wrapped(|ui| {
                 for tag in &note.frontmatter.tags {
                     if ui.link(format!("#{}", tag)).clicked() {
-                        self.query = tag.clone();
+                        crate::actions::set_query(&mut self.query, tag.clone());
                     }
                 }
             });
@@ -459,7 +460,7 @@ impl OmniNoteApp {
     fn create_note_from_wikilink(&mut self, title: &str) {
         self.flush_active();
         if let Some(v) = &mut self.vault {
-            match v.create_note(None, title, crate::types::NoteType::default()) {
+            match crate::actions::create_link_to_new(v, title) {
                 Ok(note) => {
                     self.active_note = Some(note);
                     self.editing = true;

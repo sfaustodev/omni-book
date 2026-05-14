@@ -311,8 +311,8 @@ impl eframe::App for OmniNoteApp {
         if new {
             self.show_new = true;
         }
-        if toggle_edit && self.active_note.is_some() {
-            self.editing = !self.editing;
+        if toggle_edit {
+            crate::actions::toggle_edit(&mut self.editing, &self.active_note);
         }
         if settings {
             self.show_settings = true;

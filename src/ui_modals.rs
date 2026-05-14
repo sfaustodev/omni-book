@@ -25,27 +25,26 @@ impl OmniNoteApp {
                 ui.separator();
                 ui.horizontal(|ui| {
                     if ui.button("📥 Recarregar (perde meus edits)").clicked() {
-                        self.dirty = false;
                         if let Some(v) = &mut self.vault {
-                            v.reload_notes();
+                            crate::actions::external_change_reload(
+                                v,
+                                &mut self.active_note,
+                                &mut self.dirty,
+                                &mut self.external_change_pending,
+                            );
+                        } else {
+                            self.dirty = false;
+                            self.external_change_pending = false;
                         }
-                        if let Some(active) = &self.active_note {
-                            let path = active.path.clone();
-                            if let Some(v) = &self.vault {
-                                if let Some(fresh) =
-                                    v.notes.iter().find(|n| n.path == path).cloned()
-                                {
-                                    self.active_note = Some(fresh);
-                                }
-                            }
-                        }
-                        self.external_change_pending = false;
                     }
                     if ui.button("💾 Manter edits (sobrescreve no próximo save)").clicked() {
                         // Push self-write window forward so next save isn't seen as conflict
                         self.self_write_until = std::time::Instant::now()
                             + std::time::Duration::from_millis(400);
-                        self.external_change_pending = false;
+                        crate::actions::external_change_keep(
+                            &mut self.dirty,
+                            &mut self.external_change_pending,
+                        );
                     }
                 });
             });
@@ -242,38 +241,28 @@ impl OmniNoteApp {
                 ui.separator();
                 ui.horizontal(|ui| {
                     if ui.button("🗑 Sim, deletar").clicked() {
-                        match &action {
-                            ConfirmAction::DeleteNote(id) => {
-                                if let Some(v) = &mut self.vault {
-                                    if let Some(idx) =
-                                        v.notes.iter().position(|n| &n.frontmatter.id == id)
-                                    {
-                                        let _ = v.delete_note(idx);
-                                        if self
-                                            .active_note
-                                            .as_ref()
-                                            .is_some_and(|n| &n.frontmatter.id == id)
-                                        {
-                                            self.active_note = None;
-                                        }
-                                    }
+                        if let Some(v) = &mut self.vault {
+                            match &action {
+                                ConfirmAction::DeleteNote(id) => {
+                                    let _ = crate::actions::confirm_delete_note(
+                                        v,
+                                        &mut self.active_note,
+                                        id,
+                                    );
                                 }
-                            }
-                            ConfirmAction::DeleteFolder(p) => {
-                                if let Some(v) = &mut self.vault {
-                                    let _ = v.delete_folder(p);
-                                    if let Some(n) = &self.active_note {
-                                        if n.rel_path.starts_with(p) {
-                                            self.active_note = None;
-                                        }
-                                    }
+                                ConfirmAction::DeleteFolder(p) => {
+                                    let _ = crate::actions::confirm_delete_folder(
+                                        v,
+                                        &mut self.active_note,
+                                        p,
+                                    );
                                 }
                             }
                         }
-                        self.confirm_action = None;
+                        crate::actions::cancel_confirm(&mut self.confirm_action);
                     }
                     if ui.button("Cancelar").clicked() {
-                        self.confirm_action = None;
+                        crate::actions::cancel_confirm(&mut self.confirm_action);
                     }
                 });
             });
@@ -335,107 +324,41 @@ impl OmniNoteApp {
         self.show_import = open;
     }
 
-    // Import helpers
+    // Import helpers — thin wrappers around crate::actions for the rfd dialog flow.
 
     fn import_pdf(&mut self, path: &std::path::Path) {
-        let content = match crate::pdf::extract_text(path) {
-            Ok(t) => t,
-            Err(e) => {
-                self.error_msg = Some(e);
-                return;
-            }
-        };
-        let title = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("PDF")
-            .to_string();
         if let Some(v) = &mut self.vault {
-            match v.create_note(None, &title, NoteType::Resumo) {
-                Ok(mut note) => {
-                    note.content = content;
-                    if let Ok(name) = v.import_attachment(path) {
-                        note.frontmatter.attachments.push(name);
-                    }
-                    let _ = v.save_note(&note);
-                    if let Some(e) = v
-                        .notes
-                        .iter_mut()
-                        .find(|n| n.frontmatter.id == note.frontmatter.id)
-                    {
-                        *e = note.clone();
-                    }
-                    self.active_note = Some(note);
-                    self.editing = false;
-                }
-                Err(e) => self.error_msg = Some(e),
-            }
+            crate::actions::import_pdf(
+                v,
+                &mut self.active_note,
+                &mut self.editing,
+                &mut self.error_msg,
+                path,
+            );
         }
     }
 
     fn import_chat(&mut self, path: &std::path::Path) {
-        let content = match crate::import::import_claude_chat(path) {
-            Ok(c) => c,
-            Err(e) => {
-                self.error_msg = Some(e);
-                return;
-            }
-        };
-        let title = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("Chat")
-            .to_string();
         if let Some(v) = &mut self.vault {
-            match v.create_note(None, &title, NoteType::Resumo) {
-                Ok(mut note) => {
-                    note.content = content;
-                    let _ = v.save_note(&note);
-                    if let Some(e) = v
-                        .notes
-                        .iter_mut()
-                        .find(|n| n.frontmatter.id == note.frontmatter.id)
-                    {
-                        *e = note.clone();
-                    }
-                    self.active_note = Some(note);
-                    self.editing = false;
-                }
-                Err(e) => self.error_msg = Some(e),
-            }
+            crate::actions::import_chat(
+                v,
+                &mut self.active_note,
+                &mut self.editing,
+                &mut self.error_msg,
+                path,
+            );
         }
     }
 
     fn import_artifact(&mut self, path: &std::path::Path) {
-        let content = match crate::import::import_claude_artifact(path) {
-            Ok(c) => c,
-            Err(e) => {
-                self.error_msg = Some(e);
-                return;
-            }
-        };
-        let title = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("Artefato")
-            .to_string();
         if let Some(v) = &mut self.vault {
-            match v.create_note(None, &title, NoteType::Codigo) {
-                Ok(mut note) => {
-                    note.content = content;
-                    let _ = v.save_note(&note);
-                    if let Some(e) = v
-                        .notes
-                        .iter_mut()
-                        .find(|n| n.frontmatter.id == note.frontmatter.id)
-                    {
-                        *e = note.clone();
-                    }
-                    self.active_note = Some(note);
-                    self.editing = false;
-                }
-                Err(e) => self.error_msg = Some(e),
-            }
+            crate::actions::import_artifact(
+                v,
+                &mut self.active_note,
+                &mut self.editing,
+                &mut self.error_msg,
+                path,
+            );
         }
     }
 }
