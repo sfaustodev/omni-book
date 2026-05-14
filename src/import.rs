@@ -210,7 +210,9 @@ mod tests {
 
     #[test]
     fn import_chat_missing_file_errors() {
-        let res = import_claude_chat(std::path::Path::new("/tmp/does_not_exist_omninote_xyz.json"));
+        let res = import_claude_chat(std::path::Path::new(
+            "/tmp/does_not_exist_omninote_xyz.json",
+        ));
         assert!(res.is_err());
     }
 

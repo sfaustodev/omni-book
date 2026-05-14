@@ -143,7 +143,9 @@ mod tests {
 
     #[test]
     fn very_long_expression_does_not_panic() {
-        let mut expr: String = (0..10_000).map(|i| if i % 2 == 0 { '1' } else { '+' }).collect();
+        let mut expr: String = (0..10_000)
+            .map(|i| if i % 2 == 0 { '1' } else { '+' })
+            .collect();
         expr.push_str(" =");
         let _ = subst(&expr);
     }
@@ -208,7 +210,13 @@ mod tests {
     fn function_names_blocked_by_char_filter() {
         // meval supports sin/cos/pi but the autoformat char-whitelist excludes
         // letters other than e/E (for exponent), so they all return None.
-        for expr in ["sin(1) =", "cos(1) =", "pi + 1 =", "pow(2, 3) =", "abs(-1) ="] {
+        for expr in [
+            "sin(1) =",
+            "cos(1) =",
+            "pi + 1 =",
+            "pow(2, 3) =",
+            "abs(-1) =",
+        ] {
             assert!(subst(expr).is_none(), "expected None for {expr:?}");
         }
     }

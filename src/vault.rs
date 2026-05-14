@@ -502,9 +502,7 @@ mod tests {
     #[test]
     fn create_note_with_traversal_title_stays_inside_vault() {
         let (mut v, _d) = temp_vault();
-        let note = v
-            .create_note(None, "../escape", NoteType::Resumo)
-            .unwrap();
+        let note = v.create_note(None, "../escape", NoteType::Resumo).unwrap();
         let canonical_root = v.root.canonicalize().unwrap();
         let canonical_note = note.path.canonicalize().unwrap();
         assert!(
@@ -600,7 +598,8 @@ mod tests {
         let (mut v, _d) = temp_vault();
         let abs = v.create_folder(None, "Deep").unwrap();
         let rel = abs.strip_prefix(&v.root).unwrap().to_path_buf();
-        v.create_note(Some(&rel), "Inner", NoteType::Resumo).unwrap();
+        v.create_note(Some(&rel), "Inner", NoteType::Resumo)
+            .unwrap();
         v.delete_folder(&rel).unwrap();
         assert!(!v.root.join("Deep").exists());
         assert!(!v.notes.iter().any(|n| n.title == "Inner"));
@@ -724,8 +723,16 @@ mod tests {
     #[test]
     fn reload_notes_skips_internal_dirs() {
         let (mut v, _d) = temp_vault();
-        fs::write(v.root.join(".omninote/note_inside.md"), "---\nid: x\n---\nbody").unwrap();
-        fs::write(v.root.join("_attachments/note_inside.md"), "---\nid: y\n---\nbody").unwrap();
+        fs::write(
+            v.root.join(".omninote/note_inside.md"),
+            "---\nid: x\n---\nbody",
+        )
+        .unwrap();
+        fs::write(
+            v.root.join("_attachments/note_inside.md"),
+            "---\nid: y\n---\nbody",
+        )
+        .unwrap();
         v.create_note(None, "Real", NoteType::Resumo).unwrap();
         v.reload_notes();
         assert_eq!(v.notes.len(), 1);
