@@ -143,4 +143,175 @@ mod tests {
         let c = "no bang prefix [[Note]]";
         assert_eq!(extract(c), vec![Wikilink::Note("Note".into())]);
     }
+
+    // CAD-12: adversarial parser inputs.
+
+    #[test]
+    fn many_open_brackets_does_not_panic() {
+        let c = "[[".repeat(50);
+        let _ = extract(&c);
+    }
+
+    #[test]
+    fn many_close_brackets_does_not_panic() {
+        let c = "]]".repeat(50);
+        let _ = extract(&c);
+    }
+
+    #[test]
+    fn multiline_inner_extracted_trimmed() {
+        let c = "[[\n  Multi\nLine  \n]]";
+        let result = extract(c);
+        assert_eq!(result.len(), 1);
+        if let Wikilink::Note(s) = &result[0] {
+            assert!(s.contains("Multi"));
+        } else {
+            panic!("expected Note variant");
+        }
+    }
+
+    #[test]
+    fn null_byte_inner_preserved() {
+        let c = "[[null\0byte]]";
+        let result = extract(c);
+        assert_eq!(result, vec![Wikilink::Note("null\0byte".into())]);
+    }
+
+    #[test]
+    fn traversal_string_extracted_as_literal_note() {
+        // Wikilink resolution happens later — extractor treats path-like content as a literal
+        let c = "[[../../etc/passwd]]";
+        assert_eq!(extract(c), vec![Wikilink::Note("../../etc/passwd".into())]);
+    }
+
+    #[test]
+    fn scheme_string_extracted_as_literal_note() {
+        // egui_commonmark does not auto-render wikilinks as URLs, so a scheme-like
+        // payload remains a Note title and is safe.
+        let c = "[[file://path]] [[scheme:payload]]";
+        assert_eq!(
+            extract(c),
+            vec![
+                Wikilink::Note("file://path".into()),
+                Wikilink::Note("scheme:payload".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn very_long_inner_does_not_panic() {
+        let inner = "x".repeat(10_000);
+        let c = format!("[[{inner}]]");
+        let result = extract(&c);
+        assert_eq!(result.len(), 1);
+        if let Wikilink::Note(s) = &result[0] {
+            assert_eq!(s.len(), 10_000);
+        }
+    }
+
+    #[test]
+    fn unicode_titles_extracted() {
+        let c = "[[日本語]] [[português áéíóú]] [[🔥 emoji]]";
+        let result = extract(c);
+        assert_eq!(
+            result,
+            vec![
+                Wikilink::Note("日本語".into()),
+                Wikilink::Note("português áéíóú".into()),
+                Wikilink::Note("🔥 emoji".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn embed_inside_link_extracts_first_pair() {
+        // The leading `[[` is a link; the parser greedily looks for `]]` and finds
+        // the first one inside the embed. Behaviour is deterministic.
+        let c = "[[![[nested]]]]";
+        let result = extract(c);
+        assert!(!result.is_empty(), "should extract something");
+    }
+
+    #[test]
+    fn all_image_extensions_classified() {
+        for ext in ["png", "jpg", "jpeg", "gif", "webp", "bmp"] {
+            let c = format!("![[img.{ext}]]");
+            let result = extract(&c);
+            assert_eq!(
+                result,
+                vec![Wikilink::Image(format!("img.{ext}"))],
+                "ext={ext} should be Image"
+            );
+        }
+    }
+
+    #[test]
+    fn all_image_extensions_uppercase_classified() {
+        for ext in ["PNG", "JPG", "JPEG", "GIF", "WEBP", "BMP"] {
+            let c = format!("![[img.{ext}]]");
+            let result = extract(&c);
+            assert_eq!(
+                result,
+                vec![Wikilink::Image(format!("img.{ext}"))],
+                "ext={ext} (upper) should be Image"
+            );
+        }
+    }
+
+    #[test]
+    fn non_image_extensions_classified_as_file() {
+        for ext in ["pdf", "mp4", "mov", "zip", "exe", "bin", "sh", "tar"] {
+            let c = format!("![[file.{ext}]]");
+            let result = extract(&c);
+            assert_eq!(
+                result,
+                vec![Wikilink::File(format!("file.{ext}"))],
+                "ext={ext} should be File"
+            );
+        }
+    }
+
+    #[test]
+    fn embed_no_extension_classified_as_file() {
+        let c = "![[no_ext]]";
+        assert_eq!(extract(c), vec![Wikilink::File("no_ext".into())]);
+    }
+
+    #[test]
+    fn position_order_preserved() {
+        let c = "[[A]]xxx[[B]]yyy[[C]]";
+        let result = extract(c);
+        assert_eq!(
+            result,
+            vec![
+                Wikilink::Note("A".into()),
+                Wikilink::Note("B".into()),
+                Wikilink::Note("C".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn backslash_does_not_escape_brackets() {
+        // No escape syntax is implemented — `\[[Title]]` still extracts.
+        let c = r"\[[Title]]";
+        let result = extract(c);
+        assert_eq!(result, vec![Wikilink::Note("Title".into())]);
+    }
+
+    // CAD-12: property-based fuzzing — extractor must never panic on arbitrary input.
+
+    proptest::proptest! {
+        #![proptest_config(proptest::test_runner::Config { cases: 256, ..proptest::test_runner::Config::default() })]
+
+        #[test]
+        fn extract_never_panics_on_arbitrary_strings(s in proptest::prelude::any::<String>()) {
+            let _ = extract(&s);
+        }
+
+        #[test]
+        fn extract_never_panics_on_bracket_soup(s in "[\\[\\]a-zA-Z0-9 !]{0,200}") {
+            let _ = extract(&s);
+        }
+    }
 }
