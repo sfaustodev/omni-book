@@ -417,4 +417,367 @@ mod tests {
         assert_eq!(fm.note_type, NoteType::Codigo);
         assert_eq!(body.trim(), "Body.");
     }
+
+    // CAD-12: sanitize_filename adversarial coverage.
+
+    #[test]
+    fn sanitize_strips_path_separators_unix() {
+        let s = sanitize_filename("../../etc/passwd");
+        assert!(!s.contains('/'), "got {s:?}");
+        assert_eq!(s, ".._.._etc_passwd");
+    }
+
+    #[test]
+    fn sanitize_strips_path_separators_windows() {
+        let s = sanitize_filename("..\\..\\windows\\system32");
+        assert!(!s.contains('\\'), "got {s:?}");
+    }
+
+    #[test]
+    fn sanitize_strips_dangerous_punctuation() {
+        let s = sanitize_filename(r#"a/b\c:d*e?f"g<h>i|j"#);
+        assert_eq!(s, "a_b_c_d_e_f_g_h_i_j");
+    }
+
+    #[test]
+    fn sanitize_only_whitespace_becomes_empty() {
+        assert_eq!(sanitize_filename("   "), "");
+        assert_eq!(sanitize_filename("\t\n  "), "");
+    }
+
+    #[test]
+    fn sanitize_preserves_unicode_letters_and_emoji() {
+        assert_eq!(sanitize_filename("日本語"), "日本語");
+        assert_eq!(sanitize_filename("português"), "português");
+        assert_eq!(sanitize_filename("título 🔥"), "título 🔥");
+    }
+
+    #[test]
+    fn sanitize_preserves_zero_width_chars() {
+        // Existing behaviour — zero-width chars survive (gap noted in HUMAN.md Q-05)
+        let zwsp = "\u{200B}";
+        let bom = "\u{FEFF}";
+        let s = sanitize_filename(&format!("foo{zwsp}bar{bom}"));
+        assert!(s.contains(zwsp));
+        assert!(s.contains(bom));
+    }
+
+    #[test]
+    fn sanitize_handles_long_names() {
+        let long = "a".repeat(1024);
+        let s = sanitize_filename(&long);
+        assert_eq!(s.len(), 1024);
+    }
+
+    #[test]
+    fn sanitize_empty_stays_empty() {
+        assert_eq!(sanitize_filename(""), "");
+    }
+
+    // CAD-12: Vault::open edge cases.
+
+    #[test]
+    fn open_creates_missing_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("does_not_exist_yet");
+        let v = Vault::open(nested.clone()).unwrap();
+        assert!(nested.exists());
+        assert!(v.notes.is_empty());
+    }
+
+    #[test]
+    fn open_with_file_root_does_not_panic() {
+        // Documents current behaviour: passing a regular file as root does not error
+        // because internal mkdir attempts use `let _ =`. Vault is constructed with
+        // an empty notes list. Tracked as Q-08 in HUMAN.md.
+        let dir = tempfile::tempdir().unwrap();
+        let file_root = dir.path().join("not_a_dir.txt");
+        fs::write(&file_root, b"x").unwrap();
+        let v = Vault::open(file_root).unwrap();
+        assert!(v.notes.is_empty());
+    }
+
+    // CAD-12: create_note path-traversal containment.
+
+    #[test]
+    fn create_note_with_traversal_title_stays_inside_vault() {
+        let (mut v, _d) = temp_vault();
+        let note = v
+            .create_note(None, "../escape", NoteType::Resumo)
+            .unwrap();
+        let canonical_root = v.root.canonicalize().unwrap();
+        let canonical_note = note.path.canonicalize().unwrap();
+        assert!(
+            canonical_note.starts_with(&canonical_root),
+            "note escaped vault: {} not under {}",
+            canonical_note.display(),
+            canonical_root.display()
+        );
+        assert!(note
+            .path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .contains("escape"));
+    }
+
+    #[test]
+    fn create_note_with_empty_title_uses_default_label() {
+        let (mut v, _d) = temp_vault();
+        let note = v.create_note(None, "", NoteType::Resumo).unwrap();
+        assert_eq!(note.title, "Nova nota");
+    }
+
+    #[test]
+    fn create_note_collision_appends_counter() {
+        let (mut v, _d) = temp_vault();
+        for _ in 0..5 {
+            v.create_note(None, "Foo", NoteType::Resumo).unwrap();
+        }
+        let stems: Vec<String> = v
+            .notes
+            .iter()
+            .map(|n| n.path.file_stem().unwrap().to_string_lossy().to_string())
+            .collect();
+        assert!(stems.contains(&"Foo".to_string()));
+        assert!(stems.contains(&"Foo (1)".to_string()));
+        assert!(stems.contains(&"Foo (4)".to_string()));
+    }
+
+    // CAD-12: rename_note + move_note edges.
+
+    #[test]
+    fn rename_note_to_same_name_is_noop() {
+        let (mut v, _d) = temp_vault();
+        let note = v.create_note(None, "Mesmo", NoteType::Resumo).unwrap();
+        let before = note.path.clone();
+        v.rename_note(0, "Mesmo").unwrap();
+        assert_eq!(v.notes[0].path, before);
+    }
+
+    #[test]
+    fn move_note_by_id_unknown_errors() {
+        let (mut v, _d) = temp_vault();
+        let res = v.move_note_by_id("n_doesnotexist", None);
+        assert!(res.is_err());
+        assert!(res.unwrap_err().contains("not found"));
+    }
+
+    #[test]
+    fn move_note_by_id_to_same_location_is_noop() {
+        let (mut v, _d) = temp_vault();
+        let note = v.create_note(None, "Stay", NoteType::Resumo).unwrap();
+        v.move_note_by_id(&note.frontmatter.id, None).unwrap();
+        assert!(v
+            .notes
+            .iter()
+            .find(|n| n.frontmatter.id == note.frontmatter.id)
+            .unwrap()
+            .path
+            .exists());
+    }
+
+    #[test]
+    fn move_note_creates_target_dir_on_demand() {
+        let (mut v, _d) = temp_vault();
+        let note = v.create_note(None, "X", NoteType::Resumo).unwrap();
+        v.move_note_by_id(&note.frontmatter.id, Some(Path::new("Novo")))
+            .unwrap();
+        assert!(v.root.join("Novo").exists());
+    }
+
+    #[test]
+    fn rename_note_by_id_unknown_errors() {
+        let (mut v, _d) = temp_vault();
+        let res = v.rename_note_by_id("n_nope", "Whatever");
+        assert!(res.is_err());
+    }
+
+    // CAD-12: delete_folder.
+
+    #[test]
+    fn delete_folder_removes_recursively() {
+        let (mut v, _d) = temp_vault();
+        let abs = v.create_folder(None, "Deep").unwrap();
+        let rel = abs.strip_prefix(&v.root).unwrap().to_path_buf();
+        v.create_note(Some(&rel), "Inner", NoteType::Resumo).unwrap();
+        v.delete_folder(&rel).unwrap();
+        assert!(!v.root.join("Deep").exists());
+        assert!(!v.notes.iter().any(|n| n.title == "Inner"));
+    }
+
+    #[test]
+    fn delete_folder_unknown_errors() {
+        let (mut v, _d) = temp_vault();
+        let res = v.delete_folder(Path::new("does_not_exist"));
+        assert!(res.is_err());
+    }
+
+    // CAD-12: import_attachment security surface.
+
+    #[test]
+    fn import_attachment_collision_uses_counter() {
+        let (v, dir) = temp_vault();
+        let src = dir.path().join("src_file.png");
+        fs::write(&src, b"img-bytes").unwrap();
+        let names: Vec<String> = (0..3).map(|_| v.import_attachment(&src).unwrap()).collect();
+        assert_eq!(names[0], "src_file.png");
+        assert!(names[1].starts_with("src_file_") && names[1].ends_with(".png"));
+        assert!(names[2].starts_with("src_file_") && names[2].ends_with(".png"));
+        for n in &names {
+            assert!(v.root.join("_attachments").join(n).exists());
+        }
+    }
+
+    #[test]
+    fn import_attachment_writes_into_attachments_dir() {
+        let (v, dir) = temp_vault();
+        let src = dir.path().join("legit.png");
+        fs::write(&src, b"x").unwrap();
+        let dest_name = v.import_attachment(&src).unwrap();
+        assert_eq!(dest_name, "legit.png");
+        assert!(v.root.join("_attachments/legit.png").exists());
+    }
+
+    #[test]
+    fn import_attachment_when_src_missing_errors() {
+        let (v, dir) = temp_vault();
+        let src = dir.path().join("ghost.bin");
+        let res = v.import_attachment(&src);
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn import_attachment_arbitrary_extension_allowed() {
+        // Documents the gap (Q-07): import_attachment has no extension allow-list.
+        let (v, dir) = temp_vault();
+        let src = dir.path().join("payload.exe");
+        fs::write(&src, b"MZ").unwrap();
+        let name = v.import_attachment(&src).unwrap();
+        assert_eq!(name, "payload.exe");
+    }
+
+    // CAD-12: parse_frontmatter robustness (panic safety).
+
+    #[test]
+    fn parse_frontmatter_no_delimiter_returns_default_and_full_body() {
+        let raw = "no frontmatter here\nat all";
+        let (fm, body) = parse_frontmatter(raw);
+        assert_eq!(fm.id, Frontmatter::default().id);
+        assert_eq!(body, raw);
+    }
+
+    #[test]
+    fn parse_frontmatter_unterminated_returns_default() {
+        let raw = "---\nid: abc\ntitle: foo\n\nbody never delimited";
+        let (fm, body) = parse_frontmatter(raw);
+        assert_eq!(fm.id, "");
+        assert_eq!(body, raw);
+    }
+
+    #[test]
+    fn parse_frontmatter_garbage_yaml_falls_back_without_panic() {
+        let raw = "---\n@@@ }: : :\n---\n\nbody";
+        let (fm, body) = parse_frontmatter(raw);
+        assert_eq!(fm.id, "");
+        assert_eq!(body.trim(), "body");
+    }
+
+    #[test]
+    fn parse_frontmatter_extra_unknown_field_is_ignored() {
+        let raw = "---\nid: ok\naliases: [other-name]\ncustom_field: 42\n---\n\nbody";
+        let (fm, body) = parse_frontmatter(raw);
+        assert_eq!(fm.id, "ok");
+        assert_eq!(body.trim(), "body");
+    }
+
+    #[test]
+    fn parse_frontmatter_deep_nesting_does_not_panic() {
+        let mut yaml = String::from("---\nid: deep\nnested: ");
+        let depth = 50;
+        yaml.push_str(&"[".repeat(depth));
+        yaml.push_str("\"x\"");
+        yaml.push_str(&"]".repeat(depth));
+        yaml.push_str("\n---\n\nbody");
+        let (fm, _body) = parse_frontmatter(&yaml);
+        assert!(fm.id == "deep" || fm.id.is_empty());
+    }
+
+    #[test]
+    fn parse_frontmatter_at_end_of_file_yields_empty_body() {
+        let raw = "---\nid: tail\n---\n";
+        let (fm, body) = parse_frontmatter(raw);
+        assert_eq!(fm.id, "tail");
+        assert!(body.is_empty());
+    }
+
+    #[test]
+    fn parse_frontmatter_obsidian_compat_inline_tags_array() {
+        let raw = "---\nid: obs\ntags: [\"rust\", \"egui\"]\n---\n\nbody";
+        let (fm, _body) = parse_frontmatter(raw);
+        assert_eq!(fm.id, "obs");
+        assert_eq!(fm.tags, vec!["rust", "egui"]);
+    }
+
+    // CAD-12: reload_notes filters .omninote/ and _attachments/.
+
+    #[test]
+    fn reload_notes_skips_internal_dirs() {
+        let (mut v, _d) = temp_vault();
+        fs::write(v.root.join(".omninote/note_inside.md"), "---\nid: x\n---\nbody").unwrap();
+        fs::write(v.root.join("_attachments/note_inside.md"), "---\nid: y\n---\nbody").unwrap();
+        v.create_note(None, "Real", NoteType::Resumo).unwrap();
+        v.reload_notes();
+        assert_eq!(v.notes.len(), 1);
+        assert_eq!(v.notes[0].title, "Real");
+    }
+
+    #[test]
+    fn reload_notes_ignores_non_md_files() {
+        let (mut v, _d) = temp_vault();
+        fs::write(v.root.join("data.json"), "{}").unwrap();
+        fs::write(v.root.join("readme.txt"), "ignore me").unwrap();
+        v.reload_notes();
+        assert_eq!(v.notes.len(), 0);
+    }
+
+    // CAD-12: save_config + AppConfig serde roundtrip via vault.
+
+    #[test]
+    fn save_config_round_trip() {
+        let (mut v, _d) = temp_vault();
+        v.config.dark_mode = true;
+        v.config.font_size = 17.5;
+        v.config.last_active = Some("note-id".to_string());
+        v.save_config().unwrap();
+        let reopened = Vault::open(v.root.clone()).unwrap();
+        assert!(reopened.config.dark_mode);
+        assert!((reopened.config.font_size - 17.5).abs() < f32::EPSILON);
+        assert_eq!(reopened.config.last_active.as_deref(), Some("note-id"));
+    }
+
+    // CAD-12: list_folders excludes internal dirs.
+
+    #[test]
+    fn list_folders_excludes_omninote_and_attachments() {
+        let (mut v, _d) = temp_vault();
+        v.create_folder(None, "Visible").unwrap();
+        let folders: Vec<String> = v
+            .list_folders()
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+        assert!(folders.iter().any(|f| f.contains("Visible")));
+        assert!(!folders.iter().any(|f| f.starts_with(".omninote")));
+        assert!(!folders.iter().any(|f| f.starts_with("_attachments")));
+    }
+
+    // CAD-12: sanitize_filename_pub matches private impl.
+
+    #[test]
+    fn sanitize_filename_pub_matches_private() {
+        for input in ["foo/bar", "x*y?z", "  trim  ", "ok_name"] {
+            assert_eq!(sanitize_filename_pub(input), sanitize_filename(input));
+        }
+    }
 }
