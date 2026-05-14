@@ -44,23 +44,41 @@ cargo build --release
 
 ### Milestones
 
-| # | Phase | Status |
-|---|-------|--------|
-| 1 | Setup deps + CI + sacred files | 🚧 |
-| 2 | vault.rs adversarial | ⏳ |
-| 3 | wikilinks.rs proptest | ⏳ |
-| 4 | autoformat.rs adversarial | ⏳ |
-| 5 | import.rs adversarial | ⏳ |
-| 6 | pdf.rs panic safety | ⏳ |
-| 7 | types.rs serde | ⏳ |
-| 8 | refactor handlers + tests | ⏳ |
-| 9 | docs + MANUAL_TEST_PLAN | ⏳ |
-| 10 | discipline updates | ⏳ |
-| 11 | PR + skills | ⏳ |
+| # | Phase | Status | Tests added |
+|---|-------|--------|-------------|
+| 1 | Setup deps + CI + sacred files | ✅ | — |
+| 2 | vault.rs adversarial | ✅ | +36 |
+| 3 | wikilinks.rs proptest | ✅ | +17 (+2 proptest) |
+| 4 | autoformat.rs adversarial | ✅ | +18 (+2 proptest) |
+| 5 | import.rs adversarial | ✅ | +14 |
+| 6 | pdf.rs panic safety | ✅ | +6 (+1 proptest) |
+| 7 | types.rs serde | ✅ | +12 |
+| 8 | refactor `actions` mod + UI rewiring | ✅ | +30 |
+| 9 | discipline updates | 🚧 | — |
+| 10 | local llvm-cov verify | ✅ | — |
+| 11 | PR + skills | ⏳ | — |
+
+**Final coverage (local, 2026-05-13):**
+
+| File | Lines | Cover |
+|------|-------|-------|
+| actions.rs | 517 | 95.16% |
+| autoformat.rs | 179 | 100.00% |
+| import.rs | 209 | 99.52% |
+| pdf.rs | 98 | 98.98% |
+| types.rs | 151 | 100.00% |
+| vault.rs | 665 | 94.14% |
+| wikilinks.rs | 186 | 98.92% |
+| **TOTAL** | **2005** | **96.61%** |
+
+≥90% gate passes. UI render layer (`ui_*.rs`), eframe glue (`app.rs`),
+watcher (`watcher.rs`) and entry (`main.rs`) excluded — covered by
+[MANUAL_TEST_PLAN.md](MANUAL_TEST_PLAN.md).
 
 ### Next single-step
 
-Phase 1 conclude → start Phase 2 (vault adversarial expansion).
+Open PR `feat: CAD-12 — QA + security coverage hardening`, then run
+`/pre-merge-coverage` + `/codex-cross-review`.
 
 ### Não-objetivos
 

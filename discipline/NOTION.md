@@ -36,7 +36,7 @@
 | CAD-9 | Watcher de filesystem | v0.6 | 🌱 Backlog | 🌿 Baixa | 🐈 M | 5h | [SPECS/CAD-9.md](../SPECS/CAD-9.md) |
 | CAD-10 | Spike: wikilinks clicáveis | v0.4 | 🌱 Backlog | 📌 Média | 🐭 S | 4h | [SPECS/CAD-10.md](../SPECS/CAD-10.md) |
 | CAD-11 | Doc: README cross-platform | v1.0 | 🌱 Backlog | 🌿 Baixa | 🐭 S | 2h | [SPECS/CAD-11.md](../SPECS/CAD-11.md) |
-| CAD-12 | QA + security coverage hardening | n/a | 🚧 Em obra | ⚡ Alta | 🐎 L | 10h | branch `feat/cad-12-test-coverage` |
+| CAD-12 | QA + security coverage hardening | n/a | 👀 Revisão | ⚡ Alta | 🐎 L | 10h | branch `feat/cad-12-test-coverage` (96.61% pure-module coverage) |
 
 ---
 

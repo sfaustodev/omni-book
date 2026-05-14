@@ -77,13 +77,7 @@ jobs:
       - name: Run coverage gate
         run: |
           cargo llvm-cov --lcov --output-path lcov.info \
-            --include-files 'src/vault.rs' \
-            --include-files 'src/wikilinks.rs' \
-            --include-files 'src/autoformat.rs' \
-            --include-files 'src/import.rs' \
-            --include-files 'src/pdf.rs' \
-            --include-files 'src/types.rs' \
-            --include-files 'src/app.rs' \
+            --ignore-filename-regex 'src/(ui_|main\.rs|watcher|theme|app\.rs)' \
             --fail-under-lines 90
       - name: Upload lcov artifact
         if: always()

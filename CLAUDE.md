@@ -19,19 +19,21 @@ cargo test import::          # run only import tests
 
 # Coverage gate (pure modules ≥90% — CAD-12).
 # One-time install: cargo install cargo-llvm-cov --locked
-cargo llvm-cov --html \
-  --include-files src/vault.rs --include-files src/wikilinks.rs \
-  --include-files src/autoformat.rs --include-files src/import.rs \
-  --include-files src/pdf.rs --include-files src/types.rs --include-files src/app.rs
+# (also: rustup component add llvm-tools-preview)
+cargo llvm-cov --html --ignore-filename-regex 'src/(ui_|main\.rs|watcher|theme|app\.rs)'
 open target/llvm-cov/html/index.html      # visual report
 
 cargo llvm-cov --fail-under-lines 90 \
-  --include-files 'src/vault.rs' --include-files 'src/wikilinks.rs' \
-  --include-files 'src/autoformat.rs' --include-files 'src/import.rs' \
-  --include-files 'src/pdf.rs' --include-files 'src/types.rs' --include-files 'src/app.rs'
+  --ignore-filename-regex 'src/(ui_|main\.rs|watcher|theme|app\.rs)'
 ```
 
-UI render layer (`ui_*.rs`) is intentionally excluded — covered by [discipline/MANUAL_TEST_PLAN.md](discipline/MANUAL_TEST_PLAN.md) human checklist.
+UI render layer (`ui_*.rs`), the eframe glue (`app.rs`), the watcher
+(`watcher.rs`) and the entry point (`main.rs`) are intentionally
+excluded from the gate — all of those need an `eframe::CreationContext`
+or an OS event loop to exercise. They are covered by
+[discipline/MANUAL_TEST_PLAN.md](discipline/MANUAL_TEST_PLAN.md) human
+checklist; their business logic was extracted into `src/actions.rs`
+which IS in the gate.
 
 For macOS `.app` bundle: `cargo install cargo-bundle && cargo bundle --release`
 
