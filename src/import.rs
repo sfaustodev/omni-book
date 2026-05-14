@@ -122,4 +122,139 @@ mod tests {
         let f = tmp_file(md, ".md");
         assert_eq!(import_claude_artifact(f.path()).unwrap(), md);
     }
+
+    // CAD-12: adversarial JSON + multimodal + extension matrix.
+
+    #[test]
+    fn malformed_json_errors_without_panic() {
+        for raw in ["{", "}", "[[", "{\"a\":}", "\0\0\0", "not json at all"] {
+            let f = tmp_file(raw, ".json");
+            let res = import_claude_chat(f.path());
+            assert!(res.is_err(), "expected err for {raw:?}");
+        }
+    }
+
+    #[test]
+    fn deeply_nested_json_does_not_panic() {
+        // serde_json has internal recursion limits; ensure no stack overflow / panic
+        let depth = 200;
+        let mut raw = String::new();
+        raw.push_str(&"[".repeat(depth));
+        raw.push('1');
+        raw.push_str(&"]".repeat(depth));
+        let f = tmp_file(&raw, ".json");
+        let _ = import_claude_chat(f.path());
+    }
+
+    #[test]
+    fn json_missing_messages_errors() {
+        let f = tmp_file(r#"{"name":"X"}"#, ".json");
+        let res = import_claude_chat(f.path());
+        assert!(res.is_err());
+        assert!(res.unwrap_err().contains("formato de chat não reconhecido"));
+    }
+
+    #[test]
+    fn json_unknown_role_label_falls_back() {
+        let raw = r#"{"chat_messages":[{"sender":"alien","text":"hi"}]}"#;
+        let f = tmp_file(raw, ".json");
+        let out = import_claude_chat(f.path()).unwrap();
+        assert!(out.contains("**?:**"));
+        assert!(out.contains("hi"));
+    }
+
+    #[test]
+    fn json_multimodal_content_array_concats_text_only() {
+        let raw = r#"{"chat_messages":[{"sender":"assistant","content":[{"text":"a"},{"image":"x"},{"text":"b"}]}]}"#;
+        let f = tmp_file(raw, ".json");
+        let out = import_claude_chat(f.path()).unwrap();
+        assert!(out.contains("a\nb"), "got {out:?}");
+    }
+
+    #[test]
+    fn json_content_string_form_used() {
+        let raw = r#"{"messages":[{"role":"user","content":"plain string"}]}"#;
+        let f = tmp_file(raw, ".json");
+        let out = import_claude_chat(f.path()).unwrap();
+        assert!(out.contains("plain string"));
+        assert!(out.contains("**Você:**"));
+    }
+
+    #[test]
+    fn json_content_missing_yields_empty_block() {
+        let raw = r#"{"chat_messages":[{"sender":"human"}]}"#;
+        let f = tmp_file(raw, ".json");
+        let out = import_claude_chat(f.path()).unwrap();
+        // Block exists with **Você:** label even with no content
+        assert!(out.contains("**Você:**"));
+    }
+
+    #[test]
+    fn json_no_name_omits_h1_heading() {
+        let raw = r#"{"chat_messages":[{"sender":"human","text":"oi"}]}"#;
+        let f = tmp_file(raw, ".json");
+        let out = import_claude_chat(f.path()).unwrap();
+        assert!(!out.starts_with("# "), "got {out:?}");
+    }
+
+    #[test]
+    fn json_text_with_separator_collision_passes_through() {
+        // The output uses `\\n---\\n\\n` between blocks. If user text contains `---` itself,
+        // current impl does not escape — verify it just passes through (documented gap).
+        let raw = r#"{"chat_messages":[{"sender":"human","text":"start\n---\nend"}]}"#;
+        let f = tmp_file(raw, ".json");
+        let out = import_claude_chat(f.path()).unwrap();
+        assert!(out.contains("start"));
+        assert!(out.contains("end"));
+    }
+
+    #[test]
+    fn import_chat_missing_file_errors() {
+        let res = import_claude_chat(std::path::Path::new("/tmp/does_not_exist_omninote_xyz.json"));
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn import_chat_zero_byte_file_errors() {
+        let f = tmp_file("", ".json");
+        let res = import_claude_chat(f.path());
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn artifact_extension_matrix_classification() {
+        for (ext, expected_lang) in [
+            ("tsx", "tsx"),
+            ("jsx", "tsx"),
+            ("ts", "typescript"),
+            ("js", "javascript"),
+            ("py", "python"),
+            ("rs", "rust"),
+            ("html", "html"),
+        ] {
+            let f = tmp_file("src", &format!(".{ext}"));
+            let out = import_claude_artifact(f.path()).unwrap();
+            let fence = format!("```{expected_lang}");
+            assert!(
+                out.contains(&fence),
+                "ext={ext}: missing fence {fence:?} in {out:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn artifact_unknown_extension_uses_extension_as_lang() {
+        let f = tmp_file("data", ".xyz");
+        let out = import_claude_artifact(f.path()).unwrap();
+        assert!(out.contains("```xyz"));
+    }
+
+    #[test]
+    fn artifact_with_triple_backticks_in_source_passes_through() {
+        // Documents collision gap — input with ``` is not escaped before being wrapped
+        // in the output fence. Markdown viewer may or may not render correctly.
+        let f = tmp_file("```inner```", ".rs");
+        let out = import_claude_artifact(f.path()).unwrap();
+        assert!(out.contains("```inner```"));
+    }
 }
