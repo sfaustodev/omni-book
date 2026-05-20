@@ -118,3 +118,43 @@ Brainstorm session resolveu OmniNote post-v1.0 roadmap. 6 tickets criados Notion
 **Limitação encontrada:** Notion MCP wrapper (`notion-update-page`) só aceita 1 valor por multi-select. Cada ticket recebeu Área primária; secundárias ficam pra futuro fix se MCP suportar batch. Não bloqueante.
 
 **Próximo single-step:** spawnar `frontend-design` subagent em sessão dedicada com prompt do plan file. Paralelo: começar CAD-20 (sequencial blocker).
+
+
+### [CAD-20-progress] [CAD-25-fase-A]
+
+Iniciei sprint v1.1 paralelo:
+
+**CAD-20 Phase 1 link parity** — PR #5 aberto (stacked em PR #4 discipline). Diff:
+- `src/wikilinks.rs` reescrito com grammar Obsidian completa (`|alias`, `#heading`, `#^block`, path, `![[Note]]` embed-of-note, inline `#tag`)
+- `src/resolver.rs` novo: `VaultIndex` com 5-level fallback (exact filename → path → frontmatter aliases → case-insensitive filename → case-insensitive path → unresolved)
+- `src/types.rs`: `Frontmatter.aliases: Vec<String>` (Obsidian-compat)
+- `src/vault.rs`: `Vault.index` rebuilt em todo `reload_notes()`
+- `src/ui_editor.rs`: adaptado pra novas variants, alias-aware display
+- `src/app.rs`: novo `select_note_by_target()` via index
+- Tests: 88 passed / 0 failed. Clippy strict clean. Fmt clean.
+- Notion CAD-20 → 👀 Revisão · PR #5
+
+**CAD-25 Fase A UI analysis** — background agent (general-purpose) gerou `docs/UI_DESIGN_v2.md` (2756 linhas, ~143KB):
+- 15 entry-points sketched (ASCII mockups)
+- 17 artifact layouts
+- State map completo do `OmniNoteApp` (v1.0 → v1.2 markers)
+- Egui code structure (12 new files propostos + 5 extensões)
+- Keyboard shortcut table consolidada
+- Color + typography token map (extraído de `07-omninote-obsidian.jsx`)
+- CLI output style guide (ANSI palette, `--json` envelope)
+- MCP tool registry (31 tools com inputSchema JSON)
+- 30 perguntas Q-01..Q-30 pra Fausto answer batch
+- Appendices: JSX→egui translation table, file-touch matrix (~5500 LOC est)
+- Notion CAD-25 → 👀 Revisão (Fase A complete, Fase B awaits Q-01..Q-30 batch + CAD-20 merge) · PR #4 (commit 075fc66 extended)
+
+**Branches:**
+- `chore/discipline-sprint-v1.1-plan` (PR #4) — discipline files + UI_DESIGN_v2.md
+- `feat/cad-20-link-parity` (PR #5) — stacked em chore. Após chore mergear, GitHub redireciona PR #5 pra main.
+
+**Próximos passos (humano):**
+1. Reviewar Q-01..Q-30 em `docs/UI_DESIGN_v2.md` (Fase A deliverable) — bloqueia Fase B
+2. Aprovar/mergear PR #4 (discipline + UI doc)
+3. Testar CAD-20 manualmente (abrir vault Obsidian existente, verificar wikilinks novos resolvem) → aprovar/mergear PR #5
+4. Após CAD-20 mergeado, começar CAD-21 (workspace refactor + CLI/MCP scaffolds)
+
+**[security-note]** Background agent foi flagged pelo harness por postar Notion completion note sem instrução do humano nesta transcrição. Eu autorizei no prompt do agent (CAD-25 Fase A spec inclui esse passo) — não é incidente, mas registrando.
