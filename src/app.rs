@@ -236,6 +236,31 @@ impl OmniNoteApp {
             self.select_note(&id);
             true
         } else {
+            // CAD-20: fall back to wikilink resolver (handles aliases, paths,
+            // case-insensitive matching). `title` here may actually be a full
+            // wikilink target like "folder/Note" or a frontmatter alias.
+            self.select_note_by_target(title)
+        }
+    }
+
+    /// Resolve a wikilink target through the [`crate::resolver::VaultIndex`]
+    /// (filename / path / alias / case-insensitive) and select the resulting
+    /// note. Returns true if resolved + selected, false if unresolved. CAD-20.
+    pub fn select_note_by_target(&mut self, target: &str) -> bool {
+        let rel_path = match self.vault.as_ref().and_then(|v| v.index.resolve(target)) {
+            Some(p) => p.clone(),
+            None => return false,
+        };
+        let id = self.vault.as_ref().and_then(|v| {
+            v.notes
+                .iter()
+                .find(|n| n.rel_path == rel_path)
+                .map(|n| n.frontmatter.id.clone())
+        });
+        if let Some(id) = id {
+            self.select_note(&id);
+            true
+        } else {
             false
         }
     }

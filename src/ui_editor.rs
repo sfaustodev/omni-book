@@ -346,53 +346,61 @@ impl OmniNoteApp {
 
     /// Render wikilinks (`[[Title]]`) as clickable links and embeds (`![[file]]`)
     /// as inline images (for image extensions) or open buttons (for other files).
+    ///
+    /// CAD-20: handles new grammar with aliases (`[[A|label]]`), anchors
+    /// (`[[A#H]]` / `[[A#^id]]`), path-based targets (`[[folder/A]]`), and
+    /// note-embed (`![[A]]`). Display uses alias if provided, otherwise target.
     fn render_wikilinks(&mut self, ui: &mut egui::Ui, wikis: &[crate::wikilinks::Wikilink]) {
         use crate::wikilinks::Wikilink;
         use std::collections::HashSet;
 
-        // Dedupe by display key while preserving order
+        // Dedupe by display key while preserving order. Notes and note-embeds
+        // are surfaced together — both navigate to the same target.
         let mut seen: HashSet<String> = HashSet::new();
-        let mut notes: Vec<String> = Vec::new();
+        // (display_label, target_to_resolve)
+        let mut notes: Vec<(String, String)> = Vec::new();
         let mut images: Vec<String> = Vec::new();
         let mut files: Vec<String> = Vec::new();
         for w in wikis {
             let key = match w {
-                Wikilink::Note(t) => format!("n:{}", t),
-                Wikilink::Image(f) => format!("i:{}", f),
-                Wikilink::File(f) => format!("f:{}", f),
+                Wikilink::Note(r) | Wikilink::NoteEmbed(r) => format!("n:{}", r.target),
+                Wikilink::Image(e) => format!("i:{}", e.path),
+                Wikilink::File(e) => format!("f:{}", e.path),
             };
             if !seen.insert(key) {
                 continue;
             }
             match w {
-                Wikilink::Note(t) => notes.push(t.clone()),
-                Wikilink::Image(f) => images.push(f.clone()),
-                Wikilink::File(f) => files.push(f.clone()),
+                Wikilink::Note(r) | Wikilink::NoteEmbed(r) => {
+                    let label = r.alias.clone().unwrap_or_else(|| r.target.clone());
+                    notes.push((label, r.target.clone()));
+                }
+                Wikilink::Image(e) => images.push(e.path.clone()),
+                Wikilink::File(e) => files.push(e.path.clone()),
             }
         }
 
-        // Notes referenciadas
+        // Notes referenciadas (CAD-20: resolves via VaultIndex)
         if !notes.is_empty() {
             ui.collapsing(format!("🔗 Notas referenciadas ({})", notes.len()), |ui| {
                 let mut pending_select: Option<String> = None;
                 let mut pending_create: Option<String> = None;
-                for title in &notes {
-                    let exists = self
+                for (label, target) in &notes {
+                    let resolved = self
                         .vault
                         .as_ref()
-                        .map(|v| v.notes.iter().any(|n| n.title.eq_ignore_ascii_case(title)))
-                        .unwrap_or(false);
+                        .and_then(|v| v.index.resolve(target).cloned());
 
                     ui.horizontal(|ui| {
-                        if exists {
-                            if ui.link(format!("→ {}", title)).clicked() {
-                                pending_select = Some(title.clone());
+                        if resolved.is_some() {
+                            if ui.link(format!("→ {}", label)).clicked() {
+                                pending_select = Some(target.clone());
                             }
                         } else {
-                            ui.label(egui::RichText::new(format!("⚠ {}", title)).weak().italics())
-                                .on_hover_text("Nota não existe ainda");
+                            ui.label(egui::RichText::new(format!("⚠ {}", label)).weak().italics())
+                                .on_hover_text(format!("Link não resolve: {target}"));
                             if ui.small_button("➕ criar").clicked() {
-                                pending_create = Some(title.clone());
+                                pending_create = Some(target.clone());
                             }
                         }
                     });
