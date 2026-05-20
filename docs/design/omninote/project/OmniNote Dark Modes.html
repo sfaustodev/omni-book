@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<title>OmniNote — Dark Mode Explorations</title>
+<style>
+  html, body { margin: 0; background: #0a0a0a; font-family: 'Inter', -apple-system, sans-serif; color: #fff; }
+  * { box-sizing: border-box; }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="styles/01-brutalist.jsx"></script>
+<script type="text/babel" src="styles/02-neumorphic.jsx"></script>
+<script type="text/babel" src="styles/03-aurora.jsx"></script>
+<script type="text/babel" src="styles/04-editorial.jsx"></script>
+<script type="text/babel" src="styles/05-cyberpunk.jsx"></script>
+<script type="text/babel" src="styles/06-swiss.jsx"></script>
+
+<script type="text/babel">
+const W = 1280, H = 760;
+
+const App = () => (
+  <DesignCanvas title="OmniNote — Dark Mode · 6 escolas de design" subtitle="Variações originais para um app de notas markdown. Arraste para reordenar. Dois cliques para focar.">
+    <DCSection id="brutalist" title="01 — Brutalist Terminal" subtitle="TUI/CLI · monospace · ASCII chrome · denso e funcional">
+      <DCArtboard id="ab-brutalist" label="Brutalist Terminal" width={W} height={H}>
+        <Brutalist />
+      </DCArtboard>
+    </DCSection>
+
+    <DCSection id="neumorphic" title="02 — Soft Neumorphic" subtitle="superfícies elevadas · sombras macias · cantos arredondados · calmo">
+      <DCArtboard id="ab-neumorphic" label="Soft Neumorphic" width={W} height={H}>
+        <Neumorphic />
+      </DCArtboard>
+    </DCSection>
+
+    <DCSection id="aurora" title="03 — Glassmorphism / Aurora" subtitle="vidro fosco · gradientes · neon suave · moderno">
+      <DCArtboard id="ab-aurora" label="Glass Aurora" width={W} height={H}>
+        <Aurora />
+      </DCArtboard>
+    </DCSection>
+
+    <DCSection id="editorial" title="04 — Editorial Serif" subtitle="revista · serifa generosa · drop cap · ritmo lento">
+      <DCArtboard id="ab-editorial" label="Editorial Serif" width={W} height={H}>
+        <Editorial />
+      </DCArtboard>
+    </DCSection>
+
+    <DCSection id="cyber" title="05 — Cyberpunk / Synthwave" subtitle="neon · scanlines · grid · alta voltagem">
+      <DCArtboard id="ab-cyber" label="Cyberpunk" width={W} height={H}>
+        <Cyberpunk />
+      </DCArtboard>
+    </DCSection>
+
+    <DCSection id="swiss" title="06 — Swiss / Bauhaus" subtitle="grid rigoroso · grotesk · um acento · whitespace generoso">
+      <DCArtboard id="ab-swiss" label="Swiss Minimal" width={W} height={H}>
+        <Swiss />
+      </DCArtboard>
+    </DCSection>
+  </DesignCanvas>
+);
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

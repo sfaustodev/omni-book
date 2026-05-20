@@ -81,3 +81,40 @@ SPECS/*.md (10 novos)
 - Após confirmação ("testado, pode fechar"), mergear feat/omninote-v01 → main, mover CAD-2..CAD-8 pra `✅ Concluída` no Notion via MCP
 - Verificar CI rodou no GitHub Actions
 - Próxima fase: CAD-10 (Spike wikilinks v0.4)
+
+
+## 2026-05-20 — sprint planning v1.1+ roadmap
+
+### [sprint-plan]
+
+Brainstorm session resolveu OmniNote post-v1.0 roadmap. 6 tickets criados Notion (CAD-20..CAD-25), 3 sprints de 2 semanas, parallel work mapped.
+
+**Tickets criados:**
+- CAD-20 Phase 1 link parity (16h, ⚡, 🎯 Pronta) — blocker
+- CAD-21 Phase 2 workspace+CLI+MCP (24h, ⚡) — depende CAD-20
+- CAD-22 Phase 3 discipline CLI+MCP (18h, ⚡) — depende CAD-21
+- CAD-23 Phase 4 AI-native vault (40h, ⚡) — depende CAD-21
+- CAD-24 Phase 5 power automation (20h, 📌) — depende CAD-21
+- CAD-25 UI Design v2 egui (30h, ⚡, 🎯 Pronta Fase A) — paralelo
+
+**Sprints:**
+- v1.1 (2026-05-20 → 2026-06-03): CAD-20 + CAD-21 + CAD-25 Fase A
+- v1.2 (2026-06-03 → 2026-06-17): CAD-22 ⟂ CAD-25 Fase B
+- v1.3 (2026-06-17 → 2026-07-01): CAD-23 ⟂ CAD-24
+
+**Files atualizados:**
+- `discipline/SPRINT.md` reescrito (v1.1 goal + dependency graph + parallel strategy)
+- `discipline/NOTION.md` extended (new section "Sprint v1.1+")
+- `discipline/PLAN.md` appended (sprint-2026-05-20-batch entry)
+- `SPECS/CAD-20.md` a `CAD-25.md` criados
+- `docs/design/omninote/` (handoff bundle Claude Design — 14 files, 354KB)
+
+**Plano-fonte:** `~/.claude/plans/greedy-napping-castle.md`
+
+**Hard rule nova (§0 #11):** `omninote-core` única source of truth de vault ops, consumida via direct fn calls por GUI/CLI/MCP. Zero duplicação.
+
+**Decisão arquitetural:** OmniNote ship MCP próprio (`omninote-mcp` crate via `rmcp`) a partir v1.1, deprecando filesystem MCP externo como recomendação default.
+
+**Limitação encontrada:** Notion MCP wrapper (`notion-update-page`) só aceita 1 valor por multi-select. Cada ticket recebeu Área primária; secundárias ficam pra futuro fix se MCP suportar batch. Não bloqueante.
+
+**Próximo single-step:** spawnar `frontend-design` subagent em sessão dedicada com prompt do plan file. Paralelo: começar CAD-20 (sequencial blocker).

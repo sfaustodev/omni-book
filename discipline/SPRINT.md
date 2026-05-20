@@ -1,8 +1,9 @@
-# SPRINT — OmniNote v0.1 → v0.3
+# SPRINT — OmniNote v1.1 (Foundation)
 
-> **Sprint goal:** entregar OmniNote utilizável end-to-end — sidebar com tree, editor markdown com auto-save, modais (nova nota / importar / settings / confirm), atalhos globais, import de PDF + chats Claude.
-> **Sprint window:** 2026-04-28 → 2026-05-09 (1 sprint × 2 semanas)
+> **Sprint goal:** entregar (a) link parity com Obsidian — abre vault Obsidian e zero unresolved, (b) Cargo workspace com `omninote-core` + `omninote-cli` + `omninote-mcp` rodando, (c) análise UI Design v2 pronta pra implementação na próxima sprint.
+> **Sprint window:** 2026-05-20 → 2026-06-03 (2 semanas)
 > **Tracker:** [Notion · 🚢 Caderno de Bordo](https://app.notion.com/p/35373ac79ddb81fa96bcdb9991425508) — ver [NOTION.md](NOTION.md) pro índice local.
+> **Plano de origem:** `~/.claude/plans/greedy-napping-castle.md`
 
 ---
 
@@ -12,35 +13,65 @@
 2. **`.omninote/` (não `.obsidian/`).** Coexistência com Obsidian no mesmo vault sem conflito.
 3. **Frontmatter YAML compatível com Obsidian.** Nunca quebrar o parser do Obsidian — testar em vault compartilhado se houver dúvida.
 4. **`linked_note` por ID, não por path.** Sobrevive a renomear/mover.
-5. **Sem servidor MCP próprio.** O vault é só um folder de `.md` — qualquer MCP filesystem oficial lê/escreve.
-6. **Nunca commitar `.omninote/` ou `_attachments/` de vaults reais.** São dados do usuário, não do projeto.
-7. **`from_id_salt` (não `from_id_source`).** API renomeada em egui 0.29 — usar a nova consistentemente.
-8. **`active_note: Option<Note>` clonado.** Nunca usar `active_idx: usize` — índices invalidam em mutação.
+5. **OmniNote-MCP é PRÓPRIO (não filesystem genérico).** A partir da v1.1 OmniNote ship seu próprio MCP server (`omninote-mcp` crate, `rmcp`). Filesystem MCP externo deixa de ser a recomendação.
+6. **Nunca commitar `.omninote/` ou `_attachments/` de vaults reais.** Dados do usuário, não do projeto.
+7. **`from_id_salt` (não `from_id_source`).** API egui 0.29.
+8. **`active_note: Option<Note>` clonado.** Nunca `active_idx: usize` — índices invalidam em mutação.
 9. **CommonMarkCache em `OmniNoteApp.md_cache`.** Nunca recriar por frame.
-10. **Tests inline (`#[cfg(test)]`).** Não criar `tests/` dir até `lib.rs` existir.
+10. **Tests inline (`#[cfg(test)]`).** Workspace refactor (CAD-21) pode introduzir `tests/` per crate quando necessário.
+11. **Workspace core = `omninote-core` é a única source of truth de vault ops.** GUI, CLI e MCP consomem via direct fn calls. Zero duplicação de lógica.
 
 ---
 
-## §1 — Ordered task list (atual)
+## §1 — Sprint v1.1 (atual): Foundation
 
-| # | ID | Tarefa | Fase | Status | Prio | Notas |
-|---|------|--------|------|--------|------|-------|
-| 1 | CAD-6 | Bug `from_id_source` → `from_id_salt` | v0.1 | ✅ | 🔥 | Resolvido no rebase pra 0.29 |
-| 2 | CAD-2 | Sidebar com árvore de pastas e busca | v0.1 | 👀 | ⚡ | feat/omninote-v01 — pendente teste humano |
-| 3 | CAD-3 | Painel central modo Ler/Editar | v0.1 | 👀 | ⚡ | feat/omninote-v01 — pendente teste humano |
-| 4 | CAD-4 | Auto-save 600ms debounce | v0.1 | 👀 | 📌 | feat/omninote-v01 — pendente teste humano |
-| 5 | CAD-5 | Atalhos globais (Ctrl+N/E/K/,) | v0.1 | 👀 | 📌 | feat/omninote-v01 — pendente teste humano |
-| 6 | CAD-7 | Modal Nova Nota grid 2×3 | v0.2 | 👀 | 📌 | feat/omninote-v01 — pendente teste humano |
-| 7 | CAD-8 | Modal Importar (PDF/JSON/Artefato) | v0.3 | 👀 | 📌 | feat/omninote-v01 — pendente teste humano |
-| 8 | — | CI pipeline (lint/test/build/audit) | v0.1 | 👀 | 📌 | feat/omninote-v01 — pendente run remoto |
+| # | ID | Tarefa | Status | Prio | Estimativa | Notas |
+|---|------|--------|--------|------|------------|-------|
+| 1 | CAD-20 | Phase 1 — Obsidian link parity | 🎯 Pronta | ⚡ | 16h | bloqueia tudo. Sequential. |
+| 2 | CAD-21 | Phase 2 — Workspace refactor + CLI + MCP | 🌱 Backlog | ⚡ | 24h | depende CAD-20 done |
+| 3 | CAD-25 (Fase A) | UI Design v2 — análise + plano de port | 🎯 Pronta | ⚡ | ~8h | **PARALELO** com CAD-20/21 (só leitura + doc) |
 
-**Backlog próximo (próximo sprint):**
+### Dependency graph
 
-| ID | Tarefa | Fase | Prio | Estimativa |
-|------|--------|------|------|------------|
-| CAD-10 | Spike: wikilinks clicáveis | v0.4 | 📌 | 4h |
-| CAD-9 | Watcher de filesystem (notify) | v0.6 | 🌿 | 5h |
-| CAD-11 | README cross-platform + MCP | v1.0 | 🌿 | 2h |
+```
+CAD-20 (link parity)
+  └─→ CAD-21 (workspace refactor) ──→ Sprint v1.2 + v1.3
+       └─→ CAD-25 Fase B (UI implementation, Sprint v1.2)
+
+CAD-25 Fase A (análise) ⟂ paralelo com tudo (read-only mockups + escrita de docs)
+```
+
+### Parallel work strategy
+
+- **Solo dev (Fausto):** atacar CAD-20 primeiro (foundation), CAD-25 Fase A em paralelo nas pausas (análise não bloqueia código)
+- **Múltiplos agentes:** CAD-20 + CAD-25 Fase A em paralelo (sem conflito de arquivos — CAD-20 toca `src/wikilinks.rs`+`vault.rs`+`resolver.rs`+`ui_editor.rs`, CAD-25 Fase A só escreve em `docs/UI_DESIGN_v2.md`)
+- CAD-21 começa só depois de CAD-20 mergeado (refactor toca os mesmos files)
+
+---
+
+## §1.5 — Backlog Sprint v1.2 (2026-06-03 → 2026-06-17)
+
+Sprint goal: discipline CLI/MCP + UI core implementation.
+
+| ID | Tarefa | Status | Prio | Est | Depende |
+|------|--------|--------|------|-----|---------|
+| CAD-22 | Phase 3 — Daily/Templates/Discipline CLI+MCP | 🌱 Backlog | ⚡ | 18h | CAD-21 |
+| CAD-25 (Fase B) | UI Design v2 — implementação egui | 🌱 Backlog | ⚡ | ~22h | CAD-20 + análise CAD-25A |
+
+Parallel: CAD-22 ⟂ CAD-25 Fase B (touchpoint mínimo — CAD-22 mexe em `omninote-core`/CLI, CAD-25 mexe em `omninote-gui/src/ui_*.rs`)
+
+---
+
+## §1.6 — Backlog Sprint v1.3 (2026-06-17 → 2026-07-01)
+
+Sprint goal: AI-native + power automation.
+
+| ID | Tarefa | Status | Prio | Est | Depende |
+|------|--------|--------|------|-----|---------|
+| CAD-23 | Phase 4 — AI-native vault | 🌱 Backlog | ⚡ | 40h | CAD-21 |
+| CAD-24 | Phase 5 — Power automation | 🌱 Backlog | 📌 | 20h | CAD-21 |
+
+Parallel: CAD-23 ⟂ CAD-24 (CAD-23 = nova crate `omninote-ai` ou feature flag, CAD-24 = nova bin `omninote-capture` + extensões CLI; arquivos disjuntos)
 
 ---
 
@@ -48,53 +79,62 @@
 
 Pra cada CAD-XX considerar pronto somente após:
 
-1. Código compila sem warnings (`cargo build`)
-2. `cargo clippy --all-targets -- -D warnings` passa
-3. Tests aplicáveis passam (`cargo test`)
-4. **Humano testou em macOS local e confirmou no chat** ("testado, pode fechar")
-5. Notion task movida pra `✅ Concluída` via MCP
-6. `JIRA.md` (aqui: NOTION.md) atualizado com status final
+1. Código compila sem warnings (`cargo build --workspace`)
+2. `cargo clippy --workspace --all-targets -- -D warnings` passa
+3. Tests aplicáveis passam (`cargo test --workspace`)
+4. Coverage ≥90% nos módulos pure (`omninote-core`) via `cargo llvm-cov`
+5. **Humano testou em macOS local e confirmou no chat** ("testado, pode fechar")
+6. Notion task movida pra `✅ Concluída` via MCP
+7. `NOTION.md` atualizado com status final
+8. Entrada em `DIARY.md` com label `[CAD-XX done]`
 
 ---
 
 ## §3 — Branch strategy
 
 - `main` — protegida; recebe merge de feat branches via PR
-- `feat/omninote-vXX` — uma branch por fase (v0.1, v0.2, v0.3)
-- Bugs descobertos em testes do humano = commits adicionais na **mesma** branch da feature, não SCRUM novo
-- Discipline files (SPRINT/DIARY/HUMAN/NOTION/SPECS) **vivem em main** — atualizadas a cada sessão
+- `feat/cad-XX-slug` — uma branch por ticket (não mais por fase)
+- Branches stacked permitidas: CAD-21 sai de CAD-20 antes de CAD-20 mergear (refactor depende de novos files); PR de CAD-21 → CAD-20 até CAD-20 mergear, depois rebase pra main
+- Bugs descobertos em testes humano = commits adicionais na **mesma** branch
+- Discipline files (SPRINT/DIARY/HUMAN/NOTION/PLAN/SPECS) vivem em main, atualizadas a cada sessão
 
 ---
 
-## §4 — PR-first workflow (não merge direto pra main)
+## §4 — PR-first workflow
 
-**Regra:** toda feature/fix branch fecha por PR no GitHub, nunca por `git merge` local pra main. Fausto quer revisar diff no GitHub UI pra aprender a code review.
+**Regra:** toda feature/fix fecha por PR no GitHub, nunca por `git merge` local pra main.
 
 **Fluxo:**
 
-1. Criar branch off main: `git checkout -b feat/<scope> main`
-2. Commitar trabalho atomicamente (1 commit por mudança lógica)
-3. Push: `git push -u origin <branch>`
-4. Abrir PR via `gh pr create --base main --head <branch> --title "..." --body "..."`
-   - Title: 1 linha imperativa (ex.: `feat(theme): apply Swiss/Bauhaus dark design`)
-   - Body em pt-BR com seções: **Resumo**, **Mudanças**, **Como testar**, **Riscos**
-5. Aguardar Fausto revisar + mergear no UI ("Merge pull request" → squash ou normal)
-6. Após merge, atualizar local: `git checkout main && git pull && git branch -d <branch>`
+1. `git checkout -b feat/cad-XX-slug main`
+2. Commitar atomicamente (1 commit por mudança lógica)
+3. `git push -u origin <branch>`
+4. `gh pr create --base main --head <branch> --title "..." --body "..."`
+   - Title: 1 linha imperativa (`feat(wikilinks): support [[Note|Alias]] and #heading anchors`)
+   - Body em pt-BR: **Resumo**, **Mudanças**, **Como testar**, **Riscos**, **Closes #CAD-XX**
+5. Aguardar review (Fausto solo-dev: auto-merge OK quando CI verde — memory rule `feedback_auto_merge_when_ci_green`)
+6. Pós-merge: `git checkout main && git pull && git branch -d <branch>`
 
-**Branches stacked (B saiu de A antes de A mergear):**
+**Stacked branches (CAD-21 stacked em CAD-20):**
 
-- PR de A → main primeiro
-- PR de B → A (não → main) pra diff isolado
-- Após A mergear em main, GitHub auto-atualiza o PR B pra apontar pra main
+- PR CAD-20 → main primeiro
+- PR CAD-21 → CAD-20 (não → main) pra diff isolado
+- Após CAD-20 mergear, GitHub auto-atualiza PR CAD-21 pra main
 
 **Quando NÃO fazer PR:**
 
-- Mudanças apenas em discipline files (SPRINT/DIARY/HUMAN/NOTION/SPECS) → commit direto em main
-- Hotfix crítico em produção (não aplica ainda — sem prod)
+- Mudanças apenas em discipline files (SPRINT/DIARY/HUMAN/NOTION/SPECS/PLAN) → commit direto em main
 
-**Por que:**
+---
 
-- Fausto está aprendendo code review sistemático
-- PR cria audit trail GitHub (CI run, comments, decisões)
-- Revisão antes de merge previne bugs que só aparecem no smoke
-- Branch protection futura no GitHub (require PR + approval) fica trivial de habilitar
+## §5 — Pre-merge gates (rule #19 global)
+
+Antes de mergear qualquer PR de feature:
+
+1. Local tests verdes
+2. CI verde
+3. `/pre-merge-coverage` rodou + escreveu testes adversariais adicionais
+4. `/codex-cross-review` rodou + issues P1/P2/P3 corrigidas in-PR
+5. Notion ticket → 👀 Revisão
+
+Apenas após confirmação humana → ✅ Concluída (rule #13).
