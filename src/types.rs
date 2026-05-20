@@ -64,6 +64,10 @@ pub struct Frontmatter {
     pub attachments: Vec<String>,
     #[serde(default)]
     pub created: String,
+    /// Obsidian-compatible aliases. A `[[link]]` whose target matches any alias
+    /// resolves to this note. CAD-20 (Phase 1 link parity).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
