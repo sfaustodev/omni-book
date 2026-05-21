@@ -350,6 +350,144 @@ mod tests {
         assert!(idx.resolve("Real").is_some());
     }
 
+    /// CAD-20 smoke: open a real Obsidian vault, build the index, count
+    /// unresolved links, dump JSON to stdout. Ignored by default. Run with:
+    ///
+    /// ```text
+    /// OBSIDIAN_VAULT_PATH="$HOME/Documents/Obsidian Vault" \
+    ///   cargo test --release -- --ignored --nocapture smoke_real_obsidian_vault
+    /// ```
+    ///
+    /// Asserts: build succeeds, vault index has > 0 files, parser does not
+    /// panic on any note, unresolved-note-link count is finite. Used for
+    /// the pre-merge smoke report on CAD-20.
+    #[test]
+    #[ignore]
+    fn smoke_real_obsidian_vault() {
+        use crate::types::{Frontmatter, Note};
+        use std::env;
+        use std::fs;
+        use std::path::PathBuf;
+
+        let vault_root = match env::var("OBSIDIAN_VAULT_PATH") {
+            Ok(p) => PathBuf::from(p),
+            Err(_) => {
+                eprintln!("OBSIDIAN_VAULT_PATH not set; skipping smoke.");
+                return;
+            }
+        };
+        assert!(
+            vault_root.exists(),
+            "vault path does not exist: {}",
+            vault_root.display()
+        );
+
+        // Minimal frontmatter parser: split on `---` fences, parse YAML aliases.
+        fn parse_frontmatter(raw: &str) -> Frontmatter {
+            let mut fm = Frontmatter::default();
+            if let Some(rest) = raw.strip_prefix("---\n") {
+                if let Some(end) = rest.find("\n---\n") {
+                    let yaml = &rest[..end];
+                    if let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(yaml) {
+                        // Pull aliases (list of strings) if present
+                        if let Some(a) = value.get("aliases").and_then(|v| v.as_sequence()) {
+                            fm.aliases = a
+                                .iter()
+                                .filter_map(|v| v.as_str())
+                                .map(|s| s.to_string())
+                                .collect();
+                        }
+                    }
+                }
+            }
+            fm
+        }
+
+        // Walk vault for .md files, skipping .omninote/.obsidian/_attachments.
+        let mut notes: Vec<Note> = Vec::new();
+        let walker = walkdir::WalkDir::new(&vault_root)
+            .into_iter()
+            .filter_map(|e| e.ok());
+        for entry in walker {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let lossy = path.to_string_lossy();
+            if lossy.contains("/.omninote/")
+                || lossy.contains("/.obsidian/")
+                || lossy.contains("/.trash/")
+                || lossy.contains("/_attachments/")
+            {
+                continue;
+            }
+            if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                continue;
+            }
+            let raw = match fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let fm = parse_frontmatter(&raw);
+            let content_start = if let Some(stripped) = raw.strip_prefix("---\n") {
+                stripped.find("\n---\n").map(|i| i + 4 + 5).unwrap_or(0)
+            } else {
+                0
+            };
+            let content = raw[content_start..].to_string();
+            let rel_path = path.strip_prefix(&vault_root).unwrap_or(path).to_path_buf();
+            let title = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("?")
+                .to_string();
+            notes.push(Note {
+                path: path.to_path_buf(),
+                rel_path,
+                frontmatter: fm,
+                title,
+                content,
+            });
+        }
+
+        assert!(!notes.is_empty(), "no .md files found in vault");
+
+        let idx = VaultIndex::build(&notes);
+        let stats = idx.stats();
+        let unresolved = idx.unresolved_links(&notes);
+
+        // Bucket unresolved by source for readability.
+        let mut by_source: std::collections::HashMap<PathBuf, Vec<String>> = Default::default();
+        for u in &unresolved {
+            by_source
+                .entry(u.source.clone())
+                .or_default()
+                .push(u.target.clone());
+        }
+
+        // Render JSON report — used by CI / smoke artifact.
+        let report = serde_json::json!({
+            "ok": true,
+            "vault": vault_root.to_string_lossy(),
+            "notes_total": notes.len(),
+            "index_stats": {
+                "files": stats.files,
+                "paths": stats.paths,
+                "aliases": stats.aliases,
+            },
+            "unresolved_total": unresolved.len(),
+            "unresolved_sample": unresolved.iter().take(20).map(|u| serde_json::json!({
+                "target": u.target,
+                "source": u.source.to_string_lossy(),
+            })).collect::<Vec<_>>(),
+            "unresolved_by_source_count": by_source.len(),
+        });
+
+        println!("{}", serde_json::to_string_pretty(&report).unwrap());
+
+        assert!(stats.files > 0, "VaultIndex built with zero files");
+    }
+
     proptest::proptest! {
         #![proptest_config(proptest::test_runner::Config { cases: 128, ..proptest::test_runner::Config::default() })]
 

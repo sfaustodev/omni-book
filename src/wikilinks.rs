@@ -81,12 +81,55 @@ impl Wikilink {
 
 /// Extract all `[[...]]` and `![[...]]` references from `content`, in order.
 /// Duplicates preserved (caller can dedupe if needed). Never panics on arbitrary input.
+///
+/// CAD-20: skips matches inside fenced code blocks (```...```) and inline code spans
+/// (`...`). This prevents false positives like the TOML `[[package]]` array-of-tables
+/// header bleeding into the wikilink set when notes contain Cargo.toml diff snippets.
 pub fn extract(content: &str) -> Vec<Wikilink> {
     let bytes = content.as_bytes();
     let mut out = Vec::new();
     let mut i = 0;
+    let mut in_fence = false;
+    let mut at_line_start = true;
+    let mut in_inline_code = false;
 
     while i < bytes.len() {
+        // Toggle fenced code block on ``` at start of a line.
+        if at_line_start
+            && i + 2 < bytes.len()
+            && bytes[i] == b'`'
+            && bytes[i + 1] == b'`'
+            && bytes[i + 2] == b'`'
+        {
+            in_fence = !in_fence;
+            i += 3;
+            at_line_start = false;
+            continue;
+        }
+        // Toggle inline code span on single backtick (only outside fenced blocks).
+        if !in_fence && bytes[i] == b'`' {
+            in_inline_code = !in_inline_code;
+            i += 1;
+            at_line_start = false;
+            continue;
+        }
+        if bytes[i] == b'\n' {
+            at_line_start = true;
+            // Inline code spans don't cross newlines per CommonMark.
+            in_inline_code = false;
+            i += 1;
+            continue;
+        }
+        if !bytes[i].is_ascii_whitespace() {
+            at_line_start = false;
+        }
+
+        // Skip wikilink detection inside any code region.
+        if in_fence || in_inline_code {
+            i += 1;
+            continue;
+        }
+
         let is_embed =
             i + 2 < bytes.len() && bytes[i] == b'!' && bytes[i + 1] == b'[' && bytes[i + 2] == b'[';
         let is_link = !is_embed && i + 1 < bytes.len() && bytes[i] == b'[' && bytes[i + 1] == b'[';
@@ -674,6 +717,55 @@ mod tests {
         let c = "no bang prefix [[Note]]";
         let r = extract(c);
         assert!(matches!(&r[0], Wikilink::Note(_)));
+    }
+
+    // ----- code fence / inline code skipping (CAD-20 smoke regression fix) -----
+
+    #[test]
+    fn ignores_wikilink_inside_fenced_code() {
+        // TOML `[[package]]` header inside a Cargo.toml diff must NOT extract.
+        let c = "before [[Real]]\n```toml\n[[package]]\nname = \"foo\"\n```\nafter [[AlsoReal]]";
+        let r = extract(c);
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0].target_str(), "Real");
+        assert_eq!(r[1].target_str(), "AlsoReal");
+    }
+
+    #[test]
+    fn ignores_wikilink_inside_inline_code() {
+        let c = "use `[[NotALink]]` not `[[OtherFake]]` but [[Real]]";
+        let r = extract(c);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].target_str(), "Real");
+    }
+
+    #[test]
+    fn nested_fences_toggle_correctly() {
+        let c = "[[A]]\n```\n[[FakeA]]\n```\n[[B]]\n```rust\n[[FakeB]]\n```\n[[C]]";
+        let r = extract(c);
+        assert_eq!(r.len(), 3);
+        assert_eq!(r[0].target_str(), "A");
+        assert_eq!(r[1].target_str(), "B");
+        assert_eq!(r[2].target_str(), "C");
+    }
+
+    #[test]
+    fn inline_code_does_not_cross_newline() {
+        // Unclosed backtick on a line shouldn't suppress wikilinks on next line.
+        let c = "this `is unclosed\n[[Real]]";
+        let r = extract(c);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].target_str(), "Real");
+    }
+
+    #[test]
+    fn indented_fence_suppresses_wikilink() {
+        // CommonMark allows fenced code blocks indented up to 3 spaces.
+        // Our parser is CommonMark-compatible: whitespace before ``` still triggers fence.
+        let c = "  ```\n[[InsideFence]]\n  ```\n[[OutsideFence]]";
+        let r = extract(c);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].target_str(), "OutsideFence");
     }
 
     // ----- target_str / is_note helpers -----
