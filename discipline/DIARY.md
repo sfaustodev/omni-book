@@ -158,3 +158,39 @@ Iniciei sprint v1.1 paralelo:
 4. Após CAD-20 mergeado, começar CAD-21 (workspace refactor + CLI/MCP scaffolds)
 
 **[security-note]** Background agent foi flagged pelo harness por postar Notion completion note sem instrução do humano nesta transcrição. Eu autorizei no prompt do agent (CAD-25 Fase A spec inclui esse passo) — não é incidente, mas registrando.
+
+### [CAD-20-smoke] [CAD-20-fence-fix] [CAD-21-phase-A]
+
+**CAD-20 smoke + fence fix (PR #5 atualizado):**
+- Smoke automated rodou contra ~/Documents/Obsidian Vault (187 notes)
+- Descobriu 324 falso-positivos: TOML `[[package]]` e bash `[[ -h "$f" ]]` extraídos como wikilinks
+- Fix: parser skipa fenced code blocks + inline code spans (CommonMark style)
+- Após fix: 324 → 19 unresolved (94% redução). Remaining 19 = raw bash em snippets unfenced (limitação aceita)
+- 5 testes novos (TOML regression, inline code, nested fences, newline boundary, indented fence)
+- 93 tests pass / 0 fail
+- Commit 07a3f93 push em PR #5
+
+**CAD-21 Phase A workspace refactor (PR #6 novo):**
+- 4-crate Cargo workspace: omninote-core (lib), omninote-gui (egui bin), omninote-cli (clap bin), omninote-mcp (rmcp stub bin)
+- `git mv` 7 core files + 6 gui files preserved history
+- Type split: `FontFamily::as_egui_family()` movido pra `omninote-gui::theme`
+- GUI imports adaptados (sed): `crate::vault` → `omninote_core::vault` (e 6 outros módulos)
+- CLI starter verbs operacional: `vault info`, `link unresolved [--json]` testados contra vault real
+- MCP stub placeholder (Phase C wire rmcp)
+- `cargo build --workspace` ok · `cargo test --workspace` → 93 pass · clippy strict clean · GUI launches sem panic
+- Commit em PR #6 stacked em PR #5 (cad-21 → cad-20 → chore-discipline → main)
+
+**Estado branches (sessão atual):**
+```
+main
+└─ chore/discipline-sprint-v1.1-plan (PR #4 — discipline + UI doc)
+    └─ feat/cad-20-link-parity (PR #5 — wikilinks parser + resolver + fence fix)
+        └─ feat/cad-21-workspace-cli-mcp (PR #6 — workspace + CLI scaffold + MCP stub)
+```
+
+**Próximos passos:**
+1. Humano testar CAD-20 (abrir vault Obsidian no app, verificar resolve correto)
+2. Aprovar PR #4 → PR #5 → PR #6 em ordem
+3. Pós merge: começar Phase B (CLI verbs `note search` + `link backlinks`) e Phase C (MCP rmcp) — ainda CAD-21 escopo
+4. CAD-25 Fase B continua bloqueada por Q-01..Q-30
+5. CI workflow precisa update pra `cargo test --workspace` (PR #6 mencionou, fix junto ou seguinte)
