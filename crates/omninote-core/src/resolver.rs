@@ -138,6 +138,39 @@ impl VaultIndex {
             aliases: self.by_alias.len(),
         }
     }
+
+    /// Find all notes that link TO `target_rel_path` via `[[wikilink]]` or
+    /// `![[note-embed]]`. Anchor (`#heading` / `#^block`) preserved so callers
+    /// can render "links to Section 8.2". CAD-21 Phase B.
+    ///
+    /// Resolution is target-side: a link `[[Foo|alias]]` from note A counts
+    /// as a backlink to whatever `Foo` resolves to (filename / path / alias /
+    /// case-insensitive). Unresolved links are skipped.
+    #[allow(dead_code)]
+    pub fn backlinks_to(&self, target_rel_path: &std::path::Path, notes: &[Note]) -> Vec<Backlink> {
+        use crate::wikilinks::{extract, Wikilink};
+        let mut out = Vec::new();
+        for note in notes {
+            if note.rel_path == target_rel_path {
+                continue; // notes don't backlink themselves
+            }
+            for w in extract(&note.content) {
+                let (raw_target, anchor) = match &w {
+                    Wikilink::Note(r) | Wikilink::NoteEmbed(r) => (&r.target, r.anchor.clone()),
+                    Wikilink::Image(_) | Wikilink::File(_) => continue,
+                };
+                let resolved = self.resolve(raw_target);
+                if resolved.map(|p| p.as_path()) == Some(target_rel_path) {
+                    out.push(Backlink {
+                        source: note.rel_path.clone(),
+                        anchor,
+                        is_embed: matches!(w, Wikilink::NoteEmbed(_)),
+                    });
+                }
+            }
+        }
+        out
+    }
 }
 
 /// Diagnostic counts. Returned by [`VaultIndex::stats`]. CAD-21 Phase 2.
@@ -156,6 +189,19 @@ pub struct IndexStats {
 pub struct UnresolvedLink {
     pub target: String,
     pub source: PathBuf,
+}
+
+/// A backlink to a target note: which source links to it, and through which
+/// anchor (heading or block) if any. CAD-21 Phase B.
+#[allow(dead_code)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Backlink {
+    /// The note that contains the wikilink (the source side).
+    pub source: PathBuf,
+    /// `#Heading` or `#^block-id` if the link targeted a sub-section.
+    pub anchor: Option<crate::wikilinks::Anchor>,
+    /// `![[NoteEmbed]]` (true) vs `[[Note]]` (false).
+    pub is_embed: bool,
 }
 
 #[cfg(test)]
@@ -315,6 +361,84 @@ mod tests {
         // Only [[Bar]] should be unresolved (img.png and manual.pdf are asset embeds, not note refs).
         assert_eq!(unresolved.len(), 1);
         assert_eq!(unresolved[0].target, "Bar");
+    }
+
+    #[test]
+    fn backlinks_finds_links_in_other_notes() {
+        let notes = vec![
+            mk_note("Target.md", "I am the target", vec![]),
+            mk_note("A.md", "links [[Target]]", vec![]),
+            mk_note("B.md", "embeds ![[Target]]", vec![]),
+            mk_note("C.md", "no link here", vec![]),
+        ];
+        let idx = VaultIndex::build(&notes);
+        let bl = idx.backlinks_to(&PathBuf::from("Target.md"), &notes);
+        assert_eq!(bl.len(), 2);
+        assert!(bl
+            .iter()
+            .any(|b| b.source == std::path::Path::new("A.md") && !b.is_embed));
+        assert!(bl
+            .iter()
+            .any(|b| b.source == std::path::Path::new("B.md") && b.is_embed));
+    }
+
+    #[test]
+    fn backlinks_resolves_via_alias() {
+        let notes = vec![
+            mk_note("Real.md", "", vec!["Nick"]),
+            mk_note("A.md", "links [[Nick]] via alias", vec![]),
+        ];
+        let idx = VaultIndex::build(&notes);
+        let bl = idx.backlinks_to(&PathBuf::from("Real.md"), &notes);
+        assert_eq!(bl.len(), 1);
+        assert_eq!(bl[0].source, PathBuf::from("A.md"));
+    }
+
+    #[test]
+    fn backlinks_preserves_anchor() {
+        let notes = vec![
+            mk_note("Target.md", "", vec![]),
+            mk_note("A.md", "links [[Target#Section 8.2]]", vec![]),
+            mk_note("B.md", "block ref [[Target#^abc123]]", vec![]),
+        ];
+        let idx = VaultIndex::build(&notes);
+        let bl = idx.backlinks_to(&PathBuf::from("Target.md"), &notes);
+        assert_eq!(bl.len(), 2);
+        let with_heading = bl
+            .iter()
+            .find(|b| b.source == std::path::Path::new("A.md"))
+            .unwrap();
+        assert!(matches!(
+            &with_heading.anchor,
+            Some(crate::wikilinks::Anchor::Heading(h)) if h == "Section 8.2"
+        ));
+        let with_block = bl
+            .iter()
+            .find(|b| b.source == std::path::Path::new("B.md"))
+            .unwrap();
+        assert!(matches!(
+            &with_block.anchor,
+            Some(crate::wikilinks::Anchor::Block(b)) if b == "abc123"
+        ));
+    }
+
+    #[test]
+    fn backlinks_skips_self_reference() {
+        let notes = vec![mk_note("Foo.md", "self [[Foo]]", vec![])];
+        let idx = VaultIndex::build(&notes);
+        let bl = idx.backlinks_to(&PathBuf::from("Foo.md"), &notes);
+        assert!(bl.is_empty(), "should not count self-reference");
+    }
+
+    #[test]
+    fn backlinks_skips_asset_embeds() {
+        let notes = vec![
+            mk_note("Target.md", "", vec![]),
+            mk_note("A.md", "![[img.png]] ![[doc.pdf]]", vec![]),
+        ];
+        let idx = VaultIndex::build(&notes);
+        let bl = idx.backlinks_to(&PathBuf::from("Target.md"), &notes);
+        assert!(bl.is_empty());
     }
 
     #[test]
