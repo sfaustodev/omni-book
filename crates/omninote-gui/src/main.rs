@@ -1,15 +1,10 @@
+// OmniNote GUI — egui app. Vault ops live in `omninote-core`.
 mod app;
-mod autoformat;
-mod import;
-mod pdf;
-mod resolver;
-mod types;
+mod theme;
 mod ui_editor;
 mod ui_modals;
 mod ui_sidebar;
-mod vault;
 mod watcher;
-mod wikilinks;
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {

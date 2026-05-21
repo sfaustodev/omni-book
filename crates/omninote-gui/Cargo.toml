@@ -1,0 +1,35 @@
+[package]
+name = "omninote-gui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "OmniNote desktop GUI (egui)."
+
+[[bin]]
+name = "omninote"
+path = "src/main.rs"
+
+[dependencies]
+omninote-core.workspace = true
+
+# Re-exported from workspace
+eframe.workspace = true
+egui.workspace = true
+egui_commonmark.workspace = true
+egui_extras.workspace = true
+rfd.workspace = true
+notify.workspace = true
+
+# Shared with core (gui uses serde/chrono/uuid/dirs/open directly)
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+chrono.workspace = true
+dirs.workspace = true
+uuid.workspace = true
+open.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
