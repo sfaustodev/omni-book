@@ -1,5 +1,5 @@
 use crate::app::OmniNoteApp;
-use crate::types::{ConfirmAction, NoteType};
+use omninote_core::types::{ConfirmAction, NoteType};
 use egui::RichText;
 use std::path::{Path, PathBuf};
 

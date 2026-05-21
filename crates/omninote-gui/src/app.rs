@@ -1,5 +1,5 @@
-use crate::types::{ConfirmAction, Note, NoteType};
-use crate::vault::Vault;
+use omninote_core::types::{ConfirmAction, Note, NoteType};
+use omninote_core::vault::Vault;
 use crate::watcher::VaultWatcher;
 use eframe::egui;
 use egui::RichText;
@@ -106,7 +106,7 @@ impl OmniNoteApp {
                 _ => 14.0,
             };
             font_id.size = (default_size * scale).round();
-            font_id.family = cfg.font_family.as_egui_family();
+            font_id.family = crate::theme::font_family_to_egui(cfg.font_family);
         }
 
         // Line spacing via item_spacing
@@ -169,7 +169,7 @@ impl OmniNoteApp {
         self.self_write_until = std::time::Instant::now() + std::time::Duration::from_millis(400);
 
         if let Some(v) = &mut self.vault {
-            let desired = format!("{}.md", crate::vault::sanitize_filename_pub(&note.title));
+            let desired = format!("{}.md", omninote_core::vault::sanitize_filename_pub(&note.title));
             let current = note
                 .path
                 .file_name()
@@ -243,7 +243,7 @@ impl OmniNoteApp {
         }
     }
 
-    /// Resolve a wikilink target through the [`crate::resolver::VaultIndex`]
+    /// Resolve a wikilink target through the [`omninote_core::resolver::VaultIndex`]
     /// (filename / path / alias / case-insensitive) and select the resulting
     /// note. Returns true if resolved + selected, false if unresolved. CAD-20.
     pub fn select_note_by_target(&mut self, target: &str) -> bool {

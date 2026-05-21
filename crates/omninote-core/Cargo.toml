@@ -1,0 +1,27 @@
+[package]
+name = "omninote-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Vault operations library for OmniNote — shared by GUI, CLI, and MCP."
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+chrono.workspace = true
+dirs.workspace = true
+walkdir.workspace = true
+uuid.workspace = true
+slug.workspace = true
+open.workspace = true
+meval.workspace = true
+pulldown-cmark.workspace = true
+lopdf.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+proptest.workspace = true

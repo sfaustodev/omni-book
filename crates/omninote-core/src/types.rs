@@ -100,12 +100,8 @@ impl FontFamily {
     pub fn all() -> [FontFamily; 3] {
         [Self::System, Self::Monospace, Self::Serif]
     }
-    pub fn as_egui_family(&self) -> egui::FontFamily {
-        match self {
-            Self::System | Self::Serif => egui::FontFamily::Proportional,
-            Self::Monospace => egui::FontFamily::Monospace,
-        }
-    }
+    // CAD-21: `as_egui_family()` moved to `omninote-gui::theme::font_family_to_egui`
+    // to keep `omninote-core` free of UI dependencies.
 }
 
 fn default_font_size() -> f32 {
