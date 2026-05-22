@@ -1,3 +1,4 @@
+use crate::resolver::VaultIndex;
 use crate::types::{AppConfig, Frontmatter, Note, NoteType};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -7,6 +8,9 @@ pub struct Vault {
     pub root: PathBuf,
     pub notes: Vec<Note>,
     pub config: AppConfig,
+    /// Wikilink resolution index — rebuilt after every `reload_notes()`.
+    /// CAD-20 (Phase 1 link parity).
+    pub index: VaultIndex,
 }
 
 impl Vault {
@@ -27,6 +31,7 @@ impl Vault {
             root,
             notes: Vec::new(),
             config,
+            index: VaultIndex::default(),
         };
         v.reload_notes();
         Ok(v)
@@ -53,6 +58,8 @@ impl Vault {
                 self.notes.push(note);
             }
         }
+        // Rebuild resolver index after every reload (CAD-20).
+        self.index = VaultIndex::build(&self.notes);
     }
 
     fn read_note(&self, path: &Path) -> Result<Note, String> {
@@ -115,6 +122,7 @@ impl Vault {
             linked_note: None,
             attachments: vec![],
             created: chrono::Utc::now().to_rfc3339(),
+            aliases: vec![],
         };
         let title_str = path.file_stem().unwrap().to_string_lossy().to_string();
         let rel_path = path.strip_prefix(&self.root).unwrap().to_path_buf();
