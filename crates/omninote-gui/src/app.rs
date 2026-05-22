@@ -330,10 +330,10 @@ impl eframe::App for OmniNoteApp {
 
         let (new, toggle_edit, settings, toggle_dark) = ctx.input(|i| {
             (
-                i.key_pressed(egui::Key::N) && i.modifiers.ctrl,
-                i.key_pressed(egui::Key::E) && i.modifiers.ctrl,
-                i.key_pressed(egui::Key::Comma) && i.modifiers.ctrl,
-                i.key_pressed(egui::Key::D) && i.modifiers.ctrl && i.modifiers.shift,
+                i.key_pressed(egui::Key::N) && i.modifiers.command,
+                i.key_pressed(egui::Key::E) && i.modifiers.command,
+                i.key_pressed(egui::Key::Comma) && i.modifiers.command,
+                i.key_pressed(egui::Key::D) && i.modifiers.command && i.modifiers.shift,
             )
         });
         if new {

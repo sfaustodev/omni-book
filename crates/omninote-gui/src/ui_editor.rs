@@ -33,9 +33,9 @@ impl OmniNoteApp {
                         ui.add_space(100.0);
                         ui.label(RichText::new("📓 OmniNote").size(24.0).weak());
                         ui.add_space(16.0);
-                        ui.label(RichText::new("Ctrl+N  Nova nota").size(12.0).weak());
-                        ui.label(RichText::new("Ctrl+K  Buscar").size(12.0).weak());
-                        ui.label(RichText::new("Ctrl+,  Configurações").size(12.0).weak());
+                        ui.label(RichText::new("Cmd+N  Nova nota").size(12.0).weak());
+                        ui.label(RichText::new("Cmd+K  Buscar").size(12.0).weak());
+                        ui.label(RichText::new("Cmd+,  Configurações").size(12.0).weak());
                     });
                 });
                 return;
@@ -57,7 +57,7 @@ impl OmniNoteApp {
                 }
                 if ui
                     .selectable_label(self.editing, "✎ Editar")
-                    .on_hover_text("Ctrl+E")
+                    .on_hover_text("Cmd+E")
                     .clicked()
                 {
                     self.editing = !self.editing;
@@ -184,13 +184,13 @@ impl OmniNoteApp {
             self.dirty = true;
         }
 
-        // Ctrl+= math substitution on current line
+        // Cmd+= math substitution on current line
         // Extract cursor pos before output is dropped (output holds &mut note.content)
         let cursor_pos = output.cursor_range.map(|r| r.primary.ccursor.index);
         let has_focus = output.response.has_focus();
         drop(output);
 
-        if has_focus && ui.input(|i| i.key_pressed(egui::Key::Equals) && i.modifiers.ctrl) {
+        if has_focus && ui.input(|i| i.key_pressed(egui::Key::Equals) && i.modifiers.command) {
             let pos = cursor_pos.unwrap_or(note.content.len());
             if let Some((new_line, start, end)) =
                 omninote_core::autoformat::try_math_substitute(&note.content, pos)

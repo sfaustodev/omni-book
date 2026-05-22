@@ -15,6 +15,15 @@ pub struct Vault {
 
 impl Vault {
     pub fn open(root: PathBuf) -> Result<Self, String> {
+        // Q-08: reject file paths early. Previous behavior returned `Ok` with an
+        // empty vault because `fs::create_dir_all` uses `let _ =` below and
+        // swallowed the error — confusing failure mode.
+        if root.is_file() {
+            return Err(format!(
+                "vault path is a file, expected directory: {}",
+                root.display()
+            ));
+        }
         if !root.exists() {
             fs::create_dir_all(&root).map_err(|e| e.to_string())?;
         }
@@ -311,6 +320,25 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let vault = Vault::open(dir.path().to_path_buf()).unwrap();
         (vault, dir)
+    }
+
+    #[test]
+    fn open_rejects_file_path() {
+        // Q-08: passing a file (not a directory) used to return Ok with an empty
+        // vault — confusing. Now rejected explicitly.
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("not-a-vault.txt");
+        std::fs::write(&file_path, "this is a file, not a vault").unwrap();
+        match Vault::open(file_path.clone()) {
+            Err(msg) => assert!(
+                msg.contains("file"),
+                "error should mention 'file', got: {msg}"
+            ),
+            Ok(_) => panic!(
+                "Vault::open should reject file path: {}",
+                file_path.display()
+            ),
+        }
     }
 
     #[test]
