@@ -1,6 +1,6 @@
 use crate::app::OmniNoteApp;
-use crate::types::{ConfirmAction, NoteType};
 use egui::RichText;
+use omninote_core::types::{ConfirmAction, NoteType};
 use std::path::{Path, PathBuf};
 
 /// Drag-and-drop payload: id of the note being dragged.

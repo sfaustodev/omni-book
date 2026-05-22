@@ -1,6 +1,6 @@
 use crate::app::OmniNoteApp;
-use crate::types::{ConfirmAction, NoteType};
 use egui::RichText;
+use omninote_core::types::{ConfirmAction, NoteType};
 use std::path::Path;
 
 /// v0.8 — items shown in the slash menu when user types `/` at start of a line.
@@ -193,7 +193,7 @@ impl OmniNoteApp {
         if has_focus && ui.input(|i| i.key_pressed(egui::Key::Equals) && i.modifiers.ctrl) {
             let pos = cursor_pos.unwrap_or(note.content.len());
             if let Some((new_line, start, end)) =
-                crate::autoformat::try_math_substitute(&note.content, pos)
+                omninote_core::autoformat::try_math_substitute(&note.content, pos)
             {
                 note.content.replace_range(start..end, &new_line);
                 self.dirty = true;
@@ -308,7 +308,7 @@ impl OmniNoteApp {
         ui.separator();
 
         // Wikilinks + embeds (v0.4 — CAD-10)
-        let wikis = crate::wikilinks::extract(&note.content);
+        let wikis = omninote_core::wikilinks::extract(&note.content);
         if !wikis.is_empty() {
             self.render_wikilinks(ui, &wikis);
             ui.separator();
@@ -350,8 +350,12 @@ impl OmniNoteApp {
     /// CAD-20: handles new grammar with aliases (`[[A|label]]`), anchors
     /// (`[[A#H]]` / `[[A#^id]]`), path-based targets (`[[folder/A]]`), and
     /// note-embed (`![[A]]`). Display uses alias if provided, otherwise target.
-    fn render_wikilinks(&mut self, ui: &mut egui::Ui, wikis: &[crate::wikilinks::Wikilink]) {
-        use crate::wikilinks::Wikilink;
+    fn render_wikilinks(
+        &mut self,
+        ui: &mut egui::Ui,
+        wikis: &[omninote_core::wikilinks::Wikilink],
+    ) {
+        use omninote_core::wikilinks::Wikilink;
         use std::collections::HashSet;
 
         // Dedupe by display key while preserving order. Notes and note-embeds
@@ -467,7 +471,7 @@ impl OmniNoteApp {
     fn create_note_from_wikilink(&mut self, title: &str) {
         self.flush_active();
         if let Some(v) = &mut self.vault {
-            match v.create_note(None, title, crate::types::NoteType::default()) {
+            match v.create_note(None, title, omninote_core::types::NoteType::default()) {
                 Ok(note) => {
                     self.active_note = Some(note);
                     self.editing = true;

@@ -1,5 +1,5 @@
 use crate::app::OmniNoteApp;
-use crate::types::{ConfirmAction, NoteType};
+use omninote_core::types::{ConfirmAction, NoteType};
 
 impl OmniNoteApp {
     pub fn show_modals(&mut self, ctx: &egui::Context) {
@@ -134,7 +134,7 @@ impl OmniNoteApp {
                         egui::ComboBox::from_id_salt("font_family_combo")
                             .selected_text(current.label())
                             .show_ui(ui, |ui| {
-                                for f in crate::types::FontFamily::all() {
+                                for f in omninote_core::types::FontFamily::all() {
                                     if ui
                                         .selectable_label(v.config.font_family == f, f.label())
                                         .clicked()
@@ -181,7 +181,7 @@ impl OmniNoteApp {
 
                     // Reset button
                     if ui.small_button("↩ Restaurar padrões").clicked() {
-                        v.config.font_family = crate::types::FontFamily::default();
+                        v.config.font_family = omninote_core::types::FontFamily::default();
                         v.config.font_size = 14.0;
                         v.config.line_height = 1.4;
                         style_dirty = true;
@@ -338,7 +338,7 @@ impl OmniNoteApp {
     // Import helpers
 
     fn import_pdf(&mut self, path: &std::path::Path) {
-        let content = match crate::pdf::extract_text(path) {
+        let content = match omninote_core::pdf::extract_text(path) {
             Ok(t) => t,
             Err(e) => {
                 self.error_msg = Some(e);
@@ -374,7 +374,7 @@ impl OmniNoteApp {
     }
 
     fn import_chat(&mut self, path: &std::path::Path) {
-        let content = match crate::import::import_claude_chat(path) {
+        let content = match omninote_core::import::import_claude_chat(path) {
             Ok(c) => c,
             Err(e) => {
                 self.error_msg = Some(e);
@@ -407,7 +407,7 @@ impl OmniNoteApp {
     }
 
     fn import_artifact(&mut self, path: &std::path::Path) {
-        let content = match crate::import::import_claude_artifact(path) {
+        let content = match omninote_core::import::import_claude_artifact(path) {
             Ok(c) => c,
             Err(e) => {
                 self.error_msg = Some(e);
