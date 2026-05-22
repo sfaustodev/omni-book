@@ -39,6 +39,55 @@
 
 ---
 
+## Active tickets — Sprint v1.1+ (post-v1.0 roadmap)
+
+> Origem: brainstorm 2026-05-20 → `~/.claude/plans/greedy-napping-castle.md`
+> Schema atual da DB tem CAD-13 a CAD-19 (não-indexados aqui) + CAD-20..CAD-25 abaixo.
+
+### Sprint v1.1 (2026-05-20 → 2026-06-03) · Foundation
+
+| ID | Title | Status | Prio | Size | Est | Notion URL |
+|------|-------|--------|------|------|-----|------------|
+| CAD-20 | Phase 1 — Obsidian link parity (parser + resolver + embeds) | 🎯 Pronta | ⚡ | 🐎 L | 16h | [36673ac79ddb81dea5bae6092629aa87](https://www.notion.so/36673ac79ddb81dea5bae6092629aa87) |
+| CAD-21 | Phase 2 — Workspace refactor + CLI + MCP scaffolds | 🌱 Backlog | ⚡ | 🐘 XL | 24h | [36673ac79ddb81e6b9f0ee1450e0e1c9](https://www.notion.so/36673ac79ddb81e6b9f0ee1450e0e1c9) |
+| CAD-25 | UI Design v2 — implementar handoff Claude Design em egui (Fase A análise paralela) | 🎯 Pronta | ⚡ | 🐘 XL | 30h | [36673ac79ddb81358d53caa9b7b4c46b](https://www.notion.so/36673ac79ddb81358d53caa9b7b4c46b) |
+
+### Sprint v1.2 (2026-06-03 → 2026-06-17) · Discipline + UI core
+
+| ID | Title | Status | Prio | Size | Est | Depende | Notion URL |
+|------|-------|--------|------|------|-----|---------|------------|
+| CAD-22 | Phase 3 — Daily notes + templates + discipline CLI/MCP | 🌱 Backlog | ⚡ | 🐎 L | 18h | CAD-21 | [36673ac79ddb81719384cbc41c959717](https://www.notion.so/36673ac79ddb81719384cbc41c959717) |
+| CAD-25 (Fase B) | UI Design v2 — implementação egui | 🌱 Backlog | ⚡ | 🐘 XL | 22h | CAD-20 + análise A | mesmo do v1.1 |
+
+### Sprint v1.3 (2026-06-17 → 2026-07-01) · AI + Power
+
+| ID | Title | Status | Prio | Size | Est | Depende | Notion URL |
+|------|-------|--------|------|------|-----|---------|------------|
+| CAD-23 | Phase 4 — AI-native vault (RAG + auto-tag + dictation + OCR) | 🌱 Backlog | ⚡ | 🐘 XL | 40h | CAD-21 | [36673ac79ddb81d9b1a9f1df14a8fc9d](https://www.notion.so/36673ac79ddb81d9b1a9f1df14a8fc9d) |
+| CAD-24 | Phase 5 — Power automation (quick-capture + multi-vault + diff + JSON) | 🌱 Backlog | 📌 | 🐎 L | 20h | CAD-21 | [36673ac79ddb813784afe6f9920adedc](https://www.notion.so/36673ac79ddb813784afe6f9920adedc) |
+
+### Parallel work map
+
+```
+v1.1 ──── CAD-20 (sequencial, blocks all)
+     │
+     └─── CAD-25 Fase A (paralelo, read-only docs)
+     │
+     └─── CAD-21 (depende CAD-20)
+                │
+v1.2 ──── CAD-22 ⟂ CAD-25 Fase B (paralelo)
+                │
+v1.3 ──── CAD-23 ⟂ CAD-24 (paralelo)
+```
+
+### Notes
+
+- Área (multi-select) ficou vazio em todos os 6 — Notion MCP wrapper rejeita CSV format, precisa investigar formato correto antes de bulk-set
+- Fase select usa "Backlog" pra todos (não havia v1.1/v1.2/v1.3 nos options). Sprint info vive no content/título
+- Subtasks dos umbrellas vivem como checklist dentro do content da página Notion (rule global #20 — não fragmentar em tickets por item)
+
+---
+
 ## Sync workflow
 
 1. **Pull from Notion** (no início da sessão se mudou): `notion-search` na database, atualizar tabela acima + specs.

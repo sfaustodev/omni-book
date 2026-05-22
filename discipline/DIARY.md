@@ -81,3 +81,116 @@ SPECS/*.md (10 novos)
 - Após confirmação ("testado, pode fechar"), mergear feat/omninote-v01 → main, mover CAD-2..CAD-8 pra `✅ Concluída` no Notion via MCP
 - Verificar CI rodou no GitHub Actions
 - Próxima fase: CAD-10 (Spike wikilinks v0.4)
+
+
+## 2026-05-20 — sprint planning v1.1+ roadmap
+
+### [sprint-plan]
+
+Brainstorm session resolveu OmniNote post-v1.0 roadmap. 6 tickets criados Notion (CAD-20..CAD-25), 3 sprints de 2 semanas, parallel work mapped.
+
+**Tickets criados:**
+- CAD-20 Phase 1 link parity (16h, ⚡, 🎯 Pronta) — blocker
+- CAD-21 Phase 2 workspace+CLI+MCP (24h, ⚡) — depende CAD-20
+- CAD-22 Phase 3 discipline CLI+MCP (18h, ⚡) — depende CAD-21
+- CAD-23 Phase 4 AI-native vault (40h, ⚡) — depende CAD-21
+- CAD-24 Phase 5 power automation (20h, 📌) — depende CAD-21
+- CAD-25 UI Design v2 egui (30h, ⚡, 🎯 Pronta Fase A) — paralelo
+
+**Sprints:**
+- v1.1 (2026-05-20 → 2026-06-03): CAD-20 + CAD-21 + CAD-25 Fase A
+- v1.2 (2026-06-03 → 2026-06-17): CAD-22 ⟂ CAD-25 Fase B
+- v1.3 (2026-06-17 → 2026-07-01): CAD-23 ⟂ CAD-24
+
+**Files atualizados:**
+- `discipline/SPRINT.md` reescrito (v1.1 goal + dependency graph + parallel strategy)
+- `discipline/NOTION.md` extended (new section "Sprint v1.1+")
+- `discipline/PLAN.md` appended (sprint-2026-05-20-batch entry)
+- `SPECS/CAD-20.md` a `CAD-25.md` criados
+- `docs/design/omninote/` (handoff bundle Claude Design — 14 files, 354KB)
+
+**Plano-fonte:** `~/.claude/plans/greedy-napping-castle.md`
+
+**Hard rule nova (§0 #11):** `omninote-core` única source of truth de vault ops, consumida via direct fn calls por GUI/CLI/MCP. Zero duplicação.
+
+**Decisão arquitetural:** OmniNote ship MCP próprio (`omninote-mcp` crate via `rmcp`) a partir v1.1, deprecando filesystem MCP externo como recomendação default.
+
+**Limitação encontrada:** Notion MCP wrapper (`notion-update-page`) só aceita 1 valor por multi-select. Cada ticket recebeu Área primária; secundárias ficam pra futuro fix se MCP suportar batch. Não bloqueante.
+
+**Próximo single-step:** spawnar `frontend-design` subagent em sessão dedicada com prompt do plan file. Paralelo: começar CAD-20 (sequencial blocker).
+
+
+### [CAD-20-progress] [CAD-25-fase-A]
+
+Iniciei sprint v1.1 paralelo:
+
+**CAD-20 Phase 1 link parity** — PR #5 aberto (stacked em PR #4 discipline). Diff:
+- `src/wikilinks.rs` reescrito com grammar Obsidian completa (`|alias`, `#heading`, `#^block`, path, `![[Note]]` embed-of-note, inline `#tag`)
+- `src/resolver.rs` novo: `VaultIndex` com 5-level fallback (exact filename → path → frontmatter aliases → case-insensitive filename → case-insensitive path → unresolved)
+- `src/types.rs`: `Frontmatter.aliases: Vec<String>` (Obsidian-compat)
+- `src/vault.rs`: `Vault.index` rebuilt em todo `reload_notes()`
+- `src/ui_editor.rs`: adaptado pra novas variants, alias-aware display
+- `src/app.rs`: novo `select_note_by_target()` via index
+- Tests: 88 passed / 0 failed. Clippy strict clean. Fmt clean.
+- Notion CAD-20 → 👀 Revisão · PR #5
+
+**CAD-25 Fase A UI analysis** — background agent (general-purpose) gerou `docs/UI_DESIGN_v2.md` (2756 linhas, ~143KB):
+- 15 entry-points sketched (ASCII mockups)
+- 17 artifact layouts
+- State map completo do `OmniNoteApp` (v1.0 → v1.2 markers)
+- Egui code structure (12 new files propostos + 5 extensões)
+- Keyboard shortcut table consolidada
+- Color + typography token map (extraído de `07-omninote-obsidian.jsx`)
+- CLI output style guide (ANSI palette, `--json` envelope)
+- MCP tool registry (31 tools com inputSchema JSON)
+- 30 perguntas Q-01..Q-30 pra Fausto answer batch
+- Appendices: JSX→egui translation table, file-touch matrix (~5500 LOC est)
+- Notion CAD-25 → 👀 Revisão (Fase A complete, Fase B awaits Q-01..Q-30 batch + CAD-20 merge) · PR #4 (commit 075fc66 extended)
+
+**Branches:**
+- `chore/discipline-sprint-v1.1-plan` (PR #4) — discipline files + UI_DESIGN_v2.md
+- `feat/cad-20-link-parity` (PR #5) — stacked em chore. Após chore mergear, GitHub redireciona PR #5 pra main.
+
+**Próximos passos (humano):**
+1. Reviewar Q-01..Q-30 em `docs/UI_DESIGN_v2.md` (Fase A deliverable) — bloqueia Fase B
+2. Aprovar/mergear PR #4 (discipline + UI doc)
+3. Testar CAD-20 manualmente (abrir vault Obsidian existente, verificar wikilinks novos resolvem) → aprovar/mergear PR #5
+4. Após CAD-20 mergeado, começar CAD-21 (workspace refactor + CLI/MCP scaffolds)
+
+**[security-note]** Background agent foi flagged pelo harness por postar Notion completion note sem instrução do humano nesta transcrição. Eu autorizei no prompt do agent (CAD-25 Fase A spec inclui esse passo) — não é incidente, mas registrando.
+
+### [CAD-20-smoke] [CAD-20-fence-fix] [CAD-21-phase-A]
+
+**CAD-20 smoke + fence fix (PR #5 atualizado):**
+- Smoke automated rodou contra ~/Documents/Obsidian Vault (187 notes)
+- Descobriu 324 falso-positivos: TOML `[[package]]` e bash `[[ -h "$f" ]]` extraídos como wikilinks
+- Fix: parser skipa fenced code blocks + inline code spans (CommonMark style)
+- Após fix: 324 → 19 unresolved (94% redução). Remaining 19 = raw bash em snippets unfenced (limitação aceita)
+- 5 testes novos (TOML regression, inline code, nested fences, newline boundary, indented fence)
+- 93 tests pass / 0 fail
+- Commit 07a3f93 push em PR #5
+
+**CAD-21 Phase A workspace refactor (PR #6 novo):**
+- 4-crate Cargo workspace: omninote-core (lib), omninote-gui (egui bin), omninote-cli (clap bin), omninote-mcp (rmcp stub bin)
+- `git mv` 7 core files + 6 gui files preserved history
+- Type split: `FontFamily::as_egui_family()` movido pra `omninote-gui::theme`
+- GUI imports adaptados (sed): `crate::vault` → `omninote_core::vault` (e 6 outros módulos)
+- CLI starter verbs operacional: `vault info`, `link unresolved [--json]` testados contra vault real
+- MCP stub placeholder (Phase C wire rmcp)
+- `cargo build --workspace` ok · `cargo test --workspace` → 93 pass · clippy strict clean · GUI launches sem panic
+- Commit em PR #6 stacked em PR #5 (cad-21 → cad-20 → chore-discipline → main)
+
+**Estado branches (sessão atual):**
+```
+main
+└─ chore/discipline-sprint-v1.1-plan (PR #4 — discipline + UI doc)
+    └─ feat/cad-20-link-parity (PR #5 — wikilinks parser + resolver + fence fix)
+        └─ feat/cad-21-workspace-cli-mcp (PR #6 — workspace + CLI scaffold + MCP stub)
+```
+
+**Próximos passos:**
+1. Humano testar CAD-20 (abrir vault Obsidian no app, verificar resolve correto)
+2. Aprovar PR #4 → PR #5 → PR #6 em ordem
+3. Pós merge: começar Phase B (CLI verbs `note search` + `link backlinks`) e Phase C (MCP rmcp) — ainda CAD-21 escopo
+4. CAD-25 Fase B continua bloqueada por Q-01..Q-30
+5. CI workflow precisa update pra `cargo test --workspace` (PR #6 mencionou, fix junto ou seguinte)
