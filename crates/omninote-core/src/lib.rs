@@ -13,6 +13,7 @@ pub mod autoformat;
 pub mod import;
 pub mod pdf;
 pub mod resolver;
+pub mod search;
 pub mod types;
 pub mod vault;
 pub mod wikilinks;

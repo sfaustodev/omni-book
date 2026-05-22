@@ -47,9 +47,18 @@ enum VaultAction {
 
 #[derive(Subcommand, Debug)]
 enum NoteAction {
-    /// Full-text search across notes.
+    /// Full-text search across notes (line-level substring match).
     Search {
         query: String,
+        /// Match case exactly. Default false (case-insensitive).
+        #[arg(long)]
+        case: bool,
+        /// Max hits. Default unlimited.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Search note titles only (skip body).
+        #[arg(long)]
+        titles_only: bool,
         #[arg(long)]
         json: bool,
     },
@@ -68,6 +77,14 @@ enum LinkAction {
         #[arg(long)]
         json: bool,
     },
+}
+
+fn format_anchor(a: &Option<omninote_core::wikilinks::Anchor>) -> Option<String> {
+    use omninote_core::wikilinks::Anchor;
+    a.as_ref().map(|x| match x {
+        Anchor::Heading(h) => format!("#{h}"),
+        Anchor::Block(b) => format!("#^{b}"),
+    })
 }
 
 fn resolve_vault(arg: Option<PathBuf>) -> Option<PathBuf> {
@@ -116,10 +133,48 @@ fn main() -> anyhow::Result<()> {
             }
         },
         Command::Note { action } => match action {
-            NoteAction::Search { query, json: _ } => {
-                anyhow::bail!(
-                    "note search not implemented yet (CAD-21 Phase B). Query was: {query}"
-                )
+            NoteAction::Search {
+                query,
+                case,
+                limit,
+                titles_only,
+                json,
+            } => {
+                let vault = omninote_core::vault::Vault::open(vault_root.clone())
+                    .map_err(|e| anyhow::anyhow!("vault open failed: {e}"))?;
+                let opts = omninote_core::search::SearchOpts {
+                    case_sensitive: case,
+                    limit,
+                };
+                let hits = if titles_only {
+                    omninote_core::search::search_titles(&vault.notes, &query, opts)
+                } else {
+                    omninote_core::search::search(&vault.notes, &query, opts)
+                };
+                if json {
+                    let out = serde_json::json!({
+                        "ok": true,
+                        "data": hits.iter().map(|h| serde_json::json!({
+                            "rel_path": h.rel_path,
+                            "title": h.title,
+                            "line_no": h.line_no,
+                            "snippet": h.snippet,
+                        })).collect::<Vec<_>>(),
+                        "meta": { "count": hits.len(), "query": query }
+                    });
+                    println!("{}", serde_json::to_string(&out)?);
+                } else {
+                    if hits.is_empty() {
+                        println!("no matches for: {query}");
+                    }
+                    for h in &hits {
+                        if h.line_no == 0 {
+                            println!("{}", h.rel_path.display());
+                        } else {
+                            println!("{}:{}: {}", h.rel_path.display(), h.line_no, h.snippet);
+                        }
+                    }
+                }
             }
         },
         Command::Link { action } => match action {
@@ -144,10 +199,38 @@ fn main() -> anyhow::Result<()> {
                     }
                 }
             }
-            LinkAction::Backlinks { file, json: _ } => {
-                anyhow::bail!(
-                    "link backlinks not implemented yet (CAD-21 Phase B). File was: {file}"
-                )
+            LinkAction::Backlinks { file, json } => {
+                let vault = omninote_core::vault::Vault::open(vault_root.clone())
+                    .map_err(|e| anyhow::anyhow!("vault open failed: {e}"))?;
+                // Resolve `file` via the same rules as wikilinks (filename/path/alias).
+                let target = vault.index.resolve(&file).cloned().ok_or_else(|| {
+                    anyhow::anyhow!("file does not match any note in vault: {file}")
+                })?;
+                let backlinks = vault.index.backlinks_to(&target, &vault.notes);
+                if json {
+                    let out = serde_json::json!({
+                        "ok": true,
+                        "data": backlinks.iter().map(|b| serde_json::json!({
+                            "source": b.source,
+                            "is_embed": b.is_embed,
+                            "anchor": format_anchor(&b.anchor),
+                        })).collect::<Vec<_>>(),
+                        "meta": { "count": backlinks.len(), "target": target }
+                    });
+                    println!("{}", serde_json::to_string(&out)?);
+                } else {
+                    println!("{} backlinks → {}", backlinks.len(), target.display());
+                    for b in &backlinks {
+                        let kind = if b.is_embed { "![[ ]]" } else { "[[ ]]" };
+                        let anch = format_anchor(&b.anchor);
+                        println!(
+                            "  {} {} {}",
+                            b.source.display(),
+                            kind,
+                            anch.unwrap_or_default()
+                        );
+                    }
+                }
             }
         },
     }
