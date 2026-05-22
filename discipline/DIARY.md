@@ -194,3 +194,37 @@ main
 3. Pós merge: começar Phase B (CLI verbs `note search` + `link backlinks`) e Phase C (MCP rmcp) — ainda CAD-21 escopo
 4. CAD-25 Fase B continua bloqueada por Q-01..Q-30
 5. CI workflow precisa update pra `cargo test --workspace` (PR #6 mencionou, fix junto ou seguinte)
+
+### [auto-merge-batch] [CAD-20-merged] [CAD-21-merged] [ci-fix-merged]
+
+Humano comando "se CI=verde automerge" → executei chain merge completa.
+
+**Mergeados main (em ordem):**
+- #7 ci: trigger workflow on PRs to any branch (8c43dce)
+- #4 chore(discipline): sprint v1.1 plan + UI_DESIGN_v2 + CAD-20..CAD-25 specs (a8ee2c1)
+- #10 feat(wikilinks): CAD-20 Obsidian link parity [rebased] (417fd5d)
+- #11 refactor: CAD-21 Phase A workspace (e14697b)
+- #12 feat(cli): CAD-21 Phase B note search + link backlinks (5c228f4)
+- #13 feat(mcp): CAD-21 Phase C rmcp 1.7 server (71ee182)
+
+**Stacked PR pattern descoberto:** GitHub auto-fecha PR quando base branch deletada no squash do parent. Solução: rebase chain + criar novo PR pra cada filho post-merge. Trabalho extra mas necessário.
+
+**Incidentes:**
+- `[fmt-drift]` rebase cad-21 perdeu fmt fix que estava em cad-21b → CI #11 falhou em `cargo fmt --check`. Fix: amend cad-21 commit com fmt + cascade rebase.
+- `[lost-commit]` rebase cad-21c usei `1add4ba` stale → 0 commits aplicados → Phase C commit perdeu. Fix: reflog → `git reset --hard 1add4ba` → re-rebase com `c080a16` (real parent) correto.
+
+**CI sequence:** PR #10 (~5min), #11 (~10min com novas crate deps), #12 (~3min cache warm), #13 (~3min). Total CI wait ~25min. Caching ajudou nos PRs posteriores.
+
+**Estado final main:**
+```
+71ee182 feat(mcp): rmcp 1.7 server (#13)
+5c228f4 feat(cli): note search + link backlinks (#12)
+e14697b refactor: Cargo workspace (#11)
+417fd5d feat(wikilinks): link parity (#10)
+a8ee2c1 chore(discipline): sprint v1.1 plan (#4)
+8c43dce ci: stacked branch trigger (#7)
+```
+
+**Notion status:** CAD-20 + CAD-21 ficam 👀 Revisão (não ✅ — per memory `feedback_auto_merge_when_ci_green` + discipline rule #13: ✅ exige string explícita humano "testado, pode fechar").
+
+**Próximo:** humano testa OmniNote contra vault real Obsidian → confirma → ✅ CAD-20 + CAD-21. Em paralelo: CAD-25 Fase B (UI implementation) desbloqueada por Q-01..Q-30 já respondidos (mas Q-01..Q-08 do HUMAN.md também resolvidos — 30 Qs do UI_DESIGN_v2.md são separadas, ainda pendentes).
