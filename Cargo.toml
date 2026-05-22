@@ -49,9 +49,9 @@ notify = "6"
 clap = { version = "4", features = ["derive", "env"] }
 
 # MCP deps
-rmcp = { version = "0.1", features = ["server", "macros"] }
+rmcp = { version = "1", features = ["server", "macros", "transport-io"] }
 tokio = { version = "1", features = ["full"] }
-schemars = "0.8"
+schemars = "1"
 
 [workspace.dependencies.tempfile]
 version = "3"
