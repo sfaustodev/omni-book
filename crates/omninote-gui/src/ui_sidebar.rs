@@ -28,14 +28,14 @@ impl OmniNoteApp {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
                             .small_button("⚙")
-                            .on_hover_text("Configurações (Ctrl+,)")
+                            .on_hover_text("Configurações (Cmd+,)")
                             .clicked()
                         {
                             self.show_settings = true;
                         }
                         if ui
                             .small_button("☀/🌙")
-                            .on_hover_text("Tema (Ctrl+Shift+D)")
+                            .on_hover_text("Tema (Cmd+Shift+D)")
                             .clicked()
                         {
                             if let Some(v) = &mut self.vault {
@@ -61,10 +61,10 @@ impl OmniNoteApp {
                 // Search
                 let search = ui.add(
                     egui::TextEdit::singleline(&mut self.query)
-                        .hint_text("🔍 Buscar... (Ctrl+K)")
+                        .hint_text("🔍 Buscar... (Cmd+K)")
                         .desired_width(f32::INFINITY),
                 );
-                if ctx.input(|i| i.key_pressed(egui::Key::K) && i.modifiers.ctrl) {
+                if ctx.input(|i| i.key_pressed(egui::Key::K) && i.modifiers.command) {
                     search.request_focus();
                 }
 
@@ -100,7 +100,7 @@ impl OmniNoteApp {
                 // Footer
                 ui.separator();
                 ui.horizontal(|ui| {
-                    if ui.button("➕ Nota").on_hover_text("Ctrl+N").clicked() {
+                    if ui.button("➕ Nota").on_hover_text("Cmd+N").clicked() {
                         self.show_new = true;
                     }
                     if ui.button("📁 Pasta").clicked() {
