@@ -63,8 +63,12 @@
 
 | ID | Title | Status | Prio | Size | Est | Depende | Notion URL |
 |------|-------|--------|------|------|-----|---------|------------|
-| CAD-23 | Phase 4 — AI-native vault (RAG + auto-tag + dictation + OCR) | 🌱 Backlog | ⚡ | 🐘 XL | 40h | CAD-21 | [36673ac79ddb81d9b1a9f1df14a8fc9d](https://www.notion.so/36673ac79ddb81d9b1a9f1df14a8fc9d) |
-| CAD-24 | Phase 5 — Power automation (quick-capture + multi-vault + diff + JSON) | 🌱 Backlog | 📌 | 🐎 L | 20h | CAD-21 | [36673ac79ddb813784afe6f9920adedc](https://www.notion.so/36673ac79ddb813784afe6f9920adedc) |
+| CAD-23 | Phase 4 — AI-native vault (umbrella: RAG + auto-tag + dictation + OCR) | 🔄 In progress | ⚡ | 🐘 XL | 40h | CAD-21 | [36673ac79ddb81d9b1a9f1df14a8fc9d](https://www.notion.so/36673ac79ddb81d9b1a9f1df14a8fc9d) |
+| CAD-23.1 | RAG search (omninote-ai crate + ask CLI/MCP) | 👀 Revisão | ⚡ | 🐎 L | 12h | CAD-21 | mergeado PR #17 |
+| CAD-23.2 | Auto-tag + summary | 🌱 Backlog | ⚡ | 🐂 M | 6h | CAD-23.1 done | — |
+| CAD-23.3 | Dictation Whisper | 🌱 Backlog | ⚡ | 🐎 L | 10h | CAD-23.1 done | — |
+| CAD-23.4 | OCR PDF (leptess/tesseract) | 🌱 Backlog | 📌 | 🐂 M | 8h | CAD-23.1 done | — |
+| CAD-24 | Phase 5 — Power automation (quick-capture + multi-vault + diff + JSON) | 🌱 Backlog | 📌 | 🐎 L | 20h | CAD-23 done | [36673ac79ddb813784afe6f9920adedc](https://www.notion.so/36673ac79ddb813784afe6f9920adedc) |
 
 ### Parallel work map
 
