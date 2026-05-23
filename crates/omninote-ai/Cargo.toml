@@ -19,6 +19,8 @@ async-trait.workspace = true
 tokio.workspace = true
 toml.workspace = true
 reqwest.workspace = true
+bincode.workspace = true
+fastembed.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

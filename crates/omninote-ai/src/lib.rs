@@ -15,7 +15,11 @@
 //! (slash menu + dictation hotkey + AI chat panel).
 
 pub mod config;
+pub mod embeddings;
 pub mod provider;
 
 pub use config::{LlmConfig, ProviderConfig};
+pub use embeddings::{
+    chunk_note, cosine, embed_note, EmbeddedChunk, Embedder, EmbeddingIndex, FastEmbedder,
+};
 pub use provider::{AnthropicProvider, CompleteOpts, LlmProvider, ProviderError, ProviderName};
