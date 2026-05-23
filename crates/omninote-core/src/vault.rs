@@ -73,13 +73,21 @@ impl Vault {
 
     fn read_note(&self, path: &Path) -> Result<Note, String> {
         let raw = fs::read_to_string(path).map_err(|e| e.to_string())?;
-        let (frontmatter, content) = parse_frontmatter(&raw);
+        let (mut frontmatter, content) = parse_frontmatter(&raw);
         let title = path
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("sem título")
             .to_string();
         let rel_path = path.strip_prefix(&self.root).unwrap_or(path).to_path_buf();
+        // Foreign vaults (Obsidian, raw markdown, etc.) often have no `id:`
+        // frontmatter — defaulting to "" would make every such note collide
+        // on the same key in downstream HashMaps (CAD-23.1 RAG bug). Use the
+        // rel_path as a stable derived id: unique per file, survives rename
+        // because we re-read on every reload.
+        if frontmatter.id.is_empty() {
+            frontmatter.id = rel_path.to_string_lossy().to_string();
+        }
         Ok(Note {
             path: path.to_path_buf(),
             rel_path,
@@ -339,6 +347,58 @@ mod tests {
                 file_path.display()
             ),
         }
+    }
+
+    #[test]
+    fn foreign_note_without_frontmatter_id_gets_rel_path_fallback() {
+        // CAD-23.1 RAG bug regression. Notes from foreign vaults (Obsidian,
+        // raw markdown) lack OmniNote `id:` frontmatter. They used to all
+        // collide on id="" in downstream HashMap-keyed flows. Now each gets
+        // a unique id derived from rel_path.
+        let dir = tempfile::tempdir().unwrap();
+        // Plain markdown — no frontmatter at all.
+        std::fs::write(dir.path().join("alpha.md"), "# Alpha\n\nbody").unwrap();
+        std::fs::write(dir.path().join("beta.md"), "# Beta\n\nbody").unwrap();
+        let v = Vault::open(dir.path().to_path_buf()).unwrap();
+        let ids: std::collections::HashSet<&str> =
+            v.notes.iter().map(|n| n.frontmatter.id.as_str()).collect();
+        assert_eq!(
+            ids.len(),
+            v.notes.len(),
+            "every foreign note must get a unique fallback id, got ids={ids:?}"
+        );
+        for n in &v.notes {
+            assert!(
+                !n.frontmatter.id.is_empty(),
+                "no note should have empty id; got note {}",
+                n.title
+            );
+            assert_eq!(
+                n.frontmatter.id,
+                n.rel_path.to_string_lossy().to_string(),
+                "fallback id should match rel_path"
+            );
+        }
+    }
+
+    #[test]
+    fn omninote_native_note_keeps_uuid_id() {
+        // Notes created via Vault::create_note get a `n_<uuid>` id and the
+        // fallback should NOT overwrite it.
+        let (mut v, _d) = temp_vault();
+        let note = v.create_note(None, "Nativa", NoteType::Resumo).unwrap();
+        let original_id = note.frontmatter.id.clone();
+        assert!(
+            original_id.starts_with("n_"),
+            "expected n_<uuid>, got {original_id}"
+        );
+        v.reload_notes();
+        let reloaded = v
+            .notes
+            .iter()
+            .find(|n| n.title == "Nativa")
+            .expect("note should be reloaded");
+        assert_eq!(reloaded.frontmatter.id, original_id);
     }
 
     #[test]
