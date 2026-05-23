@@ -242,6 +242,46 @@ struct DisciplineShowOutput {
     content: String,
 }
 
+// ───── CAD-23.1 — vault_ask (RAG retrieve + optional LLM answer) ─────
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct VaultAskParams {
+    /// The user's question.
+    query: String,
+    /// Top-k passages to retrieve. Default 5.
+    #[serde(default = "default_top_k")]
+    top_k: usize,
+    /// If true, skip the LLM call and only return passages.
+    #[serde(default)]
+    no_llm: bool,
+    /// Override the Anthropic model id (default from llm.toml).
+    #[serde(default)]
+    model: Option<String>,
+}
+
+fn default_top_k() -> usize {
+    5
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct AskPassage {
+    note_id: String,
+    chunk_idx: usize,
+    wikilink: String,
+    score: f32,
+    text: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct VaultAskOutput {
+    query: String,
+    passages: Vec<AskPassage>,
+    /// Present when `no_llm=false` and at least one passage was found.
+    answer: Option<String>,
+    indexed_chunks: usize,
+    embed_calls: usize,
+}
+
 // -------- tool implementations --------
 
 #[tool_router]
@@ -381,7 +421,7 @@ impl OmniNoteMcp {
             template_name: params.template,
             folder: params.folder.unwrap_or_else(|| "Daily".into()),
         };
-        let res = omninote_core::daily::ensure_daily(&*self.vault_root, opts)
+        let res = omninote_core::daily::ensure_daily(&self.vault_root, opts)
             .map_err(|e| ErrorData::internal_error(format!("daily_ensure: {e}"), None))?;
         Ok(Json(DailyEnsureOutput {
             path: res.path,
@@ -399,7 +439,7 @@ impl OmniNoteMcp {
         &self,
         Parameters(_): Parameters<EmptyParams>,
     ) -> Result<Json<TemplateListOutput>, ErrorData> {
-        let list = omninote_core::templates::list_templates(&*self.vault_root);
+        let list = omninote_core::templates::list_templates(&self.vault_root);
         let count = list.len();
         Ok(Json(TemplateListOutput {
             templates: list
@@ -421,7 +461,7 @@ impl OmniNoteMcp {
         &self,
         Parameters(params): Parameters<TemplateApplyParams>,
     ) -> Result<Json<TemplateApplyOutput>, ErrorData> {
-        let body = omninote_core::templates::load_template(&*self.vault_root, &params.name)
+        let body = omninote_core::templates::load_template(&self.vault_root, &params.name)
             .map_err(|e| ErrorData::invalid_params(format!("template: {e}"), None))?;
         let ctx = omninote_core::templates::TemplateContext::now(params.title);
         let rendered = omninote_core::templates::render(&body, &ctx);
@@ -437,7 +477,7 @@ impl OmniNoteMcp {
         Parameters(params): Parameters<DiaryAppendParams>,
     ) -> Result<Json<DiaryAppendOutput>, ErrorData> {
         let path = omninote_core::discipline::diary_quick(
-            &*self.vault_root,
+            &self.vault_root,
             &params.text,
             params.ticket.as_deref(),
         )
@@ -453,9 +493,8 @@ impl OmniNoteMcp {
         &self,
         Parameters(params): Parameters<HumanAskParams>,
     ) -> Result<Json<HumanAskOutput>, ErrorData> {
-        let (path, q_id) =
-            omninote_core::discipline::human_ask(&*self.vault_root, &params.question)
-                .map_err(|e| ErrorData::internal_error(format!("human_ask: {e}"), None))?;
+        let (path, q_id) = omninote_core::discipline::human_ask(&self.vault_root, &params.question)
+            .map_err(|e| ErrorData::internal_error(format!("human_ask: {e}"), None))?;
         Ok(Json(HumanAskOutput { path, q_id }))
     }
 
@@ -467,7 +506,7 @@ impl OmniNoteMcp {
         &self,
         Parameters(params): Parameters<TicketStatusParams>,
     ) -> Result<Json<TicketStatusOutput>, ErrorData> {
-        let t = omninote_core::discipline::ticket_status(&*self.vault_root, &params.ticket_id)
+        let t = omninote_core::discipline::ticket_status(&self.vault_root, &params.ticket_id)
             .ok_or_else(|| {
                 ErrorData::invalid_params(format!("ticket not found: {}", params.ticket_id), None)
             })?;
@@ -498,11 +537,127 @@ impl OmniNoteMcp {
                 )
             },
         )?;
-        let content = omninote_core::discipline::read_raw(&*self.vault_root, f)
+        let content = omninote_core::discipline::read_raw(&self.vault_root, f)
             .map_err(|e| ErrorData::internal_error(format!("discipline_show: {e}"), None))?;
         Ok(Json(DisciplineShowOutput {
             file: f.filename().to_string(),
             content,
+        }))
+    }
+
+    #[tool(
+        name = "vault_ask",
+        description = "Semantic search over the vault using local embeddings (fastembed BGE small, 384d). Returns top-k passages with `[[wikilink]]` citations. By default also calls Claude with the passages to synthesize an answer; set `no_llm=true` to return passages only and save tokens. The embedding index is cached at `<vault>/.omninote/embeddings.bin` and refreshed incrementally — only changed chunks are re-embedded."
+    )]
+    async fn vault_ask(
+        &self,
+        Parameters(params): Parameters<VaultAskParams>,
+    ) -> Result<Json<VaultAskOutput>, ErrorData> {
+        use omninote_ai::LlmProvider;
+
+        let vault = self.open_vault()?;
+
+        let embedder = omninote_ai::FastEmbedder::bge_small()
+            .map_err(|e| ErrorData::internal_error(format!("fastembed init: {e}"), None))?;
+        let index_path = omninote_ai::EmbeddingIndex::default_path(&self.vault_root);
+        let existing = omninote_ai::EmbeddingIndex::load(&index_path)
+            .map_err(|e| ErrorData::internal_error(format!("load embeddings: {e}"), None))?;
+        let mut rag = omninote_ai::Rag::with_index(embedder, existing);
+
+        let mut embed_calls = 0usize;
+        for note in &vault.notes {
+            if let Ok(n) = rag.upsert_note(&note.frontmatter.id, &note.content) {
+                embed_calls += n;
+            }
+        }
+        let alive: std::collections::HashSet<&str> = vault
+            .notes
+            .iter()
+            .map(|n| n.frontmatter.id.as_str())
+            .collect();
+        let stale: Vec<String> = rag
+            .index
+            .entries
+            .iter()
+            .map(|c| c.note_id.clone())
+            .filter(|id| !alive.contains(id.as_str()))
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+        for id in &stale {
+            rag.forget_note(id);
+        }
+        rag.index
+            .save(&index_path)
+            .map_err(|e| ErrorData::internal_error(format!("save embeddings: {e}"), None))?;
+
+        let hits = rag
+            .retrieve(&params.query, params.top_k)
+            .map_err(|e| ErrorData::internal_error(format!("retrieve: {e}"), None))?;
+
+        let passages: Vec<AskPassage> = hits
+            .iter()
+            .map(|h| {
+                let wikilink = vault
+                    .notes
+                    .iter()
+                    .find(|n| n.frontmatter.id == h.note_id)
+                    .map(|n| format!("[[{}]]", n.title))
+                    .unwrap_or_else(|| format!("[[{}]]", h.note_id));
+                AskPassage {
+                    note_id: h.note_id.clone(),
+                    chunk_idx: h.chunk_idx,
+                    wikilink,
+                    score: h.score,
+                    text: h.chunk_text.clone(),
+                }
+            })
+            .collect();
+
+        let answer = if params.no_llm || passages.is_empty() {
+            None
+        } else {
+            let cfg = omninote_ai::LlmConfig::load()
+                .map_err(|e| ErrorData::internal_error(format!("load llm.toml: {e}"), None))?;
+            let key = cfg
+                .anthropic_key()
+                .map_err(|e| ErrorData::invalid_params(format!("api key: {e}"), None))?;
+            let provider = omninote_ai::AnthropicProvider::new(key);
+            let opts = omninote_ai::CompleteOpts {
+                model: params.model.clone().unwrap_or(cfg.provider.model.clone()),
+                max_tokens: cfg.provider.max_tokens,
+                ..Default::default()
+            };
+            let mut passages_str = String::new();
+            for (idx, p) in passages.iter().enumerate() {
+                passages_str.push_str(&format!(
+                    "{}. {} (score {:.2})\n{}\n\n",
+                    idx + 1,
+                    p.wikilink,
+                    p.score,
+                    p.text
+                ));
+            }
+            let system = "You answer questions about the user's personal note vault. \
+                          Cite supporting notes inline as [[wikilinks]] using the labels in the passages. \
+                          If the passages don't answer the question, say so plainly.";
+            let user = format!(
+                "Passages:\n\n{passages_str}---\n\nQuestion: {}",
+                params.query
+            );
+            let text = provider
+                .complete(system, &user, opts)
+                .await
+                .map_err(|e| ErrorData::internal_error(format!("llm: {e}"), None))?;
+            Some(text)
+        };
+
+        Ok(Json(VaultAskOutput {
+            query: params.query,
+            passages,
+            answer,
+            indexed_chunks: rag.index.entries.len(),
+            embed_calls,
         }))
     }
 }
@@ -521,7 +676,7 @@ impl ServerHandler for OmniNoteMcp {
         // `ServerInfo` is `#[non_exhaustive]`; mutate Default's fields.
         let mut info = ServerInfo::default();
         info.instructions = Some(format!(
-            "OmniNote MCP server. Vault: {}. Tools: vault_info, note_search, link_unresolved, link_backlinks, daily_ensure, template_list, template_apply, diary_append, human_ask, ticket_status, discipline_show. Vault is re-scanned per call.",
+            "OmniNote MCP server. Vault: {}. Tools: vault_info, note_search, link_unresolved, link_backlinks, daily_ensure, template_list, template_apply, diary_append, human_ask, ticket_status, discipline_show, vault_ask. Vault is re-scanned per call.",
             self.vault_root.display()
         ));
         info.capabilities = ServerCapabilities::builder().enable_tools().build();

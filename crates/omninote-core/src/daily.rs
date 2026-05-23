@@ -204,8 +204,10 @@ mod tests {
     #[test]
     fn respects_custom_folder() {
         let tmp = tempfile::tempdir().unwrap();
-        let mut opts = DailyOpts::default();
-        opts.folder = "journal/2026".into();
+        let opts = DailyOpts {
+            folder: "journal/2026".into(),
+            ..Default::default()
+        };
         let res = ensure_daily(tmp.path(), opts).unwrap();
         assert!(res.path.starts_with(tmp.path().join("journal/2026")));
         assert!(res.rel_path.starts_with("journal/2026"));

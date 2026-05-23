@@ -21,6 +21,7 @@
 //! `{ok, data, meta?}` or `{ok: false, error}`).
 
 use clap::{Parser, Subcommand};
+use omninote_ai::LlmProvider; // brings trait `complete` method into scope
 use omninote_core::discipline::DisciplineFile;
 use std::path::PathBuf;
 
@@ -91,6 +92,23 @@ enum Command {
     Discipline {
         #[command(subcommand)]
         action: DisciplineAction,
+    },
+    /// Ask the vault — semantic retrieval + LLM completion (CAD-23.1).
+    Ask {
+        /// The question — wrap in quotes for multi-word queries.
+        query: String,
+        /// Top-k passages to retrieve from the local embedding index.
+        #[arg(long, default_value_t = 5)]
+        top_k: usize,
+        /// Skip the LLM call and just print the retrieved passages.
+        /// Useful for debugging retrieval quality without spending tokens.
+        #[arg(long)]
+        no_llm: bool,
+        /// Anthropic model id to use (overrides config).
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -208,7 +226,8 @@ fn parse_naive_date(s: &str) -> anyhow::Result<chrono::NaiveDate> {
         .map_err(|e| anyhow::anyhow!("invalid date '{s}' (expected YYYY-MM-DD): {e}"))
 }
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let vault_root = resolve_vault(cli.vault.clone()).ok_or_else(|| {
         anyhow::anyhow!("no vault: pass --vault, set OMNINOTE_VAULT, or open the GUI once")
@@ -515,6 +534,186 @@ fn main() -> anyhow::Result<()> {
                 }
             }
         },
+        Command::Ask {
+            query,
+            top_k,
+            no_llm,
+            model,
+            json,
+        } => {
+            cmd_ask(&vault_root, &query, top_k, no_llm, model, json).await?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Resolve `note_id` → `[[wikilink]]` target via `vault.notes`. Falls back
+/// to the bare id if no matching note found (shouldn't happen but defensive).
+fn note_id_to_wikilink(notes: &[omninote_core::types::Note], id: &str) -> String {
+    notes
+        .iter()
+        .find(|n| n.frontmatter.id == id)
+        .map(|n| format!("[[{}]]", n.title))
+        .unwrap_or_else(|| format!("[[{id}]]"))
+}
+
+/// CAD-23.1 RAG flow: incremental index → retrieve → optional LLM answer.
+async fn cmd_ask(
+    vault_root: &std::path::Path,
+    query: &str,
+    top_k: usize,
+    no_llm: bool,
+    model_override: Option<String>,
+    json: bool,
+) -> anyhow::Result<()> {
+    let started = std::time::Instant::now();
+
+    // 1. Vault scan.
+    let vault = omninote_core::vault::Vault::open(vault_root.to_path_buf())
+        .map_err(|e| anyhow::anyhow!("vault open failed: {e}"))?;
+
+    // 2. Embedder + index. First call downloads the BGE small model
+    //    (~100MB → ~/.cache/huggingface) and takes ~15s to init; subsequent
+    //    calls reuse the cache and start in ~1s.
+    eprintln!("loading embedder (first run downloads ~100MB)...");
+    let embedder = omninote_ai::FastEmbedder::bge_small()
+        .map_err(|e| anyhow::anyhow!("fastembed init: {e}"))?;
+
+    let index_path = omninote_ai::EmbeddingIndex::default_path(vault_root);
+    let existing = omninote_ai::EmbeddingIndex::load(&index_path)
+        .map_err(|e| anyhow::anyhow!("load embeddings: {e}"))?;
+    let mut rag = omninote_ai::Rag::with_index(embedder, existing);
+
+    // 3. Incremental refresh — skips notes whose chunks haven't changed.
+    let mut embed_calls = 0usize;
+    for note in &vault.notes {
+        match rag.upsert_note(&note.frontmatter.id, &note.content) {
+            Ok(n) => embed_calls += n,
+            Err(e) => eprintln!("warn: upsert {} failed: {e}", note.title),
+        }
+    }
+    // Drop chunks for notes that no longer exist in the vault.
+    let alive_ids: std::collections::HashSet<&str> = vault
+        .notes
+        .iter()
+        .map(|n| n.frontmatter.id.as_str())
+        .collect();
+    let stale_ids: Vec<String> = rag
+        .index
+        .entries
+        .iter()
+        .map(|c| c.note_id.clone())
+        .filter(|id| !alive_ids.contains(id.as_str()))
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    for id in &stale_ids {
+        rag.forget_note(id);
+    }
+
+    rag.index
+        .save(&index_path)
+        .map_err(|e| anyhow::anyhow!("save embeddings: {e}"))?;
+
+    // 4. Retrieve.
+    let hits = rag
+        .retrieve(query, top_k)
+        .map_err(|e| anyhow::anyhow!("retrieve: {e}"))?;
+    let retrieved_ms = started.elapsed().as_millis();
+
+    // Resolve note_id → wikilink for output.
+    let hits_with_links: Vec<_> = hits
+        .iter()
+        .map(|h| (note_id_to_wikilink(&vault.notes, &h.note_id), h.clone()))
+        .collect();
+
+    // 5. Optionally call the LLM.
+    let answer = if no_llm || hits.is_empty() {
+        None
+    } else {
+        let cfg =
+            omninote_ai::LlmConfig::load().map_err(|e| anyhow::anyhow!("load llm.toml: {e}"))?;
+        let key = cfg
+            .anthropic_key()
+            .map_err(|e| anyhow::anyhow!("API key: {e}"))?;
+        let provider = omninote_ai::AnthropicProvider::new(key);
+        let opts = omninote_ai::CompleteOpts {
+            model: model_override.unwrap_or(cfg.provider.model.clone()),
+            max_tokens: cfg.provider.max_tokens,
+            ..Default::default()
+        };
+
+        let mut passages = String::new();
+        for (idx, (link, h)) in hits_with_links.iter().enumerate() {
+            passages.push_str(&format!(
+                "{}. {} (score {:.2})\n{}\n\n",
+                idx + 1,
+                link,
+                h.score,
+                h.chunk_text
+            ));
+        }
+        let system = "You answer questions about the user's personal note vault. \
+                      Cite supporting notes inline as [[wikilinks]] using the labels in the passages. \
+                      If the passages don't answer the question, say so plainly.";
+        let user_prompt = format!("Passages:\n\n{passages}---\n\nQuestion: {query}");
+        let text = provider
+            .complete(system, &user_prompt, opts)
+            .await
+            .map_err(|e| anyhow::anyhow!("llm: {e}"))?;
+        Some(text)
+    };
+
+    let total_ms = started.elapsed().as_millis();
+
+    if json {
+        let out = serde_json::json!({
+            "ok": true,
+            "data": {
+                "query": query,
+                "passages": hits_with_links.iter().map(|(link, h)| serde_json::json!({
+                    "note_id": h.note_id,
+                    "chunk_idx": h.chunk_idx,
+                    "wikilink": link,
+                    "score": h.score,
+                    "text": h.chunk_text,
+                })).collect::<Vec<_>>(),
+                "answer": answer,
+            },
+            "meta": {
+                "embed_calls": embed_calls,
+                "stale_dropped": stale_ids.len(),
+                "retrieved_ms": retrieved_ms,
+                "total_ms": total_ms,
+                "indexed_chunks": rag.index.entries.len(),
+            }
+        });
+        println!("{}", serde_json::to_string(&out)?);
+    } else {
+        eprintln!(
+            "[indexed {} chunks · embedded {} new · dropped {} stale · {} hits in {}ms]",
+            rag.index.entries.len(),
+            embed_calls,
+            stale_ids.len(),
+            hits.len(),
+            retrieved_ms
+        );
+        if hits.is_empty() {
+            println!("no matches for: {query}");
+            return Ok(());
+        }
+        for (idx, (link, h)) in hits_with_links.iter().enumerate() {
+            println!("{}. {} (score {:.2})", idx + 1, link, h.score);
+            for line in h.chunk_text.lines().take(3) {
+                println!("   {line}");
+            }
+            println!();
+        }
+        if let Some(ans) = answer {
+            println!("---");
+            println!("{ans}");
+        }
     }
 
     Ok(())

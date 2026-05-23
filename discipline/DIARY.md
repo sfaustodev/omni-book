@@ -4,6 +4,56 @@
 
 ---
 
+## 2026-05-23 — CAD-23.1 RAG search (Phases A-F)
+
+**Tickets touched:** CAD-23.1 (sub-task de CAD-23, sprint v1.3)
+
+**Branch:** `feat/cad-23-1-rag-search` (saiu de main, `--base main` explícito)
+
+**Done — novo crate `omninote-ai` + extensões CLI/MCP:**
+
+Sprint v1.3 começou. CAD-23 fatiado em 4 subtasks (decisão via AskUserQuestion) — esta é a primeira (RAG search). Decisões locked:
+- Local-only AI stack (fastembed + whisper-rs + tesseract)
+- Anthropic Claude API default (trait `LlmProvider` permite Ollama/Grok futuro)
+- Crate novo `omninote-ai` separado de core (deps pesadas ~200MB de modelos)
+
+**6 fases (A→F):**
+
+- **Phase A** — scaffold `omninote-ai`. `LlmProvider` trait (async-trait), `AnthropicProvider` stub, `LlmConfig` toml loader. API key redaction via `ProviderError::redact_key()` (`sk-ant-`/`Bearer ` prefixes strip). Env-touching tests serializadas via `static Mutex<()>` pra evitar race do parallel runner. 24 tests.
+- **Phase B** — `embeddings.rs`. `EmbeddingIndex` bincode-persistido em `.omninote/embeddings.bin` com `model_id` + `dim` (cache invalidation). `Embedder` trait + `FastEmbedder` (BGE small, 384d). `chunk_note()` puro (split blank-line + merge até max_chars, nunca split mid-paragraph). `hash_chunk` + `cosine`. 31 tests com `StubEmbedder` (sem download de modelo no CI).
+- **Phase C** — `rag.rs`. `Rag` facade combina `EmbeddingIndex` + `Embedder`. `build_index_from_notes`, `upsert_note` (skip-unchanged via content_hash, embed só chunks diff), `forget_note`, `retrieve` (cosine top-k com tiebreaker determinístico note_id+chunk_idx). 22 tests.
+- **Phase D** — `AnthropicProvider` HTTP real via `reqwest`. Helpers puros `build_messages_body` + `extract_text_from_response` permitem unit-test wire format sem hit network. `MockProvider` pra downstream tests. ANTHROPIC_API_VERSION pinned em `2023-06-01`. API key NUNCA leaka (test asserta com unreachable port). 12 tests novos = 89 totais em omninote-ai.
+- **Phase E** — CLI `omninote ask "query" [--top-k 5] [--no-llm] [--model X] [--json]` + MCP tool `vault_ask`. Fluxo: vault scan → FastEmbedder load (lazy, baixa ~100MB primeira vez) → load index → incremental upsert per note (skip-unchanged) → drop stale (notas deletadas) → save index → retrieve top-k → opcional LLM completion citando `[[wikilinks]]`. `main` virou `#[tokio::main] async fn`. Trait import gotcha: `LlmProvider` precisa estar in scope pro `.complete()` resolver mesmo com `AnthropicProvider` visível.
+- **Phase F** — ship. fmt + clippy + workspace test. README + DIARY + SPRINT + NOTION updates. PR `--base main` explícito (lesson learned de CAD-22). Auto-merge quando CI verde.
+
+**Clippy fixes em flight** (4 errors descobertos no `-D warnings`):
+
+1. `Default::default() + field-by-field assignment` → struct literal (anti-pattern field_reassign_with_default). Pegou em `daily.rs::respects_custom_folder` (CAD-22 pre-existing) + meu `rag.rs::new`. Cure: usar `Self { field: x, ..Default::default() }`.
+2. `unused_mut` em test (`let mut idx = ...` mas nunca muta).
+3. `dead_code` em método `api_key()` que adicionei pra tests mas nunca chamei.
+4. `&*self.vault_root` redundante (Arc<PathBuf> auto-derefs pra `&Path`). 7 callsites no MCP main.rs.
+
+**Quality gate:**
+
+- `cargo test --workspace` → 256 totais (87 ai + 169 core)
+- `cargo fmt --check` clean
+- `cargo clippy --workspace --all-targets -- -D warnings` clean (após fixes acima)
+
+**Anti-pattern documentado (CAD-22):** PR #15 fechou no GH default branch (`feat/omninote-v01` legacy) por falta de `--base main` explícito no `gh pr create`. Fix retroativo via cherry-pick virou PR #16. Daqui pra frente: sempre `--base main` no gh pr create.
+
+**Padrão consolidado pra próximos sub-CADs:**
+
+1. Cada módulo novo segue `search.rs` template (doc header + structs + pub fns + #[cfg(test)] com proptest).
+2. Backend-agnostic via trait (`LlmProvider`, `Embedder`) — permite mock em testes sem dep pesada.
+3. Wire format de APIs externas em helpers puros (não-async, sem I/O) → testáveis sem network.
+4. API keys: redact em `Debug`/`Display`, test asserta key não aparece em error.
+5. Idempotência via content_hash — re-runs baratos.
+6. Env-touching tests → `static Mutex<()>` (não dep externa).
+
+**Next:** CAD-23.2 (auto-tag), CAD-23.3 (dictation), CAD-23.4 (OCR). Plus: real-use smoke contra Obsidian Vault (~187 notas, 1ª build de index ~3-5min, retrievals subsequentes ~1s + LLM latency).
+
+---
+
 ## 2026-05-23 — quick entry
 
 **Tickets touched:** CAD-22

@@ -1,11 +1,11 @@
-# SPRINT — OmniNote v1.2 (Daily + Discipline)
+# SPRINT — OmniNote v1.3 (AI-native + Power)
 
-> **Sprint goal:** entregar daily notes + templates + discipline CLI/MCP (CAD-22), tornando o `omninote` usável no fluxo diário e expondo sacred files via tools pro Cowork/Claude Desktop.
-> **Sprint window:** 2026-06-03 → 2026-06-17 (2 semanas)
+> **Sprint goal:** chat-com-vault funcional via RAG semântico (CAD-23.x slices) + power automation (CAD-24). User pode perguntar "where did I discuss X?" e Claude responde citando `[[wikilinks]]`.
+> **Sprint window:** 2026-06-17 → 2026-07-01 (2 semanas, fatiado em CAD-23.1/.2/.3/.4 + CAD-24)
 > **Tracker:** [Notion · 🚢 Caderno de Bordo](https://app.notion.com/p/35373ac79ddb81fa96bcdb9991425508) — ver [NOTION.md](NOTION.md) pro índice local.
-> **Plano de origem:** `~/.claude/plans/greedy-napping-castle.md` (seção "Next session execution plan — 2026-05-23")
+> **Plano de origem:** `~/.claude/plans/greedy-napping-castle.md` (seção "Sprint v1.3 — CAD-23 + CAD-24")
 
-**Sprint anterior (v1.1 Foundation):** ✅ CAD-20 (link parity) + ✅ CAD-21 (workspace + CLI + MCP) + ✅ CAD-25 Fase A (UI v2 análise) — todos mergeados em main, binários instalados.
+**Sprint anterior (v1.2 Daily + Discipline):** ✅ CAD-22 mergeado main (PR #16), Notion 👀 Revisão aguardando teste humano. Discipline CLI/MCP rodando (omninote daily, diary append, human ask, ticket, discipline show + tools MCP equivalentes).
 
 ---
 
@@ -25,31 +25,50 @@
 
 ---
 
-## §1 — Sprint v1.2 (atual): Daily + Discipline
+## §1 — Sprint v1.3 (atual): AI-native + Power
+
+CAD-23 foi fatiado em 4 subtasks shipáveis (per decisão AskUserQuestion 2026-05-23, plano em greedy-napping-castle.md).
 
 | # | ID | Tarefa | Status | Prio | Estimativa | Notas |
 |---|------|--------|--------|------|------------|-------|
-| 1 | CAD-22 | Phase 3 — Daily notes + templates + discipline CLI/MCP | 🔄 Em execução | ⚡ | 18h | branch `feat/cad-22-daily-discipline` |
-| 2 | CAD-25 (Fase B) | UI Design v2 — implementação egui | 🌱 Backlog | ⚡ | ~22h | bloqueado em Q-01..Q-30 (UI_DESIGN_v2.md) |
+| 1 | CAD-23.1 | RAG search (omninote-ai + ask CLI/MCP) | 🔄 Em execução | ⚡ | 12h | branch `feat/cad-23-1-rag-search` — Phases A-F done |
+| 2 | CAD-23.2 | Auto-tag + summary | 🌱 Backlog | ⚡ | 6h | depende 23.1 |
+| 3 | CAD-23.3 | Dictation Whisper | 🌱 Backlog | ⚡ | 10h | depende 23.1 |
+| 4 | CAD-23.4 | OCR PDF | 🌱 Backlog | 📌 | 8h | depende 23.1 |
+| 5 | CAD-24 | Power automation (quick-capture + multi-vault + diff) | 🌱 Backlog | 📌 | 20h | depende CAD-23 done |
+| 6 | CAD-25 (Fase B) | UI Design v2 — implementação egui | 🚫 Bloqueado | ⚡ | ~22h | aguarda batch Q-01..Q-30 (UI_DESIGN_v2.md) |
 
 ### Dependency graph
 
 ```
-CAD-22 (daily + discipline)
-  └─→ Sprint v1.3 (CAD-23 AI, CAD-24 power) — todos dependem do core estável
+CAD-23.1 RAG (Phase A-F) → ship → confirma humano → ✅
+  ├─→ CAD-23.2 auto-tag (LLM)
+  ├─→ CAD-23.3 dictation (whisper-rs)
+  └─→ CAD-23.4 OCR (leptess/tesseract)
+       ↓
+       CAD-24 power automation
 
-CAD-25 Fase B (UI v2) ⟂ paralelo
-  └─ blocked on: Q-01..Q-30 batch decision com Fausto
+CAD-25 Fase B ⟂ blocked on Q-01..Q-30
 ```
 
 ### Parallel work strategy
 
-- **CAD-22** é o caminho principal. 6 fases (templates → daily → discipline → CLI → MCP → ship).
-- **CAD-25 Fase B** desbloqueia quando Fausto responder batch Q-01..Q-30. Antes disso, fica em standby.
+- **CAD-23.1** é o caminho principal — foundation pra todas outras AI tasks.
+- Após shipped, **CAD-23.2/.3/.4** podem rodar em paralelo (cada uma toca módulo próprio em omninote-ai).
+- **CAD-24** segue depois.
+- **CAD-25 Fase B** permanece blocked até user responder Q-01..Q-30 (UI design questions).
 
 ---
 
-## §1.5 — Sprint anterior (v1.1 Foundation) — ✅ shipped
+## §1.5 — Sprint anterior (v1.2 Daily + Discipline) — ✅ shipped
+
+| ID | Tarefa | Status | Notas |
+|------|--------|--------|-------|
+| CAD-22 | Phase 3 — Daily/Templates/Discipline CLI/MCP | ✅ Done (PR #16) | 7 tools MCP novos, ~780 LOC core, 60 tests novos |
+
+---
+
+## §1.6 — Sprint v1.1 Foundation — ✅ shipped
 
 | ID | Tarefa | Status | Notas |
 |------|--------|--------|-------|

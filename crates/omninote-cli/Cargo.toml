@@ -13,9 +13,11 @@ path = "src/main.rs"
 
 [dependencies]
 omninote-core.workspace = true
+omninote-ai.workspace = true
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
 dirs.workspace = true
 chrono.workspace = true
+tokio.workspace = true
