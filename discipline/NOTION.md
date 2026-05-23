@@ -56,7 +56,7 @@
 
 | ID | Title | Status | Prio | Size | Est | Depende | Notion URL |
 |------|-------|--------|------|------|-----|---------|------------|
-| CAD-22 | Phase 3 — Daily notes + templates + discipline CLI/MCP | 🌱 Backlog | ⚡ | 🐎 L | 18h | CAD-21 | [36673ac79ddb81719384cbc41c959717](https://www.notion.so/36673ac79ddb81719384cbc41c959717) |
+| CAD-22 | Phase 3 — Daily notes + templates + discipline CLI/MCP | 👀 Revisão | ⚡ | 🐎 L | 18h | CAD-21 | [36673ac79ddb81719384cbc41c959717](https://www.notion.so/36673ac79ddb81719384cbc41c959717) |
 | CAD-25 (Fase B) | UI Design v2 — implementação egui | 🌱 Backlog | ⚡ | 🐘 XL | 22h | CAD-20 + análise A | mesmo do v1.1 |
 
 ### Sprint v1.3 (2026-06-17 → 2026-07-01) · AI + Power

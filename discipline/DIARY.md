@@ -4,6 +4,13 @@
 
 ---
 
+## 2026-05-23 — quick entry
+
+**Tickets touched:** CAD-22
+
+CAD-22 mergeado em main via PR #16 (re-target após #15 ir pro feat/omninote-v01 por engano). 11 MCP tools agora visíveis em sessões novas do Claude — dogfooding confirmado.
+---
+
 ## 2026-05-23 — CAD-22 daily notes + templates + discipline CLI/MCP
 
 **Tickets touched:** CAD-22 (Phase 3 — daily/templates/discipline)
