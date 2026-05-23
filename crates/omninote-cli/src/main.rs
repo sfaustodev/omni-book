@@ -1,9 +1,27 @@
-//! OmniNote CLI — scaffold (CAD-21 Phase B will wire verbs).
+//! OmniNote CLI — vault ops from the terminal.
 //!
 //! Vault resolution order: `--vault <PATH>` → `OMNINOTE_VAULT` env →
 //! `~/.config/omninote/last_vault` file. Mirrors the GUI's vault picker.
+//!
+//! Verbs (CAD-22 added daily/template/diary/human/ticket/discipline):
+//! ```text
+//! omninote-cli vault info
+//! omninote-cli note search QUERY [--case] [--limit N] [--titles-only]
+//! omninote-cli link unresolved
+//! omninote-cli link backlinks FILE
+//! omninote-cli daily [--date YYYY-MM-DD] [--template NAME] [--folder Daily]
+//! omninote-cli template list
+//! omninote-cli template apply NAME [--title TITLE] [--out PATH]
+//! omninote-cli diary append TEXT [--ticket CAD-XX]
+//! omninote-cli human ask QUESTION
+//! omninote-cli ticket ID
+//! omninote-cli discipline show FILE
+//! ```
+//! Every verb accepts `--json` for machine-readable output (envelope:
+//! `{ok, data, meta?}` or `{ok: false, error}`).
 
 use clap::{Parser, Subcommand};
+use omninote_core::discipline::DisciplineFile;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -34,11 +52,50 @@ enum Command {
         #[command(subcommand)]
         action: LinkAction,
     },
+    /// Open/create today's daily note (CAD-22).
+    Daily {
+        /// Override date (YYYY-MM-DD). Default: today.
+        #[arg(long)]
+        date: Option<String>,
+        /// Template name to render (without `.md`). Default: `daily`.
+        #[arg(long)]
+        template: Option<String>,
+        /// Folder relative to vault. Default: `Daily`.
+        #[arg(long, default_value = "Daily")]
+        folder: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Template operations (CAD-22).
+    Template {
+        #[command(subcommand)]
+        action: TemplateAction,
+    },
+    /// Append entry to discipline DIARY.md (CAD-22).
+    Diary {
+        #[command(subcommand)]
+        action: DiaryAction,
+    },
+    /// Open question in discipline HUMAN.md (CAD-22).
+    Human {
+        #[command(subcommand)]
+        action: HumanAction,
+    },
+    /// Look up ticket status in NOTION.md / JIRA.md (CAD-22).
+    Ticket {
+        ticket_id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show raw content of a discipline file (CAD-22).
+    Discipline {
+        #[command(subcommand)]
+        action: DisciplineAction,
+    },
 }
 
 #[derive(Subcommand, Debug)]
 enum VaultAction {
-    /// Print vault metadata (path, file count, folder count).
     Info {
         #[arg(long)]
         json: bool,
@@ -47,16 +104,12 @@ enum VaultAction {
 
 #[derive(Subcommand, Debug)]
 enum NoteAction {
-    /// Full-text search across notes (line-level substring match).
     Search {
         query: String,
-        /// Match case exactly. Default false (case-insensitive).
         #[arg(long)]
         case: bool,
-        /// Max hits. Default unlimited.
         #[arg(long)]
         limit: Option<usize>,
-        /// Search note titles only (skip body).
         #[arg(long)]
         titles_only: bool,
         #[arg(long)]
@@ -66,13 +119,65 @@ enum NoteAction {
 
 #[derive(Subcommand, Debug)]
 enum LinkAction {
-    /// List wikilinks that don't resolve to any note.
     Unresolved {
         #[arg(long)]
         json: bool,
     },
-    /// List notes that link TO the given file.
     Backlinks {
+        file: String,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum TemplateAction {
+    /// List available templates under `<vault>/Templates/`.
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Render a template with optional title. Prints rendered text to
+    /// stdout (or writes to `--out` path).
+    Apply {
+        name: String,
+        #[arg(long, default_value = "")]
+        title: String,
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum DiaryAction {
+    /// Append a quick entry to DIARY.md (prepended to top).
+    Append {
+        /// Entry body (single line; wrap in quotes for spaces).
+        text: String,
+        /// Optional ticket reference, e.g. `CAD-22`.
+        #[arg(long)]
+        ticket: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum HumanAction {
+    /// Ask a new question (auto-numbers Q-NN under "Open questions").
+    Ask {
+        question: String,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum DisciplineAction {
+    /// Dump raw content. FILE is one of: diary|sprint|human|plan|jira|notion|eternal.
+    Show {
         file: String,
         #[arg(long)]
         json: bool,
@@ -96,6 +201,11 @@ fn resolve_vault(arg: Option<PathBuf>) -> Option<PathBuf> {
         .ok()
         .map(|s| PathBuf::from(s.trim()))
         .filter(|p| p.exists())
+}
+
+fn parse_naive_date(s: &str) -> anyhow::Result<chrono::NaiveDate> {
+    chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
+        .map_err(|e| anyhow::anyhow!("invalid date '{s}' (expected YYYY-MM-DD): {e}"))
 }
 
 fn main() -> anyhow::Result<()> {
@@ -202,7 +312,6 @@ fn main() -> anyhow::Result<()> {
             LinkAction::Backlinks { file, json } => {
                 let vault = omninote_core::vault::Vault::open(vault_root.clone())
                     .map_err(|e| anyhow::anyhow!("vault open failed: {e}"))?;
-                // Resolve `file` via the same rules as wikilinks (filename/path/alias).
                 let target = vault.index.resolve(&file).cloned().ok_or_else(|| {
                     anyhow::anyhow!("file does not match any note in vault: {file}")
                 })?;
@@ -230,6 +339,179 @@ fn main() -> anyhow::Result<()> {
                             anch.unwrap_or_default()
                         );
                     }
+                }
+            }
+        },
+
+        // ────────── CAD-22 verbs ──────────
+        Command::Daily {
+            date,
+            template,
+            folder,
+            json,
+        } => {
+            let opts = omninote_core::daily::DailyOpts {
+                date: date.as_deref().map(parse_naive_date).transpose()?,
+                template_name: template,
+                folder,
+            };
+            let res = omninote_core::daily::ensure_daily(&vault_root, opts)
+                .map_err(|e| anyhow::anyhow!("daily: {e}"))?;
+            if json {
+                let out = serde_json::json!({
+                    "ok": true,
+                    "data": {
+                        "path": res.path,
+                        "rel_path": res.rel_path,
+                        "created": res.created,
+                        "template_used": res.template_used,
+                    }
+                });
+                println!("{}", serde_json::to_string(&out)?);
+            } else {
+                println!(
+                    "{} {}",
+                    if res.created { "created" } else { "exists" },
+                    res.path.display()
+                );
+                if let Some(t) = &res.template_used {
+                    println!("template: {t}");
+                }
+            }
+        }
+        Command::Template { action } => match action {
+            TemplateAction::List { json } => {
+                let list = omninote_core::templates::list_templates(&vault_root);
+                if json {
+                    let out = serde_json::json!({
+                        "ok": true,
+                        "data": list.iter().map(|t| serde_json::json!({
+                            "name": t.name,
+                            "path": t.path,
+                        })).collect::<Vec<_>>(),
+                        "meta": { "count": list.len() }
+                    });
+                    println!("{}", serde_json::to_string(&out)?);
+                } else {
+                    if list.is_empty() {
+                        println!("no templates in <vault>/Templates/");
+                    }
+                    for t in &list {
+                        println!("{}  {}", t.name, t.path.display());
+                    }
+                }
+            }
+            TemplateAction::Apply {
+                name,
+                title,
+                out,
+                json,
+            } => {
+                let body = omninote_core::templates::load_template(&vault_root, &name)
+                    .map_err(|e| anyhow::anyhow!("template: {e}"))?;
+                let ctx = omninote_core::templates::TemplateContext::now(title);
+                let rendered = omninote_core::templates::render(&body, &ctx);
+                if let Some(path) = out.as_ref() {
+                    std::fs::write(path, &rendered)
+                        .map_err(|e| anyhow::anyhow!("write {}: {e}", path.display()))?;
+                }
+                if json {
+                    let out_json = serde_json::json!({
+                        "ok": true,
+                        "data": {
+                            "rendered": rendered,
+                            "wrote_to": out,
+                        }
+                    });
+                    println!("{}", serde_json::to_string(&out_json)?);
+                } else if out.is_none() {
+                    print!("{rendered}");
+                } else {
+                    println!("wrote: {}", out.as_ref().unwrap().display());
+                }
+            }
+        },
+        Command::Diary { action } => match action {
+            DiaryAction::Append { text, ticket, json } => {
+                let path =
+                    omninote_core::discipline::diary_quick(&vault_root, &text, ticket.as_deref())
+                        .map_err(|e| anyhow::anyhow!("diary append: {e}"))?;
+                if json {
+                    let out = serde_json::json!({
+                        "ok": true,
+                        "data": { "path": path }
+                    });
+                    println!("{}", serde_json::to_string(&out)?);
+                } else {
+                    println!("appended to {}", path.display());
+                }
+            }
+        },
+        Command::Human { action } => match action {
+            HumanAction::Ask { question, json } => {
+                let (path, qn) = omninote_core::discipline::human_ask(&vault_root, &question)
+                    .map_err(|e| anyhow::anyhow!("human ask: {e}"))?;
+                if json {
+                    let out = serde_json::json!({
+                        "ok": true,
+                        "data": { "path": path, "q_id": qn }
+                    });
+                    println!("{}", serde_json::to_string(&out)?);
+                } else {
+                    println!("{} added to {}", qn, path.display());
+                }
+            }
+        },
+        Command::Ticket { ticket_id, json } => {
+            match omninote_core::discipline::ticket_status(&vault_root, &ticket_id) {
+                Some(t) => {
+                    if json {
+                        let out = serde_json::json!({
+                            "ok": true,
+                            "data": {
+                                "ticket_id": t.ticket_id,
+                                "file": t.file,
+                                "line_no": t.line_no,
+                                "paragraph": t.paragraph,
+                            }
+                        });
+                        println!("{}", serde_json::to_string(&out)?);
+                    } else {
+                        println!("{} ({}:{})", t.ticket_id, t.file.display(), t.line_no);
+                        println!("{}", t.paragraph);
+                    }
+                }
+                None => {
+                    if json {
+                        let out = serde_json::json!({
+                            "ok": false,
+                            "error": format!("ticket not found: {ticket_id}")
+                        });
+                        println!("{}", serde_json::to_string(&out)?);
+                    } else {
+                        eprintln!("ticket not found: {ticket_id}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+        Command::Discipline { action } => match action {
+            DisciplineAction::Show { file, json } => {
+                let f = DisciplineFile::from_slug(&file).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "unknown discipline file '{file}' — try: diary|sprint|human|plan|jira|notion|eternal"
+                    )
+                })?;
+                let raw = omninote_core::discipline::read_raw(&vault_root, f)
+                    .map_err(|e| anyhow::anyhow!("show: {e}"))?;
+                if json {
+                    let out = serde_json::json!({
+                        "ok": true,
+                        "data": { "file": f.filename(), "content": raw }
+                    });
+                    println!("{}", serde_json::to_string(&out)?);
+                } else {
+                    print!("{raw}");
                 }
             }
         },

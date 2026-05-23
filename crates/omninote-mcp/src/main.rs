@@ -18,6 +18,13 @@
 //! - `note_search` — substring search across notes (or titles only)
 //! - `link_unresolved` — list wikilinks that don't resolve
 //! - `link_backlinks` — list notes that link to a given target
+//! - `daily_ensure` — create today's daily note (CAD-22)
+//! - `template_list` — list templates under `<vault>/Templates/` (CAD-22)
+//! - `template_apply` — render a template by name (CAD-22)
+//! - `diary_append` — quick-append entry to DIARY.md (CAD-22)
+//! - `human_ask` — open question in HUMAN.md (auto Q-NN) (CAD-22)
+//! - `ticket_status` — find ticket in NOTION.md / JIRA.md (CAD-22)
+//! - `discipline_show` — dump raw content of a discipline file (CAD-22)
 //!
 //! Vault resolved at startup: `OMNINOTE_VAULT` env → `~/.config/omninote/last_vault`.
 //! Vault is re-opened per tool call (fresh scan) — Phase 4 may cache.
@@ -134,6 +141,107 @@ struct LinkBacklinksOutput {
     count: usize,
 }
 
+// ───── CAD-22 — daily / templates / discipline params + outputs ─────
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct DailyEnsureParams {
+    /// Date override in `YYYY-MM-DD`. Default: today (local TZ).
+    #[serde(default)]
+    date: Option<String>,
+    /// Template name (no `.md`). Default: `daily`.
+    #[serde(default)]
+    template: Option<String>,
+    /// Folder relative to vault. Default: `Daily`.
+    #[serde(default)]
+    folder: Option<String>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct DailyEnsureOutput {
+    path: PathBuf,
+    rel_path: PathBuf,
+    created: bool,
+    template_used: Option<String>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct TemplateMetaOut {
+    name: String,
+    path: PathBuf,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct TemplateListOutput {
+    templates: Vec<TemplateMetaOut>,
+    count: usize,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct TemplateApplyParams {
+    /// Template name (no `.md`).
+    name: String,
+    /// Title to substitute into `{{title}}`.
+    #[serde(default)]
+    title: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct TemplateApplyOutput {
+    rendered: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct DiaryAppendParams {
+    /// Entry text (single line — wrap multi-line in `\n`).
+    text: String,
+    /// Optional ticket reference (e.g. `CAD-22`).
+    #[serde(default)]
+    ticket: Option<String>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct DiaryAppendOutput {
+    path: PathBuf,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct HumanAskParams {
+    /// The question (pt-BR recommended).
+    question: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct HumanAskOutput {
+    path: PathBuf,
+    q_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct TicketStatusParams {
+    /// Ticket ID like `CAD-22`, `SCRUM-157`. Word-bounded match.
+    ticket_id: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct TicketStatusOutput {
+    ticket_id: String,
+    file: PathBuf,
+    line_no: usize,
+    paragraph: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct DisciplineShowParams {
+    /// One of: `diary`, `sprint`, `human`, `plan`, `jira`, `notion`, `eternal`.
+    file: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct DisciplineShowOutput {
+    file: String,
+    content: String,
+}
+
 // -------- tool implementations --------
 
 #[tool_router]
@@ -243,6 +351,160 @@ impl OmniNoteMcp {
             count,
         }))
     }
+
+    // ───── CAD-22 — daily + templates + discipline tools ─────
+
+    #[tool(
+        name = "daily_ensure",
+        description = "Creates today's daily note `<vault>/<folder>/YYYY-MM-DD.md` if missing, rendered from `Templates/<template>.md` when available. Idempotent — returns `created: false` plus the path if the file already exists. Safe to call multiple times per day."
+    )]
+    async fn daily_ensure(
+        &self,
+        Parameters(params): Parameters<DailyEnsureParams>,
+    ) -> Result<Json<DailyEnsureOutput>, ErrorData> {
+        let date = params
+            .date
+            .as_deref()
+            .map(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d"))
+            .transpose()
+            .map_err(|e| {
+                ErrorData::invalid_params(
+                    format!(
+                        "invalid date '{:?}' (expected YYYY-MM-DD): {e}",
+                        params.date
+                    ),
+                    None,
+                )
+            })?;
+        let opts = omninote_core::daily::DailyOpts {
+            date,
+            template_name: params.template,
+            folder: params.folder.unwrap_or_else(|| "Daily".into()),
+        };
+        let res = omninote_core::daily::ensure_daily(&*self.vault_root, opts)
+            .map_err(|e| ErrorData::internal_error(format!("daily_ensure: {e}"), None))?;
+        Ok(Json(DailyEnsureOutput {
+            path: res.path,
+            rel_path: res.rel_path,
+            created: res.created,
+            template_used: res.template_used,
+        }))
+    }
+
+    #[tool(
+        name = "template_list",
+        description = "Lists all `*.md` templates under `<vault>/Templates/`. Returns empty array if folder absent."
+    )]
+    async fn template_list(
+        &self,
+        Parameters(_): Parameters<EmptyParams>,
+    ) -> Result<Json<TemplateListOutput>, ErrorData> {
+        let list = omninote_core::templates::list_templates(&*self.vault_root);
+        let count = list.len();
+        Ok(Json(TemplateListOutput {
+            templates: list
+                .into_iter()
+                .map(|t| TemplateMetaOut {
+                    name: t.name,
+                    path: t.path,
+                })
+                .collect(),
+            count,
+        }))
+    }
+
+    #[tool(
+        name = "template_apply",
+        description = "Renders `<vault>/Templates/<name>.md` substituting `{{date}}`, `{{time}}`, `{{title}}`, plus arbitrary `{{KEY}}` placeholders. Returns the rendered text — does NOT write a file."
+    )]
+    async fn template_apply(
+        &self,
+        Parameters(params): Parameters<TemplateApplyParams>,
+    ) -> Result<Json<TemplateApplyOutput>, ErrorData> {
+        let body = omninote_core::templates::load_template(&*self.vault_root, &params.name)
+            .map_err(|e| ErrorData::invalid_params(format!("template: {e}"), None))?;
+        let ctx = omninote_core::templates::TemplateContext::now(params.title);
+        let rendered = omninote_core::templates::render(&body, &ctx);
+        Ok(Json(TemplateApplyOutput { rendered }))
+    }
+
+    #[tool(
+        name = "diary_append",
+        description = "Appends a quick entry to `<vault>/discipline/DIARY.md` (or `<vault>/DIARY.md` as fallback). Entry is prepended to the top (newest first). Optional `ticket` reference adds a `**Tickets touched:** <ID>` line."
+    )]
+    async fn diary_append(
+        &self,
+        Parameters(params): Parameters<DiaryAppendParams>,
+    ) -> Result<Json<DiaryAppendOutput>, ErrorData> {
+        let path = omninote_core::discipline::diary_quick(
+            &*self.vault_root,
+            &params.text,
+            params.ticket.as_deref(),
+        )
+        .map_err(|e| ErrorData::internal_error(format!("diary_append: {e}"), None))?;
+        Ok(Json(DiaryAppendOutput { path }))
+    }
+
+    #[tool(
+        name = "human_ask",
+        description = "Adds a new open question to `<vault>/discipline/HUMAN.md`, auto-numbering it Q-NN under '## Open questions'. Use for irreversible decisions, external contracts, security questions, or SPRINT conflicts that need human input."
+    )]
+    async fn human_ask(
+        &self,
+        Parameters(params): Parameters<HumanAskParams>,
+    ) -> Result<Json<HumanAskOutput>, ErrorData> {
+        let (path, q_id) =
+            omninote_core::discipline::human_ask(&*self.vault_root, &params.question)
+                .map_err(|e| ErrorData::internal_error(format!("human_ask: {e}"), None))?;
+        Ok(Json(HumanAskOutput { path, q_id }))
+    }
+
+    #[tool(
+        name = "ticket_status",
+        description = "Looks up a ticket ID (e.g. `CAD-22`, `SCRUM-157`) in `<vault>/discipline/NOTION.md` first, then `JIRA.md`. Word-bounded match — `CAD-2` won't match `CAD-22`. Returns the surrounding paragraph + line number, or an error if missing."
+    )]
+    async fn ticket_status(
+        &self,
+        Parameters(params): Parameters<TicketStatusParams>,
+    ) -> Result<Json<TicketStatusOutput>, ErrorData> {
+        let t = omninote_core::discipline::ticket_status(&*self.vault_root, &params.ticket_id)
+            .ok_or_else(|| {
+                ErrorData::invalid_params(format!("ticket not found: {}", params.ticket_id), None)
+            })?;
+        Ok(Json(TicketStatusOutput {
+            ticket_id: t.ticket_id,
+            file: t.file,
+            line_no: t.line_no,
+            paragraph: t.paragraph,
+        }))
+    }
+
+    #[tool(
+        name = "discipline_show",
+        description = "Dumps the raw markdown of a discipline file. `file` is one of: diary, sprint, human, plan, jira, notion, eternal. Searches `<vault>/discipline/<FILE>` first, then `<vault>/<FILE>`."
+    )]
+    async fn discipline_show(
+        &self,
+        Parameters(params): Parameters<DisciplineShowParams>,
+    ) -> Result<Json<DisciplineShowOutput>, ErrorData> {
+        let f = omninote_core::discipline::DisciplineFile::from_slug(&params.file).ok_or_else(
+            || {
+                ErrorData::invalid_params(
+                    format!(
+                        "unknown discipline file '{}' — try: diary|sprint|human|plan|jira|notion|eternal",
+                        params.file
+                    ),
+                    None,
+                )
+            },
+        )?;
+        let content = omninote_core::discipline::read_raw(&*self.vault_root, f)
+            .map_err(|e| ErrorData::internal_error(format!("discipline_show: {e}"), None))?;
+        Ok(Json(DisciplineShowOutput {
+            file: f.filename().to_string(),
+            content,
+        }))
+    }
 }
 
 fn format_anchor(a: &Option<omninote_core::wikilinks::Anchor>) -> Option<String> {
@@ -259,7 +521,7 @@ impl ServerHandler for OmniNoteMcp {
         // `ServerInfo` is `#[non_exhaustive]`; mutate Default's fields.
         let mut info = ServerInfo::default();
         info.instructions = Some(format!(
-            "OmniNote MCP server. Vault: {}. Tools: vault_info, note_search, link_unresolved, link_backlinks. Vault is re-scanned per call.",
+            "OmniNote MCP server. Vault: {}. Tools: vault_info, note_search, link_unresolved, link_backlinks, daily_ensure, template_list, template_apply, diary_append, human_ask, ticket_status, discipline_show. Vault is re-scanned per call.",
             self.vault_root.display()
         ));
         info.capabilities = ServerCapabilities::builder().enable_tools().build();
