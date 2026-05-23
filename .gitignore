@@ -9,3 +9,9 @@ omni-book/
 
 # Local-only artifacts (Codex reviews, coverage outputs, smoke logs)
 reports_fausto/
+
+# Vault runtime data created by omninote-cli/mcp when caderno is used as a
+# vault for self-testing — never commit user content or AI model caches.
+.fastembed_cache/
+.omninote/
+Daily/
