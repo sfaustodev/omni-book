@@ -61,9 +61,11 @@ impl<E: Embedder> Rag<E> {
     /// [`Self::build_index_from_notes`] or load via
     /// [`EmbeddingIndex::load`] + [`Self::with_index`].
     pub fn new(embedder: E) -> Self {
-        let mut index = EmbeddingIndex::default();
-        index.model_id = embedder.model_id().to_string();
-        index.dim = embedder.dim();
+        let index = EmbeddingIndex {
+            model_id: embedder.model_id().to_string(),
+            dim: embedder.dim(),
+            entries: Vec::new(),
+        };
         Self {
             index,
             embedder,
@@ -316,7 +318,7 @@ mod tests {
 
     #[test]
     fn with_index_keeps_compatible_index() {
-        let mut idx = EmbeddingIndex {
+        let idx = EmbeddingIndex {
             model_id: "stub-v1".into(),
             dim: 8,
             entries: vec![EmbeddedChunk {
@@ -328,7 +330,7 @@ mod tests {
             }],
         };
         let backup_entries = idx.entries.clone();
-        let r = Rag::with_index(StubEmbedder { dim: 8 }, idx.clone());
+        let r = Rag::with_index(StubEmbedder { dim: 8 }, idx);
         assert_eq!(r.index.entries.len(), 1);
         assert_eq!(r.index.entries, backup_entries);
     }

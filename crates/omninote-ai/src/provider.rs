@@ -170,12 +170,6 @@ impl AnthropicProvider {
         self.base_url = url.into();
         self
     }
-
-    /// Borrow for tests asserting redaction — never serialize this in logs.
-    #[cfg(test)]
-    pub(crate) fn api_key(&self) -> &str {
-        &self.api_key
-    }
 }
 
 impl fmt::Debug for AnthropicProvider {
