@@ -230,6 +230,7 @@ mod tests {
                 attachments: vec![],
                 created: String::new(),
                 aliases: aliases.into_iter().map(|s| s.to_string()).collect(),
+                summary: String::new(),
             },
             title,
             content: content.to_string(),

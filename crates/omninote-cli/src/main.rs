@@ -93,6 +93,11 @@ enum Command {
         #[command(subcommand)]
         action: DisciplineAction,
     },
+    /// Auto-suggest tags + 1-line summary via LLM (CAD-23.2).
+    Tag {
+        #[command(subcommand)]
+        action: TagAction,
+    },
     /// Ask the vault — semantic retrieval + LLM completion (CAD-23.1).
     Ask {
         /// The question — wrap in quotes for multi-word queries.
@@ -197,6 +202,34 @@ enum DisciplineAction {
     /// Dump raw content. FILE is one of: diary|sprint|human|plan|jira|notion|eternal.
     Show {
         file: String,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum TagAction {
+    /// Suggest tags + summary for FILE via LLM. Without `--apply` only prints
+    /// the proposed diff. FILE is resolved by filename / path / alias (same
+    /// rules as wikilinks).
+    Auto {
+        file: String,
+        /// Write the suggested frontmatter back to disk.
+        #[arg(long)]
+        apply: bool,
+        /// Max total tags (current + suggested merged + capped). Default 5.
+        #[arg(long, default_value_t = 5)]
+        max_tags: usize,
+        /// Truncate the note body to this many chars before sending to LLM.
+        /// Default 6000.
+        #[arg(long, default_value_t = 6000)]
+        max_input_chars: usize,
+        /// Replace existing tags entirely instead of merging additively.
+        #[arg(long)]
+        replace: bool,
+        /// Override the LLM model id (else uses llm.toml).
+        #[arg(long)]
+        model: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -542,6 +575,112 @@ async fn main() -> anyhow::Result<()> {
             json,
         } => {
             cmd_ask(&vault_root, &query, top_k, no_llm, model, json).await?;
+        }
+        Command::Tag { action } => match action {
+            TagAction::Auto {
+                file,
+                apply,
+                max_tags,
+                max_input_chars,
+                replace,
+                model,
+                json,
+            } => {
+                cmd_tag_auto(
+                    &vault_root,
+                    &file,
+                    apply,
+                    max_tags,
+                    max_input_chars,
+                    replace,
+                    model,
+                    json,
+                )
+                .await?;
+            }
+        },
+    }
+
+    Ok(())
+}
+
+/// CAD-23.2 tag --auto flow: resolve FILE → LLM suggestion → optional apply.
+#[allow(clippy::too_many_arguments)]
+async fn cmd_tag_auto(
+    vault_root: &std::path::Path,
+    file: &str,
+    apply: bool,
+    max_tags: usize,
+    max_input_chars: usize,
+    replace: bool,
+    model: Option<String>,
+    json: bool,
+) -> anyhow::Result<()> {
+    let mut vault = omninote_core::vault::Vault::open(vault_root.to_path_buf())
+        .map_err(|e| anyhow::anyhow!("vault open failed: {e}"))?;
+    let rel = vault
+        .index
+        .resolve(file)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("note not found in vault: {file}"))?;
+    let note = vault
+        .notes
+        .iter()
+        .find(|n| n.rel_path == rel)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("resolved rel_path missing from vault.notes: {rel:?}"))?;
+
+    let cfg = omninote_ai::LlmConfig::load().map_err(|e| anyhow::anyhow!("load llm.toml: {e}"))?;
+    let key = cfg
+        .anthropic_key()
+        .map_err(|e| anyhow::anyhow!("API key: {e}"))?;
+    let provider = omninote_ai::AnthropicProvider::new(key);
+
+    let opts = omninote_ai::SuggestOpts {
+        max_tags,
+        max_input_chars,
+        merge_existing: !replace,
+        model: model.or(Some(cfg.provider.model.clone())),
+    };
+    let diff = omninote_ai::suggest_tags(&provider, &note, opts)
+        .await
+        .map_err(|e| anyhow::anyhow!("suggest_tags: {e}"))?;
+
+    let applied = if apply && diff.has_changes() {
+        omninote_ai::apply_diff(&mut vault, &diff)
+            .map_err(|e| anyhow::anyhow!("apply_diff: {e}"))?;
+        true
+    } else {
+        false
+    };
+
+    if json {
+        let out = serde_json::json!({
+            "ok": true,
+            "data": {
+                "rel_path": diff.note_rel_path,
+                "current": {
+                    "tags": diff.current_tags,
+                    "summary": diff.current_summary,
+                },
+                "suggested": {
+                    "tags": diff.suggested_tags,
+                    "summary": diff.suggested_summary,
+                },
+                "added": { "tags": diff.added_tags },
+                "applied": applied,
+                "has_changes": diff.has_changes(),
+            }
+        });
+        println!("{}", serde_json::to_string(&out)?);
+    } else {
+        print!("{}", diff.pretty());
+        if applied {
+            println!("APPLIED — frontmatter written to {}", rel.display());
+        } else if diff.has_changes() {
+            println!("DRY RUN — pass --apply to write changes.");
+        } else {
+            println!("no changes to apply.");
         }
     }
 

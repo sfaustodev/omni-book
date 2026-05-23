@@ -300,6 +300,7 @@ mod tests {
                 attachments: vec![],
                 created: String::new(),
                 aliases: vec![],
+                summary: String::new(),
             },
             title: title.into(),
             content: body.into(),

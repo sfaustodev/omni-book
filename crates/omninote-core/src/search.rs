@@ -116,6 +116,7 @@ mod tests {
                 attachments: vec![],
                 created: String::new(),
                 aliases: vec![],
+                summary: String::new(),
             },
             title: PathBuf::from(rel)
                 .file_stem()

@@ -31,10 +31,10 @@ CAD-23 foi fatiado em 4 subtasks shipáveis (per decisão AskUserQuestion 2026-0
 
 | # | ID | Tarefa | Status | Prio | Estimativa | Notas |
 |---|------|--------|--------|------|------------|-------|
-| 1 | CAD-23.1 | RAG search (omninote-ai + ask CLI/MCP) | 🔄 Em execução | ⚡ | 12h | branch `feat/cad-23-1-rag-search` — Phases A-F done |
-| 2 | CAD-23.2 | Auto-tag + summary | 🌱 Backlog | ⚡ | 6h | depende 23.1 |
-| 3 | CAD-23.3 | Dictation Whisper | 🌱 Backlog | ⚡ | 10h | depende 23.1 |
-| 4 | CAD-23.4 | OCR PDF | 🌱 Backlog | 📌 | 8h | depende 23.1 |
+| 1 | CAD-23.1 | RAG search (omninote-ai + ask CLI/MCP) | ✅ Done (PR #17 + hotfix #18) | ⚡ | 12h | mergeado main |
+| 2 | CAD-23.2 | Auto-tag + summary | 🔄 Em execução | ⚡ | 6h | branch `feat/cad-23-2-auto-tag` — Phases A-E done, PR pending |
+| 3 | CAD-23.3 | Dictation Whisper | 🌱 Backlog | ⚡ | 10h | depende 23.1 done ✅ |
+| 4 | CAD-23.4 | OCR PDF | 🌱 Backlog | 📌 | 8h | depende 23.1 done ✅ |
 | 5 | CAD-24 | Power automation (quick-capture + multi-vault + diff) | 🌱 Backlog | 📌 | 20h | depende CAD-23 done |
 | 6 | CAD-25 (Fase B) | UI Design v2 — implementação egui | 🚫 Bloqueado | ⚡ | ~22h | aguarda batch Q-01..Q-30 (UI_DESIGN_v2.md) |
 

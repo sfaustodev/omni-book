@@ -14,11 +14,13 @@
 //! `omninote-mcp` (tools `vault_ask`, `note_auto_tag`, …), `omninote-gui`
 //! (slash menu + dictation hotkey + AI chat panel).
 
+pub mod auto_tag;
 pub mod config;
 pub mod embeddings;
 pub mod provider;
 pub mod rag;
 
+pub use auto_tag::{apply_diff, suggest_tags, FrontmatterDiff, SuggestOpts};
 pub use config::{LlmConfig, ProviderConfig};
 pub use embeddings::{
     chunk_note, cosine, embed_note, EmbeddedChunk, Embedder, EmbeddingIndex, FastEmbedder,

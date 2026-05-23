@@ -272,6 +272,49 @@ struct AskPassage {
     text: String,
 }
 
+// ───── CAD-23.2 — note_auto_tag (LLM tag suggestion + summary) ─────
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct NoteAutoTagParams {
+    /// File reference: filename, path, or alias. Resolved like a `[[wikilink]]`.
+    file: String,
+    /// Max total tags (current + suggested merged, capped). Default 5.
+    #[serde(default = "default_max_tags")]
+    max_tags: usize,
+    /// Truncate the note body to this many chars before sending to LLM.
+    /// Default 6000.
+    #[serde(default = "default_max_input_chars")]
+    max_input_chars: usize,
+    /// Replace existing tags entirely instead of merging additively.
+    #[serde(default)]
+    replace: bool,
+    /// Persist the suggested frontmatter to disk. Default false (preview only).
+    #[serde(default)]
+    apply: bool,
+    /// Override the Anthropic model id.
+    #[serde(default)]
+    model: Option<String>,
+}
+
+fn default_max_tags() -> usize {
+    5
+}
+fn default_max_input_chars() -> usize {
+    6000
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct NoteAutoTagOutput {
+    rel_path: PathBuf,
+    current_tags: Vec<String>,
+    suggested_tags: Vec<String>,
+    added_tags: Vec<String>,
+    current_summary: String,
+    suggested_summary: String,
+    has_changes: bool,
+    applied: bool,
+}
+
 #[derive(Debug, Serialize, JsonSchema)]
 struct VaultAskOutput {
     query: String,
@@ -660,6 +703,69 @@ impl OmniNoteMcp {
             embed_calls,
         }))
     }
+
+    #[tool(
+        name = "note_auto_tag",
+        description = "Suggest tags + a one-line summary for a note via Claude. Returns a FrontmatterDiff (current vs suggested). By default does NOT write — set `apply: true` to persist. File is resolved like a `[[wikilink]]`. Existing tags are merged additively unless `replace: true`."
+    )]
+    async fn note_auto_tag(
+        &self,
+        Parameters(params): Parameters<NoteAutoTagParams>,
+    ) -> Result<Json<NoteAutoTagOutput>, ErrorData> {
+        let mut vault = omninote_core::vault::Vault::open((*self.vault_root).clone())
+            .map_err(|e| ErrorData::internal_error(format!("vault open: {e}"), None))?;
+        let rel = vault.index.resolve(&params.file).cloned().ok_or_else(|| {
+            ErrorData::invalid_params(format!("note not found in vault: {}", params.file), None)
+        })?;
+        let note = vault
+            .notes
+            .iter()
+            .find(|n| n.rel_path == rel)
+            .cloned()
+            .ok_or_else(|| {
+                ErrorData::internal_error(
+                    format!("resolved rel_path missing from vault.notes: {rel:?}"),
+                    None,
+                )
+            })?;
+
+        let cfg = omninote_ai::LlmConfig::load()
+            .map_err(|e| ErrorData::internal_error(format!("load llm.toml: {e}"), None))?;
+        let key = cfg
+            .anthropic_key()
+            .map_err(|e| ErrorData::invalid_params(format!("api key: {e}"), None))?;
+        let provider = omninote_ai::AnthropicProvider::new(key);
+
+        let opts = omninote_ai::SuggestOpts {
+            max_tags: params.max_tags,
+            max_input_chars: params.max_input_chars,
+            merge_existing: !params.replace,
+            model: params.model.or(Some(cfg.provider.model.clone())),
+        };
+        let diff = omninote_ai::suggest_tags(&provider, &note, opts)
+            .await
+            .map_err(|e| ErrorData::internal_error(format!("suggest_tags: {e}"), None))?;
+
+        let has_changes = diff.has_changes();
+        let applied = if params.apply && has_changes {
+            omninote_ai::apply_diff(&mut vault, &diff)
+                .map_err(|e| ErrorData::internal_error(format!("apply_diff: {e}"), None))?;
+            true
+        } else {
+            false
+        };
+
+        Ok(Json(NoteAutoTagOutput {
+            rel_path: diff.note_rel_path,
+            current_tags: diff.current_tags,
+            suggested_tags: diff.suggested_tags,
+            added_tags: diff.added_tags,
+            current_summary: diff.current_summary,
+            suggested_summary: diff.suggested_summary,
+            has_changes,
+            applied,
+        }))
+    }
 }
 
 fn format_anchor(a: &Option<omninote_core::wikilinks::Anchor>) -> Option<String> {
@@ -676,7 +782,7 @@ impl ServerHandler for OmniNoteMcp {
         // `ServerInfo` is `#[non_exhaustive]`; mutate Default's fields.
         let mut info = ServerInfo::default();
         info.instructions = Some(format!(
-            "OmniNote MCP server. Vault: {}. Tools: vault_info, note_search, link_unresolved, link_backlinks, daily_ensure, template_list, template_apply, diary_append, human_ask, ticket_status, discipline_show, vault_ask. Vault is re-scanned per call.",
+            "OmniNote MCP server. Vault: {}. Tools: vault_info, note_search, link_unresolved, link_backlinks, daily_ensure, template_list, template_apply, diary_append, human_ask, ticket_status, discipline_show, vault_ask, note_auto_tag. Vault is re-scanned per call.",
             self.vault_root.display()
         ));
         info.capabilities = ServerCapabilities::builder().enable_tools().build();
