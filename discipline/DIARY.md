@@ -4,6 +4,22 @@
 
 ---
 
+## 2026-05-23 — CAD-21 release install + Claude Desktop MCP config
+
+**Tickets touched:** CAD-21 (workspace/CLI/MCP — operacional pós-merge)
+
+**Done:**
+- `cargo build --release --workspace` → 3 binários: `omninote` (7.7MB GUI), `omninote-cli` (982KB), `omninote-mcp` (2.2MB)
+- Instalados em `~/.local/bin/` (sem sudo)
+- `~/.config/omninote/last_vault` → `/Users/peluche/Documents/Obsidian Vault` (GUI auto-abre vault)
+- `~/Library/Application Support/Claude/claude_desktop_config.json` → entrada `omninote` com `OMNINOTE_VAULT=/Users/peluche/Documents/Obsidian Vault`
+- Smoke CLI: `vault info` → 187 notas, 138 files, 187 paths, 0 aliases. EXIT: 0
+- Smoke MCP: JSON-RPC initialize + tools/list → 4 tools registrados (`vault_info`, `note_search`, `link_unresolved`, `link_backlinks`). EXIT: 0
+
+**Next:** usuário reinicia Claude Desktop → MCP disponível. Abre GUI `omninote`. Próximo sprint: CAD-22 (daily notes + templates + discipline CLI).
+
+---
+
 ## 2026-05-02 — discipline migration: root → discipline/ subfolder
 
 **Tickets touched:** none (housekeeping)
