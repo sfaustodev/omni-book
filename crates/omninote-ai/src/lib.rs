@@ -17,9 +17,11 @@
 pub mod config;
 pub mod embeddings;
 pub mod provider;
+pub mod rag;
 
 pub use config::{LlmConfig, ProviderConfig};
 pub use embeddings::{
     chunk_note, cosine, embed_note, EmbeddedChunk, Embedder, EmbeddingIndex, FastEmbedder,
 };
 pub use provider::{AnthropicProvider, CompleteOpts, LlmProvider, ProviderError, ProviderName};
+pub use rag::{Rag, RagHit, RagOpts, DEFAULT_MAX_CHUNK_CHARS};
