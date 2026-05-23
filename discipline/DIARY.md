@@ -4,6 +4,88 @@
 
 ---
 
+## 2026-05-23 — CAD-22 daily notes + templates + discipline CLI/MCP
+
+**Tickets touched:** CAD-22 (Phase 3 — daily/templates/discipline)
+
+**Branch:** `feat/cad-22-daily-discipline` (saiu de main)
+
+**Done — 3 novos módulos em `omninote-core` + extensões CLI/MCP:**
+
+- `crates/omninote-core/src/templates.rs` (260 LOC) — render de `{{date}}/{{time}}/{{title}}/{{extra}}`. chrono `StrftimeItems` panic-safe (matches `Item::Error` antes de format). UTF-8-safe via `next_char_boundary()`. 21 unit tests + 2 proptests (256 cases cada).
+- `crates/omninote-core/src/daily.rs` (180 LOC) — `ensure_daily()` idempotente: cria `<vault>/<folder>/YYYY-MM-DD.md` se missing, render do template + extras. Idempotência testada com `idempotent_preserves_user_edits` (edita arquivo entre chamadas — segunda call não sobrescreve). `list_dailies()` pra calendário CAD-25 Fase B. 11 unit tests + 1 proptest.
+- `crates/omninote-core/src/discipline.rs` (340 LOC) — 7 sacred files via enum (DIARY/SPRINT/HUMAN/PLAN/JIRA/NOTION/ETERNAL). `resolve_path()` prefere `discipline/` subfolder, fallback root. 3 append modes: prepend (DIARY), insert-before-resolved (HUMAN com auto Q-NN + remove placeholder `_(nenhuma..)_`), append-tail (resto). `ticket_status()` word-bounded grep — `CAD-2` ≠ `CAD-22`. 23 unit tests + 2 proptests.
+
+**CLI verbos novos (6 → total 10):**
+
+```
+omninote-cli daily [--date Y-M-D] [--template N] [--folder Daily]
+omninote-cli template list|apply NAME [--title T] [--out PATH]
+omninote-cli diary append TEXT [--ticket CAD-XX]
+omninote-cli human ask QUESTION
+omninote-cli ticket ID
+omninote-cli discipline show diary|sprint|human|plan|jira|notion|eternal
+```
+
+Todos com `--json` envelope `{ok, data, meta}`. `chrono` adicionado a `omninote-cli/Cargo.toml`.
+
+**MCP tools novos (7 → total 11):**
+
+`daily_ensure`, `template_list`, `template_apply`, `diary_append`, `human_ask`, `ticket_status`, `discipline_show`. Padrão CAD-21: `#[tool]` + `Parameters<T>` + `Json<T>`, structs com `JsonSchema` derive. JSON-RPC `tools/list` confirma 11 tools. JSON-RPC `tools/call` em 3 tools (`ticket_status`, `discipline_show`, `daily_ensure`) — todos retornam `structuredContent` correto. `chrono` adicionado a `omninote-mcp/Cargo.toml`.
+
+**Quality gate:**
+
+- `cargo test --workspace` → 169 passed / 1 ignored / 0 failed (60+ tests novos)
+- `cargo fmt --all --check` → clean
+- `cargo clippy --workspace --all-targets -- -D warnings` → clean
+- `cargo llvm-cov --workspace --summary-only` — coverage por módulo novo:
+  - `templates.rs`: 99.78% regions / 99.55% lines
+  - `daily.rs`: 98.99% / 98.45%
+  - `discipline.rs`: 95.13% / 95.37%
+- Workspace total 56% reflete binários (cli/mcp/gui main.rs sem unit tests) — padrão pré-existente, sem regressão.
+
+**Real-use smoke contra vault `caderno/`:**
+
+- `omninote-cli ticket CAD-22` → encontra em `discipline/NOTION.md:59` com word-boundary (não mistura com CAD-2)
+- `omninote-cli daily` em /tmp vault novo → cria `Daily/2026-05-23.md` com starter `# {{date}} / ## Notas`
+- Segunda chamada → `exists` em vez de `created`, preserva edits
+- `omninote-cli diary append "smoke" --ticket CAD-22` → prepend no topo do DIARY com `**Tickets touched:** CAD-22`
+- `omninote-cli human ask "..."` → auto-numera Q-NN, remove `_(nenhuma)_` placeholder
+
+**Decisões de design (pré-locked via AskUserQuestion no início):**
+
+- Tudo em `omninote-core` (sem crate novo) — coerente com `search.rs`/`resolver.rs`
+- Discipline path fixo: `<vault>/discipline/<FILE>` primeiro, fallback `<vault>/<FILE>`
+- Coverage gate ≥90% mantido (Q-04 já resolvido)
+
+**Install + Claude Desktop:**
+
+- Rebuild release: `omninote-cli` 1.2MB (+220KB), `omninote-mcp` 2.5MB (+300KB), `omninote` GUI 7.7MB (inchange)
+- Reinstalado em `~/.local/bin/`
+- Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`) já tem `omninote` entry da CAD-21 — vai pegar os 7 tools novos no próximo restart
+
+**Plano de origem:** `~/.claude/plans/greedy-napping-castle.md` seção "Next session execution plan — 2026-05-23".
+
+**Next:** PR + auto-merge quando CI verde. Próximo sprint v1.3: CAD-23 (AI-native) + CAD-24 (power automation) podem rodar paralelo. CAD-25 Fase B segue blocked em Q-01..Q-30.
+
+---
+
+## 2026-05-23 — CAD-21 release install + Claude Desktop MCP config
+
+**Tickets touched:** CAD-21 (workspace/CLI/MCP — operacional pós-merge)
+
+**Done:**
+- `cargo build --release --workspace` → 3 binários: `omninote` (7.7MB GUI), `omninote-cli` (982KB), `omninote-mcp` (2.2MB)
+- Instalados em `~/.local/bin/` (sem sudo)
+- `~/.config/omninote/last_vault` → `/Users/peluche/Documents/Obsidian Vault` (GUI auto-abre vault)
+- `~/Library/Application Support/Claude/claude_desktop_config.json` → entrada `omninote` com `OMNINOTE_VAULT=/Users/peluche/Documents/Obsidian Vault`
+- Smoke CLI: `vault info` → 187 notas, 138 files, 187 paths, 0 aliases. EXIT: 0
+- Smoke MCP: JSON-RPC initialize + tools/list → 4 tools registrados (`vault_info`, `note_search`, `link_unresolved`, `link_backlinks`). EXIT: 0
+
+**Next:** usuário reinicia Claude Desktop → MCP disponível. Abre GUI `omninote`. Próximo sprint: CAD-22 (daily notes + templates + discipline CLI).
+
+---
+
 ## 2026-05-02 — discipline migration: root → discipline/ subfolder
 
 **Tickets touched:** none (housekeeping)

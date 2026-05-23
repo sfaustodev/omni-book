@@ -10,10 +10,13 @@
 //! - `omninote-mcp` (rmcp stdio server `omninote-mcp`)
 
 pub mod autoformat;
+pub mod daily;
+pub mod discipline;
 pub mod import;
 pub mod pdf;
 pub mod resolver;
 pub mod search;
+pub mod templates;
 pub mod types;
 pub mod vault;
 pub mod wikilinks;

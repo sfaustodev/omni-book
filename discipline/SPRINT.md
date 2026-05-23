@@ -1,9 +1,11 @@
-# SPRINT — OmniNote v1.1 (Foundation)
+# SPRINT — OmniNote v1.2 (Daily + Discipline)
 
-> **Sprint goal:** entregar (a) link parity com Obsidian — abre vault Obsidian e zero unresolved, (b) Cargo workspace com `omninote-core` + `omninote-cli` + `omninote-mcp` rodando, (c) análise UI Design v2 pronta pra implementação na próxima sprint.
-> **Sprint window:** 2026-05-20 → 2026-06-03 (2 semanas)
+> **Sprint goal:** entregar daily notes + templates + discipline CLI/MCP (CAD-22), tornando o `omninote` usável no fluxo diário e expondo sacred files via tools pro Cowork/Claude Desktop.
+> **Sprint window:** 2026-06-03 → 2026-06-17 (2 semanas)
 > **Tracker:** [Notion · 🚢 Caderno de Bordo](https://app.notion.com/p/35373ac79ddb81fa96bcdb9991425508) — ver [NOTION.md](NOTION.md) pro índice local.
-> **Plano de origem:** `~/.claude/plans/greedy-napping-castle.md`
+> **Plano de origem:** `~/.claude/plans/greedy-napping-castle.md` (seção "Next session execution plan — 2026-05-23")
+
+**Sprint anterior (v1.1 Foundation):** ✅ CAD-20 (link parity) + ✅ CAD-21 (workspace + CLI + MCP) + ✅ CAD-25 Fase A (UI v2 análise) — todos mergeados em main, binários instalados.
 
 ---
 
@@ -23,42 +25,37 @@
 
 ---
 
-## §1 — Sprint v1.1 (atual): Foundation
+## §1 — Sprint v1.2 (atual): Daily + Discipline
 
 | # | ID | Tarefa | Status | Prio | Estimativa | Notas |
 |---|------|--------|--------|------|------------|-------|
-| 1 | CAD-20 | Phase 1 — Obsidian link parity | 🎯 Pronta | ⚡ | 16h | bloqueia tudo. Sequential. |
-| 2 | CAD-21 | Phase 2 — Workspace refactor + CLI + MCP | 🌱 Backlog | ⚡ | 24h | depende CAD-20 done |
-| 3 | CAD-25 (Fase A) | UI Design v2 — análise + plano de port | 🎯 Pronta | ⚡ | ~8h | **PARALELO** com CAD-20/21 (só leitura + doc) |
+| 1 | CAD-22 | Phase 3 — Daily notes + templates + discipline CLI/MCP | 🔄 Em execução | ⚡ | 18h | branch `feat/cad-22-daily-discipline` |
+| 2 | CAD-25 (Fase B) | UI Design v2 — implementação egui | 🌱 Backlog | ⚡ | ~22h | bloqueado em Q-01..Q-30 (UI_DESIGN_v2.md) |
 
 ### Dependency graph
 
 ```
-CAD-20 (link parity)
-  └─→ CAD-21 (workspace refactor) ──→ Sprint v1.2 + v1.3
-       └─→ CAD-25 Fase B (UI implementation, Sprint v1.2)
+CAD-22 (daily + discipline)
+  └─→ Sprint v1.3 (CAD-23 AI, CAD-24 power) — todos dependem do core estável
 
-CAD-25 Fase A (análise) ⟂ paralelo com tudo (read-only mockups + escrita de docs)
+CAD-25 Fase B (UI v2) ⟂ paralelo
+  └─ blocked on: Q-01..Q-30 batch decision com Fausto
 ```
 
 ### Parallel work strategy
 
-- **Solo dev (Fausto):** atacar CAD-20 primeiro (foundation), CAD-25 Fase A em paralelo nas pausas (análise não bloqueia código)
-- **Múltiplos agentes:** CAD-20 + CAD-25 Fase A em paralelo (sem conflito de arquivos — CAD-20 toca `src/wikilinks.rs`+`vault.rs`+`resolver.rs`+`ui_editor.rs`, CAD-25 Fase A só escreve em `docs/UI_DESIGN_v2.md`)
-- CAD-21 começa só depois de CAD-20 mergeado (refactor toca os mesmos files)
+- **CAD-22** é o caminho principal. 6 fases (templates → daily → discipline → CLI → MCP → ship).
+- **CAD-25 Fase B** desbloqueia quando Fausto responder batch Q-01..Q-30. Antes disso, fica em standby.
 
 ---
 
-## §1.5 — Backlog Sprint v1.2 (2026-06-03 → 2026-06-17)
+## §1.5 — Sprint anterior (v1.1 Foundation) — ✅ shipped
 
-Sprint goal: discipline CLI/MCP + UI core implementation.
-
-| ID | Tarefa | Status | Prio | Est | Depende |
-|------|--------|--------|------|-----|---------|
-| CAD-22 | Phase 3 — Daily/Templates/Discipline CLI+MCP | 🌱 Backlog | ⚡ | 18h | CAD-21 |
-| CAD-25 (Fase B) | UI Design v2 — implementação egui | 🌱 Backlog | ⚡ | ~22h | CAD-20 + análise CAD-25A |
-
-Parallel: CAD-22 ⟂ CAD-25 Fase B (touchpoint mínimo — CAD-22 mexe em `omninote-core`/CLI, CAD-25 mexe em `omninote-gui/src/ui_*.rs`)
+| ID | Tarefa | Status | Notas |
+|------|--------|--------|-------|
+| CAD-20 | Phase 1 — Obsidian link parity | ✅ Done | merged main, 93 tests |
+| CAD-21 | Phase 2 — Workspace refactor + CLI + MCP | ✅ Done | merged main, 4 MCP tools |
+| CAD-25 (Fase A) | UI Design v2 — análise + plano de port | ✅ Done | docs/UI_DESIGN_v2.md (2756 linhas) |
 
 ---
 

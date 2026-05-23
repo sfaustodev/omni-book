@@ -6,3 +6,6 @@ Cargo.lock
 .idea/
 .vscode/
 omni-book/
+
+# Local-only artifacts (Codex reviews, coverage outputs, smoke logs)
+reports_fausto/
