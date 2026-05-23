@@ -23,5 +23,7 @@ pub use config::{LlmConfig, ProviderConfig};
 pub use embeddings::{
     chunk_note, cosine, embed_note, EmbeddedChunk, Embedder, EmbeddingIndex, FastEmbedder,
 };
-pub use provider::{AnthropicProvider, CompleteOpts, LlmProvider, ProviderError, ProviderName};
+pub use provider::{
+    AnthropicProvider, CompleteOpts, LlmProvider, MockProvider, ProviderError, ProviderName,
+};
 pub use rag::{Rag, RagHit, RagOpts, DEFAULT_MAX_CHUNK_CHARS};
