@@ -93,7 +93,7 @@ O `omninote-mcp` é um servidor MCP próprio que expõe operações de vault com
 }
 ```
 
-Reinicie Claude Desktop. O Claude passa a ter 11 tools:
+Reinicie Claude Desktop. O Claude passa a ter 13 tools:
 
 | Tool | O que faz |
 |---|---|
@@ -108,6 +108,17 @@ Reinicie Claude Desktop. O Claude passa a ter 11 tools:
 | `human_ask` | abre pergunta no `discipline/HUMAN.md` com Q-NN auto |
 | `ticket_status` | grep word-bounded em `NOTION.md` / `JIRA.md` |
 | `discipline_show` | dump raw de qualquer sacred file |
+| `vault_ask` | RAG semântico (fastembed BGE 384d) + opcional Claude completion (CAD-23.1) |
+| `note_auto_tag` | sugere tags + summary via Claude, retorna diff (apply opcional) (CAD-23.2) |
+
+**Setup de API key (pra `vault_ask` com LLM + `note_auto_tag`):**
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+# OU em ~/.config/omninote/llm.toml:
+# [anthropic]
+# api_key = "sk-ant-..."
+```
 
 ---
 
@@ -133,6 +144,13 @@ omninote-cli diary append "session note" --ticket CAD-22
 omninote-cli human ask "Posso usar embeddings locais ou só remoto?"
 omninote-cli ticket CAD-22                # grep NOTION/JIRA
 omninote-cli discipline show sprint
+
+# AI (CAD-23.x — requer ANTHROPIC_API_KEY)
+omninote-cli ask "where did I discuss escrow HMAC?" --top-k 5
+omninote-cli ask "..." --no-llm           # só retrieval, sem chamar Claude
+omninote-cli tag --auto SPEC_V2           # mostra diff (dry-run)
+omninote-cli tag --auto SPEC_V2 --apply   # escreve frontmatter
+omninote-cli tag --auto SPEC_V2 --replace # substitui tags em vez de adicionar
 ```
 
 Todo verbo aceita `--json` pra output machine-readable (envelope `{ok, data, meta}`).
@@ -241,8 +259,13 @@ Implementado v1.1 (sprint 2026-05-20 → 06-03):
 Implementado v1.2 (sprint 2026-06-03 → 06-17):
 - ✅ CAD-22 — Daily notes + templates + discipline CLI/MCP
 
+Em curso v1.3 (sprint 2026-06-17 → 07-01) — CAD-23 fatiado:
+- ✅ CAD-23.1 — RAG search (omninote-ai crate + `ask` verb + `vault_ask` tool)
+- ✅ CAD-23.2 — Auto-tag + summary (`tag --auto` verb + `note_auto_tag` tool)
+- 🔜 CAD-23.3 — Dictation Whisper local
+- 🔜 CAD-23.4 — OCR PDF (tesseract via leptess)
+
 Próximas:
-- 🔜 CAD-23 — AI-native vault (RAG search local, auto-tag, dictation, OCR)
 - 🔜 CAD-24 — Power automation (quick-capture global hotkey, multi-vault switcher)
 - 🔜 CAD-25 Fase B — UI Design v2 (right rail, command palette, discipline-typed views)
 

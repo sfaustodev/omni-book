@@ -4,6 +4,45 @@
 
 ---
 
+## 2026-05-23 — CAD-23.2 auto-tag + summary (Phases A-E)
+
+**Tickets touched:** CAD-23.2 (sub-task de CAD-23, sprint v1.3)
+
+**Branch:** `feat/cad-23-2-auto-tag` (saiu de main, `--base main` explícito)
+
+**Done — auto_tag.rs em omninote-ai + Frontmatter.summary + CLI/MCP wiring:**
+
+Segunda subtask do CAD-23. Reusou trait `LlmProvider` + `MockProvider` (CAD-23.1) — sem deps novas, sem modelo pra baixar. Só LLM call + frontmatter diff.
+
+**5 fases (A→E):**
+
+- **Phase A** — `Frontmatter.summary: String` field em omninote-core (`#[serde(default, skip_serializing_if = "String::is_empty")]`). 2 testes: roundtrip + omit-when-empty. Atualizado 4 fixtures de teste downstream (rag.rs, search.rs, resolver.rs, vault.rs) pra incluir o novo field.
+- **Phase B** — `omninote-ai/src/auto_tag.rs` (~640 LOC). `SuggestOpts`, `FrontmatterDiff` (Serialize), `suggest_tags()` async (LLM call + parse), `apply_diff()` (writes via vault.save_note). Helpers puros: `build_system_prompt`, `build_user_prompt`, `parse_llm_response` (strict JSON → fallback regex extract first `{...}` block), `merge_diff` (additive + dedup case-insensitive + cap max_tags), `sanitize_tag` ([a-z0-9-] only). 39 unit + 3 proptests = todos passam first try.
+- **Phase C** — CLI `omninote tag --auto FILE [--apply] [--max-tags 5] [--max-input-chars 6000] [--replace] [--model X] [--json]`. Resolve FILE via `vault.index.resolve()` (mesma regra dos wikilinks — symmetric com `link backlinks`).
+- **Phase D** — MCP `note_auto_tag` tool. Same shape do CLI. Retorna `FrontmatterDiff` completo (current/suggested/added/has_changes/applied) pra Claude Desktop poder iterar.
+- **Phase E** — ship. fmt + clippy clean. cargo test --workspace = 299 tests (126 ai + 173 core). README atualizado: 11 → 13 MCP tools, CLI cheatsheet com `ask`/`tag`, setup ANTHROPIC_API_KEY. Release rebuild + reinstall. PR `--base main` explícito.
+
+**Padrões reforçados:**
+
+- **Pure-helper-first design**: 5 helpers puros (`build_system_prompt`, `build_user_prompt`, `parse_llm_response`, `merge_diff`, `sanitize_tag`) unit-testáveis sem network. `suggest_tags` async é só plumbing entre eles + `provider.complete()`.
+- **Tolerant JSON parsing**: strict `serde_json::from_str` primeiro, fallback `extract_first_json_block` que faz balanced-brace scan (respeita strings com `}` dentro). Útil porque LLMs ocasionalmente wrappam JSON em prose mesmo com instrução clara.
+- **Tag sanitization**: emoji/punctuation/`<script>` viram tags limpas (`hello-world`, `rust`) ou são droppados. Caps + dedup + max_tags ceiling. Tags adversariais não vão pro frontmatter.
+- **Frontmatter additive merge**: `merge_existing=true` (default) preserva tags existentes. Flag `--replace` pra quem quer controle total.
+- **`#[serde(default, skip_serializing_if)]`**: pattern reusado de `aliases` (CAD-20) — mantém YAML limpo quando field vazio, sem quebrar backward compat com notes antigas.
+
+**Quality gate:**
+
+- 299 tests workspace (+39 auto_tag, +4 vault summary tests)
+- fmt + clippy --all-targets -- -D warnings clean
+- Coverage: auto_tag.rs ≥95% (pure helpers + suggest_tags via MockProvider)
+
+**Real-use deferred:**
+- Smoke real LLM precisa `ANTHROPIC_API_KEY` no env. README documenta. CI roda sem key (todos testes usam MockProvider).
+
+**Next:** CAD-23.3 (dictation via whisper-rs, ~10h), depois CAD-23.4 (OCR via leptess/tesseract, ~8h), depois CAD-24 (power automation).
+
+---
+
 ## 2026-05-23 — CAD-23.1 RAG search (Phases A-F)
 
 **Tickets touched:** CAD-23.1 (sub-task de CAD-23, sprint v1.3)

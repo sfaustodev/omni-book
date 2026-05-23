@@ -140,6 +140,7 @@ impl Vault {
             attachments: vec![],
             created: chrono::Utc::now().to_rfc3339(),
             aliases: vec![],
+            summary: String::new(),
         };
         let title_str = path.file_stem().unwrap().to_string_lossy().to_string();
         let rel_path = path.strip_prefix(&self.root).unwrap().to_path_buf();
@@ -427,6 +428,36 @@ mod tests {
         assert_eq!(loaded.frontmatter.note_type, NoteType::Citacao);
         assert_eq!(loaded.frontmatter.source, "Livro X");
         assert_eq!(loaded.frontmatter.tags, vec!["rust"]);
+    }
+
+    #[test]
+    fn frontmatter_summary_roundtrip() {
+        // CAD-23.2: summary field survives save+reload.
+        let (mut v, _d) = temp_vault();
+        let mut note = v.create_note(None, "Sumarizada", NoteType::Resumo).unwrap();
+        note.frontmatter.summary = "Uma frase resumindo a nota.".into();
+        v.save_note(&note).unwrap();
+        v.reload_notes();
+        let loaded = v
+            .notes
+            .iter()
+            .find(|n| n.frontmatter.id == note.frontmatter.id)
+            .unwrap();
+        assert_eq!(loaded.frontmatter.summary, "Uma frase resumindo a nota.");
+    }
+
+    #[test]
+    fn frontmatter_summary_omitted_when_empty() {
+        // CAD-23.2: empty summary must not appear in serialized YAML so
+        // existing notes stay byte-clean.
+        let (mut v, _d) = temp_vault();
+        let note = v.create_note(None, "SemResumo", NoteType::Resumo).unwrap();
+        v.save_note(&note).unwrap();
+        let raw = std::fs::read_to_string(&note.path).unwrap();
+        assert!(
+            !raw.contains("summary:"),
+            "empty summary should NOT appear in YAML; got:\n{raw}"
+        );
     }
 
     #[test]
