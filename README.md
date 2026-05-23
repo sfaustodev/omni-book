@@ -78,22 +78,64 @@ O OmniNote usa **filesystem como fonte da verdade** — sem SQLite, sem JSON, se
 
 > **Nota:** OmniNote usa `.omninote/` pra config, Obsidian usa `.obsidian/`. Não conflitam.
 
-### Claude Desktop (MCP filesystem)
+### Claude Desktop (MCP nativo)
 
-Adicione ao seu `~/Library/Application Support/Claude/claude_desktop_config.json`:
+O `omninote-mcp` é um servidor MCP próprio que expõe operações de vault como tools tipadas. Build + instale, depois adicione ao seu `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
-    "omninote-vault": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/caminho/pro/seu/vault"]
+    "omninote": {
+      "command": "/Users/SEU_USUARIO/.local/bin/omninote-mcp",
+      "env": { "OMNINOTE_VAULT": "/caminho/pro/seu/vault" }
     }
   }
 }
 ```
 
-Reinicie Claude Desktop. Agora o Claude lê e edita seu vault diretamente — e o OmniNote detecta as mudanças via watcher.
+Reinicie Claude Desktop. O Claude passa a ter 11 tools:
+
+| Tool | O que faz |
+|---|---|
+| `vault_info` | path, contagem de notas, stats do resolver |
+| `note_search` | busca substring em corpo ou só títulos |
+| `link_unresolved` | wikilinks quebrados |
+| `link_backlinks` | quem linka pra um arquivo (filename/path/alias) |
+| `daily_ensure` | cria/abre `Daily/YYYY-MM-DD.md` (CAD-22) |
+| `template_list` | templates em `Templates/` |
+| `template_apply` | renderiza template com `{{date}}/{{time}}/{{title}}` |
+| `diary_append` | append a `discipline/DIARY.md` (prepend no topo) |
+| `human_ask` | abre pergunta no `discipline/HUMAN.md` com Q-NN auto |
+| `ticket_status` | grep word-bounded em `NOTION.md` / `JIRA.md` |
+| `discipline_show` | dump raw de qualquer sacred file |
+
+---
+
+## CLI
+
+O `omninote-cli` (CAD-21+22) dá as mesmas operações no terminal. Vault path por `--vault PATH`, `OMNINOTE_VAULT` env, ou `~/.config/omninote/last_vault`.
+
+```bash
+# Inspeção
+omninote-cli vault info
+omninote-cli note search "escrow HMAC" [--titles-only] [--limit 20]
+omninote-cli link unresolved
+omninote-cli link backlinks "SPEC_V2 - NdA"
+
+# Daily + templates (CAD-22)
+omninote-cli daily                        # cria/abre Daily/YYYY-MM-DD.md
+omninote-cli daily --date 2026-05-23
+omninote-cli template list
+omninote-cli template apply daily --title "Hoje"
+
+# Discipline (CAD-22)
+omninote-cli diary append "session note" --ticket CAD-22
+omninote-cli human ask "Posso usar embeddings locais ou só remoto?"
+omninote-cli ticket CAD-22                # grep NOTION/JIRA
+omninote-cli discipline show sprint
+```
+
+Todo verbo aceita `--json` pra output machine-readable (envelope `{ok, data, meta}`).
 
 ---
 
@@ -146,12 +188,15 @@ Conteúdo markdown aqui...
 
 ## Discipline (workflow do projeto)
 
-O projeto segue protocolo de discipline com 4 sacred files:
+O projeto segue protocolo de discipline com sacred files em [`discipline/`](./discipline/):
 
-- [SPRINT.md](./SPRINT.md) — sprint atual + ordered task list + hard rules
-- [DIARY.md](./DIARY.md) — append-only log de cada sessão
-- [HUMAN.md](./HUMAN.md) — perguntas abertas pro humano
-- [NOTION.md](./NOTION.md) — index de tickets sincronizados com Notion
+- [SPRINT.md](./discipline/SPRINT.md) — sprint atual + ordered task list + hard rules
+- [DIARY.md](./discipline/DIARY.md) — append-only log de cada sessão
+- [HUMAN.md](./discipline/HUMAN.md) — perguntas abertas pro humano
+- [PLAN.md](./discipline/PLAN.md) — plano do sprint vigente
+- [NOTION.md](./discipline/NOTION.md) — index de tickets sincronizados com Notion
+
+Esses arquivos são acessíveis programaticamente via `omninote-cli discipline show <FILE>` e `omninote-cli diary append`/`human ask`/`ticket` (também expostos como MCP tools).
 
 Specs por ticket vivem em [SPECS/](./SPECS/).
 
@@ -179,7 +224,7 @@ Versões pinadas no [Cargo.toml](./Cargo.toml).
 
 ## Roadmap
 
-Implementado v1.0 (esta release):
+Implementado v1.0:
 - ✅ v0.1 — UI sidebar/editor + auto-save + atalhos
 - ✅ v0.2 — Modais (new, settings, confirm)
 - ✅ v0.3 — Importação PDF + Claude chat/artefato
@@ -189,11 +234,17 @@ Implementado v1.0 (esta release):
 - ✅ v0.7 — Drag-and-drop entre pastas
 - ✅ v0.8 — Slash menu
 
-Próximas (v2.0+):
-- 🔜 Wikilinks renderizados *inline* dentro do CommonMark (parser custom com `pulldown-cmark`)
-- 🔜 Fontes acessíveis embutidas: Atkinson Hyperlegible, Lexend, OpenDyslexic
-- 🔜 Sync com mobile via algum protocolo (Syncthing? rclone?)
-- 🔜 Plugin system
+Implementado v1.1 (sprint 2026-05-20 → 06-03):
+- ✅ CAD-20 — Obsidian link parity (`|alias`, `#heading`, `#^block`, frontmatter `aliases`)
+- ✅ CAD-21 — Workspace refactor + `omninote-cli` + `omninote-mcp` nativos
+
+Implementado v1.2 (sprint 2026-06-03 → 06-17):
+- ✅ CAD-22 — Daily notes + templates + discipline CLI/MCP
+
+Próximas:
+- 🔜 CAD-23 — AI-native vault (RAG search local, auto-tag, dictation, OCR)
+- 🔜 CAD-24 — Power automation (quick-capture global hotkey, multi-vault switcher)
+- 🔜 CAD-25 Fase B — UI Design v2 (right rail, command palette, discipline-typed views)
 
 ---
 
