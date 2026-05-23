@@ -1,0 +1,21 @@
+[package]
+name = "omninote-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "OmniNote CLI — vault ops from the terminal."
+
+[[bin]]
+name = "omninote-cli"
+path = "src/main.rs"
+
+[dependencies]
+omninote-core.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+dirs.workspace = true
+chrono.workspace = true

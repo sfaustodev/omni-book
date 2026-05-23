@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<title>OmniNote — Three-pane Notebook (egui-realistic)</title>
+<style>
+  html, body { margin: 0; background: #0a0a0a; font-family: 'Inter', -apple-system, sans-serif; color: #fff; }
+  * { box-sizing: border-box; }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="styles/07-omninote-obsidian.jsx"></script>
+
+<script type="text/babel">
+const W = 1440, H = 900;
+
+const App = () => (
+  <DesignCanvas
+    title="OmniNote — Notebook UI · estilo Obsidian-class"
+    subtitle="Desenho original em três painéis, dark-first, egui-realista. 4 superfícies-chave para Claude Code implementar em egui 0.29."
+  >
+    <DCSection id="main" title="01 — Main view" subtitle="3 painéis · sidebar (Daily/Inbox/Disciplines/Projects/Vault/Tags) · editor com wikilinks/embeds/slash menu · right rail (Backlinks/Outline/AI Chat) · title bar com dictation · status bar · toasts">
+      <DCArtboard id="ab-main" label="Three-pane main" width={W} height={H}>
+        <MainView />
+      </DCArtboard>
+    </DCSection>
+
+    <DCSection id="palette" title="02 — Command palette (⌘P)" subtitle="Fuzzy match em notas + comandos + tags. Substitui o modal-per-action.">
+      <DCArtboard id="ab-palette" label="Command palette" width={W} height={H}>
+        <CommandPalette />
+      </DCArtboard>
+    </DCSection>
+
+    <DCSection id="sprint" title="03 — Discipline view: SPRINT.md" subtitle="Typed view, não markdown cru. Mesmo padrão se aplica a DIARY/HUMAN/PLAN/JIRA.">
+      <DCArtboard id="ab-sprint" label="SPRINT discipline" width={W} height={H}>
+        <SprintView />
+      </DCArtboard>
+    </DCSection>
+
+    <DCSection id="capture" title="04 — Quick capture (⌘⇧Space) + Dictation (⌘⇧M)" subtitle="Hotkey global. Submit → Inbox.md. Dictation overlay com waveform.">
+      <DCArtboard id="ab-capture" label="Quick capture overlay" width={W} height={H}>
+        <QuickCapture />
+      </DCArtboard>
+    </DCSection>
+  </DesignCanvas>
+);
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

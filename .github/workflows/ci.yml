@@ -4,7 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    # Run on PRs targeting any branch — covers stacked PR chains where
+    # intermediate PRs point at feature branches instead of main.
+    # Without this, stacked PRs would have zero CI signal until they
+    # eventually re-target main.
+    branches: ['**']
 
 env:
   CARGO_TERM_COLOR: always
