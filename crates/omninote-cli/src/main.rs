@@ -231,16 +231,21 @@ fn format_anchor(a: &Option<omninote_core::wikilinks::Anchor>) -> Option<String>
 
 /// Resolve the vault root: `--vault`/env first (handled by clap), then the
 /// active entry in `vaults.toml`, then the legacy `last_vault` file.
+///
+/// An explicitly-set active entry wins outright — even if its path is missing,
+/// we surface *that* vault (so the open fails loudly on the intended target)
+/// rather than silently falling through to a different legacy vault. Legacy is
+/// consulted only when the registry names no active entry.
 fn resolve_vault(arg: Option<PathBuf>) -> Option<PathBuf> {
     if let Some(p) = arg {
         return Some(p);
     }
-    if let Some(p) = omninote_core::vaults::registry_path()
-        .and_then(|rp| omninote_core::vaults::load(&rp).ok())
-        .and_then(|reg| reg.active_entry().map(|e| e.path.clone()))
-        .filter(|p| p.exists())
+    if let Some(reg) =
+        omninote_core::vaults::registry_path().and_then(|rp| omninote_core::vaults::load(&rp).ok())
     {
-        return Some(p);
+        if let Some(active) = reg.active.as_deref() {
+            return reg.get(active).map(|e| e.path.clone());
+        }
     }
     let last = dirs::config_dir()?.join("omninote").join("last_vault");
     std::fs::read_to_string(last)
@@ -342,6 +347,9 @@ fn main() -> anyhow::Result<()> {
                     .ok_or_else(|| anyhow::anyhow!("no config dir on this platform"))?;
                 let mut reg = omninote_core::vaults::load(&reg_path)
                     .map_err(|e| anyhow::anyhow!("load vaults.toml: {e}"))?;
+                // Store an absolute path: the registry is consulted from any cwd,
+                // so a relative path would later resolve against the wrong dir.
+                let path = std::path::absolute(&path).unwrap_or(path);
                 let inserted = reg
                     .add(&name, path.clone())
                     .map_err(|e| anyhow::anyhow!("add vault: {e}"))?;
@@ -383,8 +391,8 @@ fn main() -> anyhow::Result<()> {
                             Envelope::<serde_json::Value>::error(e).print()?;
                         } else {
                             eprintln!("{e}");
-                            std::process::exit(1);
                         }
+                        std::process::exit(1);
                     }
                 }
             }
@@ -649,8 +657,8 @@ fn main() -> anyhow::Result<()> {
                         .print()?;
                     } else {
                         eprintln!("ticket not found: {ticket_id}");
-                        std::process::exit(1);
                     }
+                    std::process::exit(1);
                 }
             }
         }

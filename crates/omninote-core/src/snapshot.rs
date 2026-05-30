@@ -53,14 +53,17 @@ pub fn parse_since(token: &str) -> Option<String> {
     if let Ok(n) = t.parse::<u64>() {
         return Some(format!("{n} days ago"));
     }
-    let (num, unit) = t.split_at(t.len() - 1);
+    // Split off the last *char* (not byte) so a single multibyte token like
+    // "é" can't slice mid-codepoint and panic.
+    let unit = t.chars().next_back().expect("t is non-empty");
+    let num = &t[..t.len() - unit.len_utf8()];
     if let Ok(n) = num.parse::<u64>() {
         let word = match unit {
-            "d" | "D" => "day",
-            "w" | "W" => "week",
-            "h" | "H" => "hour",
-            "m" => "month",
-            "y" | "Y" => "year",
+            'd' | 'D' => "day",
+            'w' | 'W' => "week",
+            'h' | 'H' => "hour",
+            'm' => "month",
+            'y' | 'Y' => "year",
             _ => return Some(t.to_string()),
         };
         return Some(format!("{n} {word}s ago"));
@@ -218,6 +221,16 @@ mod tests {
         assert_eq!(parse_since("yesterday").as_deref(), Some("yesterday"));
         // Unknown unit letter passes through verbatim.
         assert_eq!(parse_since("5x").as_deref(), Some("5x"));
+    }
+
+    #[test]
+    fn parse_since_multibyte_does_not_panic() {
+        // Regression: a single multibyte char must not slice mid-codepoint.
+        assert_eq!(parse_since("é").as_deref(), Some("é"));
+        assert_eq!(parse_since("界").as_deref(), Some("界"));
+        assert_eq!(parse_since("🦀").as_deref(), Some("🦀"));
+        // Multibyte trailing char with a numeric prefix also passes through.
+        assert_eq!(parse_since("7é").as_deref(), Some("7é"));
     }
 
     #[test]
