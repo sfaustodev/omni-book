@@ -1,9 +1,28 @@
+use crate::theme;
 use crate::watcher::VaultWatcher;
 use eframe::egui;
 use egui::RichText;
 use omninote_core::types::{ConfirmAction, Note, NoteType};
 use omninote_core::vault::Vault;
 use std::path::PathBuf;
+
+/// OpenDyslexic, bundled in the binary (OFL). Selectable via the a11y font setting.
+const OPEN_DYSLEXIC_OTF: &[u8] = include_bytes!("../assets/fonts/OpenDyslexic-Regular.otf");
+
+/// Register bundled custom fonts. Call once before applying theme/styles.
+fn register_custom_fonts(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        theme::OPEN_DYSLEXIC_NAME.to_owned(),
+        egui::FontData::from_static(OPEN_DYSLEXIC_OTF),
+    );
+    fonts
+        .families
+        .entry(egui::FontFamily::Name(theme::OPEN_DYSLEXIC_NAME.into()))
+        .or_default()
+        .insert(0, theme::OPEN_DYSLEXIC_NAME.to_owned());
+    ctx.set_fonts(fonts);
+}
 
 pub struct OmniNoteApp {
     pub vault: Option<Vault>,
@@ -40,13 +59,9 @@ impl OmniNoteApp {
             .filter(|p| p.exists());
 
         let vault = last_vault.and_then(|p| Vault::open(p).ok());
-        if let Some(v) = &vault {
-            cc.egui_ctx.set_visuals(if v.config.dark_mode {
-                egui::Visuals::dark()
-            } else {
-                egui::Visuals::light()
-            });
-        }
+        register_custom_fonts(&cc.egui_ctx);
+        let dark = vault.as_ref().map(|v| v.config.dark_mode).unwrap_or(true);
+        theme::apply_theme(&cc.egui_ctx, dark);
 
         let watcher = vault.as_ref().and_then(|v| VaultWatcher::new(&v.root).ok());
 
@@ -328,12 +343,22 @@ impl eframe::App for OmniNoteApp {
         // Request repaint regularly so watcher events are noticed even when idle
         ctx.request_repaint_after(Duration::from_millis(500));
 
-        let (new, toggle_edit, settings, toggle_dark) = ctx.input(|i| {
+        // `consume_shortcut` maps COMMAND to Cmd on macOS and Ctrl elsewhere, and
+        // consumes the event so a focused TextEdit doesn't also intercept it.
+        let new_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::N);
+        let edit_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::E);
+        let settings_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Comma);
+        let dark_sc = egui::KeyboardShortcut::new(
+            egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+            egui::Key::D,
+        );
+
+        let (new, toggle_edit, settings, toggle_dark) = ctx.input_mut(|i| {
             (
-                i.key_pressed(egui::Key::N) && i.modifiers.command,
-                i.key_pressed(egui::Key::E) && i.modifiers.command,
-                i.key_pressed(egui::Key::Comma) && i.modifiers.command,
-                i.key_pressed(egui::Key::D) && i.modifiers.command && i.modifiers.shift,
+                i.consume_shortcut(&new_sc),
+                i.consume_shortcut(&edit_sc),
+                i.consume_shortcut(&settings_sc),
+                i.consume_shortcut(&dark_sc),
             )
         });
         if new {
@@ -348,11 +373,8 @@ impl eframe::App for OmniNoteApp {
         if toggle_dark {
             if let Some(v) = &mut self.vault {
                 v.config.dark_mode = !v.config.dark_mode;
-                ctx.set_visuals(if v.config.dark_mode {
-                    egui::Visuals::dark()
-                } else {
-                    egui::Visuals::light()
-                });
+                let dark = v.config.dark_mode;
+                theme::apply_theme(ctx, dark);
             }
         }
 

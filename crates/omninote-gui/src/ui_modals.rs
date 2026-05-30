@@ -116,11 +116,7 @@ impl OmniNoteApp {
                     let mut dark = v.config.dark_mode;
                     if ui.checkbox(&mut dark, "🌙 Modo escuro").changed() {
                         v.config.dark_mode = dark;
-                        ctx.set_visuals(if dark {
-                            egui::Visuals::dark()
-                        } else {
-                            egui::Visuals::light()
-                        });
+                        crate::theme::apply_theme(ctx, dark);
                     }
                     ui.separator();
 

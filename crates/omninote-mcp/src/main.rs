@@ -381,7 +381,7 @@ impl OmniNoteMcp {
             template_name: params.template,
             folder: params.folder.unwrap_or_else(|| "Daily".into()),
         };
-        let res = omninote_core::daily::ensure_daily(&*self.vault_root, opts)
+        let res = omninote_core::daily::ensure_daily(&self.vault_root, opts)
             .map_err(|e| ErrorData::internal_error(format!("daily_ensure: {e}"), None))?;
         Ok(Json(DailyEnsureOutput {
             path: res.path,
@@ -399,7 +399,7 @@ impl OmniNoteMcp {
         &self,
         Parameters(_): Parameters<EmptyParams>,
     ) -> Result<Json<TemplateListOutput>, ErrorData> {
-        let list = omninote_core::templates::list_templates(&*self.vault_root);
+        let list = omninote_core::templates::list_templates(&self.vault_root);
         let count = list.len();
         Ok(Json(TemplateListOutput {
             templates: list
@@ -421,7 +421,7 @@ impl OmniNoteMcp {
         &self,
         Parameters(params): Parameters<TemplateApplyParams>,
     ) -> Result<Json<TemplateApplyOutput>, ErrorData> {
-        let body = omninote_core::templates::load_template(&*self.vault_root, &params.name)
+        let body = omninote_core::templates::load_template(&self.vault_root, &params.name)
             .map_err(|e| ErrorData::invalid_params(format!("template: {e}"), None))?;
         let ctx = omninote_core::templates::TemplateContext::now(params.title);
         let rendered = omninote_core::templates::render(&body, &ctx);
@@ -437,7 +437,7 @@ impl OmniNoteMcp {
         Parameters(params): Parameters<DiaryAppendParams>,
     ) -> Result<Json<DiaryAppendOutput>, ErrorData> {
         let path = omninote_core::discipline::diary_quick(
-            &*self.vault_root,
+            &self.vault_root,
             &params.text,
             params.ticket.as_deref(),
         )
@@ -453,9 +453,8 @@ impl OmniNoteMcp {
         &self,
         Parameters(params): Parameters<HumanAskParams>,
     ) -> Result<Json<HumanAskOutput>, ErrorData> {
-        let (path, q_id) =
-            omninote_core::discipline::human_ask(&*self.vault_root, &params.question)
-                .map_err(|e| ErrorData::internal_error(format!("human_ask: {e}"), None))?;
+        let (path, q_id) = omninote_core::discipline::human_ask(&self.vault_root, &params.question)
+            .map_err(|e| ErrorData::internal_error(format!("human_ask: {e}"), None))?;
         Ok(Json(HumanAskOutput { path, q_id }))
     }
 
@@ -467,7 +466,7 @@ impl OmniNoteMcp {
         &self,
         Parameters(params): Parameters<TicketStatusParams>,
     ) -> Result<Json<TicketStatusOutput>, ErrorData> {
-        let t = omninote_core::discipline::ticket_status(&*self.vault_root, &params.ticket_id)
+        let t = omninote_core::discipline::ticket_status(&self.vault_root, &params.ticket_id)
             .ok_or_else(|| {
                 ErrorData::invalid_params(format!("ticket not found: {}", params.ticket_id), None)
             })?;
@@ -498,7 +497,7 @@ impl OmniNoteMcp {
                 )
             },
         )?;
-        let content = omninote_core::discipline::read_raw(&*self.vault_root, f)
+        let content = omninote_core::discipline::read_raw(&self.vault_root, f)
             .map_err(|e| ErrorData::internal_error(format!("discipline_show: {e}"), None))?;
         Ok(Json(DisciplineShowOutput {
             file: f.filename().to_string(),

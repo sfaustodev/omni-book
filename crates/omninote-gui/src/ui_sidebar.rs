@@ -40,11 +40,8 @@ impl OmniNoteApp {
                         {
                             if let Some(v) = &mut self.vault {
                                 v.config.dark_mode = !v.config.dark_mode;
-                                ctx.set_visuals(if v.config.dark_mode {
-                                    egui::Visuals::dark()
-                                } else {
-                                    egui::Visuals::light()
-                                });
+                                let dark = v.config.dark_mode;
+                                crate::theme::apply_theme(ctx, dark);
                             }
                         }
                         if ui
@@ -64,7 +61,8 @@ impl OmniNoteApp {
                         .hint_text("🔍 Buscar... (Cmd+K)")
                         .desired_width(f32::INFINITY),
                 );
-                if ctx.input(|i| i.key_pressed(egui::Key::K) && i.modifiers.command) {
+                let search_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::K);
+                if ctx.input_mut(|i| i.consume_shortcut(&search_sc)) {
                     search.request_focus();
                 }
 

@@ -87,6 +87,9 @@ pub enum FontFamily {
     System,
     Monospace,
     Serif,
+    /// OpenDyslexic — open-source typeface for dyslexic readers. The egui font
+    /// registration lives in the gui crate; core only carries the variant.
+    Dyslexic,
 }
 
 impl FontFamily {
@@ -95,12 +98,13 @@ impl FontFamily {
             Self::System => "Sistema (sans-serif)",
             Self::Monospace => "Monospace",
             Self::Serif => "Serif",
+            Self::Dyslexic => "OpenDyslexic (dislexia)",
         }
     }
-    pub fn all() -> [FontFamily; 3] {
-        [Self::System, Self::Monospace, Self::Serif]
+    pub fn all() -> [FontFamily; 4] {
+        [Self::System, Self::Monospace, Self::Serif, Self::Dyslexic]
     }
-    // CAD-21: `as_egui_family()` moved to `omninote-gui::theme::font_family_to_egui`
+    // `as_egui_family()` moved to `omninote-gui::theme::font_family_to_egui`
     // to keep `omninote-core` free of UI dependencies.
 }
 
