@@ -143,4 +143,44 @@ mod tests {
         assert!(back.meta.is_none());
         assert!(back.error.is_none());
     }
+
+    #[test]
+    fn error_carries_no_data_or_meta() {
+        // A failure envelope must never leak a half-built payload alongside the error.
+        let env: Envelope<Value> = Envelope::error("boom");
+        assert!(!env.ok);
+        assert!(env.data.is_none());
+        assert!(env.meta.is_none());
+    }
+
+    #[test]
+    fn success_constructors_carry_no_error() {
+        assert!(Envelope::ok(json!(1)).error.is_none());
+        assert!(Envelope::ok_meta(json!(1), json!({"k": 1})).error.is_none());
+    }
+
+    #[test]
+    fn deeply_nested_payload_round_trips() {
+        let deep = json!({"a": {"b": {"c": [1, {"d": [true, null]}]}}});
+        let env = Envelope::ok(deep.clone());
+        let back: Envelope<Value> = serde_json::from_str(&env.to_json().unwrap()).unwrap();
+        assert_eq!(back.data, Some(deep));
+    }
+
+    #[test]
+    fn error_message_with_unicode_and_quotes_is_escaped() {
+        let msg = "não achou: \"a/b\" \n\t— 路径";
+        let env: Envelope<Value> = Envelope::error(msg);
+        let s = env.to_json().unwrap();
+        let back: Envelope<Value> = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.error.as_deref(), Some(msg));
+    }
+
+    #[test]
+    fn ok_meta_with_null_meta_is_preserved() {
+        // `meta = Some(Null)` is distinct from `meta = None`: the key must appear.
+        let env = Envelope::ok_meta(json!("x"), Value::Null);
+        let s = env.to_json().unwrap();
+        assert!(s.contains("\"meta\":null"));
+    }
 }
