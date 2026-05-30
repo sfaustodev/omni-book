@@ -1,14 +1,19 @@
 //! OmniNote CLI — vault ops from the terminal.
 //!
 //! Vault resolution order: `--vault <PATH>` → `OMNINOTE_VAULT` env →
+//! active entry in `~/.config/omninote/vaults.toml` → legacy
 //! `~/.config/omninote/last_vault` file. Mirrors the GUI's vault picker.
 //!
-//! Verbs (CAD-22 added daily/template/diary/human/ticket/discipline):
+//! Verbs:
 //! ```text
 //! omninote-cli vault info
+//! omninote-cli vault list
+//! omninote-cli vault add NAME PATH
+//! omninote-cli vault switch NAME
 //! omninote-cli note search QUERY [--case] [--limit N] [--titles-only]
 //! omninote-cli link unresolved
 //! omninote-cli link backlinks FILE
+//! omninote-cli diff [--since 1d|7d]
 //! omninote-cli daily [--date YYYY-MM-DD] [--template NAME] [--folder Daily]
 //! omninote-cli template list
 //! omninote-cli template apply NAME [--title TITLE] [--out PATH]
@@ -17,11 +22,16 @@
 //! omninote-cli ticket ID
 //! omninote-cli discipline show FILE
 //! ```
-//! Every verb accepts `--json` for machine-readable output (envelope:
-//! `{ok, data, meta?}` or `{ok: false, error}`).
+//! Every verb accepts `--json` for machine-readable output. The envelope is
+//! `{ok: true, data, meta?}` on success or `{ok: false, error}` on failure
+//! (see [`envelope`]).
+
+mod envelope;
 
 use clap::{Parser, Subcommand};
+use envelope::Envelope;
 use omninote_core::discipline::DisciplineFile;
+use serde_json::json;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -37,7 +47,7 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Vault inspection.
+    /// Vault inspection and the multi-vault registry.
     Vault {
         #[command(subcommand)]
         action: VaultAction,
@@ -52,7 +62,15 @@ enum Command {
         #[command(subcommand)]
         action: LinkAction,
     },
-    /// Open/create today's daily note (CAD-22).
+    /// Summarize recent vault changes via git (`--since 1d|7d`).
+    Diff {
+        /// Window: `1d`, `7d`, `2w`, a bare integer (days), or a git phrase.
+        #[arg(long, default_value = "7d")]
+        since: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Open/create today's daily note.
     Daily {
         /// Override date (YYYY-MM-DD). Default: today.
         #[arg(long)]
@@ -66,28 +84,28 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Template operations (CAD-22).
+    /// Template operations.
     Template {
         #[command(subcommand)]
         action: TemplateAction,
     },
-    /// Append entry to discipline DIARY.md (CAD-22).
+    /// Append entry to discipline DIARY.md.
     Diary {
         #[command(subcommand)]
         action: DiaryAction,
     },
-    /// Open question in discipline HUMAN.md (CAD-22).
+    /// Open question in discipline HUMAN.md.
     Human {
         #[command(subcommand)]
         action: HumanAction,
     },
-    /// Look up ticket status in NOTION.md / JIRA.md (CAD-22).
+    /// Look up ticket status in NOTION.md / JIRA.md.
     Ticket {
         ticket_id: String,
         #[arg(long)]
         json: bool,
     },
-    /// Show raw content of a discipline file (CAD-22).
+    /// Show raw content of a discipline file.
     Discipline {
         #[command(subcommand)]
         action: DisciplineAction,
@@ -96,7 +114,26 @@ enum Command {
 
 #[derive(Subcommand, Debug)]
 enum VaultAction {
+    /// Index + note counts for the resolved vault.
     Info {
+        #[arg(long)]
+        json: bool,
+    },
+    /// List registered vaults from `vaults.toml`.
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Register (or update) a vault path under a name.
+    Add {
+        name: String,
+        path: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Set the active vault by name.
+    Switch {
+        name: String,
         #[arg(long)]
         json: bool,
     },
@@ -192,8 +229,17 @@ fn format_anchor(a: &Option<omninote_core::wikilinks::Anchor>) -> Option<String>
     })
 }
 
+/// Resolve the vault root: `--vault`/env first (handled by clap), then the
+/// active entry in `vaults.toml`, then the legacy `last_vault` file.
 fn resolve_vault(arg: Option<PathBuf>) -> Option<PathBuf> {
     if let Some(p) = arg {
+        return Some(p);
+    }
+    if let Some(p) = omninote_core::vaults::registry_path()
+        .and_then(|rp| omninote_core::vaults::load(&rp).ok())
+        .and_then(|reg| reg.active_entry().map(|e| e.path.clone()))
+        .filter(|p| p.exists())
+    {
         return Some(p);
     }
     let last = dirs::config_dir()?.join("omninote").join("last_vault");
@@ -203,35 +249,51 @@ fn resolve_vault(arg: Option<PathBuf>) -> Option<PathBuf> {
         .filter(|p| p.exists())
 }
 
+/// Resolve or bail with the standard "no vault" error.
+fn require_vault(arg: Option<PathBuf>) -> anyhow::Result<PathBuf> {
+    resolve_vault(arg).ok_or_else(|| {
+        anyhow::anyhow!(
+            "no vault: pass --vault, set OMNINOTE_VAULT, run `vault add`, or open the GUI once"
+        )
+    })
+}
+
 fn parse_naive_date(s: &str) -> anyhow::Result<chrono::NaiveDate> {
     chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
         .map_err(|e| anyhow::anyhow!("invalid date '{s}' (expected YYYY-MM-DD): {e}"))
 }
 
+/// Emit a JSON envelope built from a `serde_json::Value` payload.
+fn emit(data: serde_json::Value) -> anyhow::Result<()> {
+    Envelope::ok(data).print()?;
+    Ok(())
+}
+
+/// Emit a JSON envelope with a `meta` object.
+fn emit_meta(data: serde_json::Value, meta: serde_json::Value) -> anyhow::Result<()> {
+    Envelope::ok_meta(data, meta).print()?;
+    Ok(())
+}
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let vault_root = resolve_vault(cli.vault.clone()).ok_or_else(|| {
-        anyhow::anyhow!("no vault: pass --vault, set OMNINOTE_VAULT, or open the GUI once")
-    })?;
+    let vault_arg = cli.vault.clone();
 
     match cli.command {
         Command::Vault { action } => match action {
             VaultAction::Info { json } => {
-                let vault = omninote_core::vault::Vault::open(vault_root.clone())
+                let vault_root = require_vault(vault_arg)?;
+                let vault = omninote_core::vault::Vault::open(vault_root)
                     .map_err(|e| anyhow::anyhow!("vault open failed: {e}"))?;
                 let stats = vault.index.stats();
                 if json {
-                    let out = serde_json::json!({
-                        "ok": true,
-                        "data": {
-                            "path": vault.root,
-                            "files": vault.notes.len(),
-                            "index_files": stats.files,
-                            "index_paths": stats.paths,
-                            "index_aliases": stats.aliases,
-                        }
-                    });
-                    println!("{}", serde_json::to_string(&out)?);
+                    emit(json!({
+                        "path": vault.root,
+                        "files": vault.notes.len(),
+                        "index_files": stats.files,
+                        "index_paths": stats.paths,
+                        "index_aliases": stats.aliases,
+                    }))?;
                 } else {
                     println!("vault: {}", vault.root.display());
                     println!("notes: {}", vault.notes.len());
@@ -239,6 +301,91 @@ fn main() -> anyhow::Result<()> {
                         "index: {} files / {} paths / {} aliases",
                         stats.files, stats.paths, stats.aliases
                     );
+                }
+            }
+            VaultAction::List { json } => {
+                let path = omninote_core::vaults::registry_path()
+                    .ok_or_else(|| anyhow::anyhow!("no config dir on this platform"))?;
+                let reg = omninote_core::vaults::load(&path)
+                    .map_err(|e| anyhow::anyhow!("load vaults.toml: {e}"))?;
+                if json {
+                    let data = reg
+                        .vaults
+                        .iter()
+                        .map(|v| {
+                            json!({
+                                "name": v.name,
+                                "path": v.path,
+                                "active": reg.active.as_deref() == Some(v.name.as_str()),
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    emit_meta(
+                        json!(data),
+                        json!({ "count": reg.vaults.len(), "active": reg.active }),
+                    )?;
+                } else if reg.vaults.is_empty() {
+                    println!("no vaults registered — run `vault add <NAME> <PATH>`");
+                } else {
+                    for v in &reg.vaults {
+                        let marker = if reg.active.as_deref() == Some(v.name.as_str()) {
+                            "*"
+                        } else {
+                            " "
+                        };
+                        println!("{marker} {}  {}", v.name, v.path.display());
+                    }
+                }
+            }
+            VaultAction::Add { name, path, json } => {
+                let reg_path = omninote_core::vaults::registry_path()
+                    .ok_or_else(|| anyhow::anyhow!("no config dir on this platform"))?;
+                let mut reg = omninote_core::vaults::load(&reg_path)
+                    .map_err(|e| anyhow::anyhow!("load vaults.toml: {e}"))?;
+                let inserted = reg
+                    .add(&name, path.clone())
+                    .map_err(|e| anyhow::anyhow!("add vault: {e}"))?;
+                omninote_core::vaults::save(&reg_path, &reg)
+                    .map_err(|e| anyhow::anyhow!("save vaults.toml: {e}"))?;
+                if json {
+                    emit(json!({
+                        "name": name,
+                        "path": path,
+                        "inserted": inserted,
+                        "active": reg.active,
+                    }))?;
+                } else {
+                    let verb = if inserted { "added" } else { "updated" };
+                    println!("{verb} {name} → {}", path.display());
+                }
+            }
+            VaultAction::Switch { name, json } => {
+                let reg_path = omninote_core::vaults::registry_path()
+                    .ok_or_else(|| anyhow::anyhow!("no config dir on this platform"))?;
+                let mut reg = omninote_core::vaults::load(&reg_path)
+                    .map_err(|e| anyhow::anyhow!("load vaults.toml: {e}"))?;
+                match reg.switch(&name) {
+                    Ok(()) => {
+                        omninote_core::vaults::save(&reg_path, &reg)
+                            .map_err(|e| anyhow::anyhow!("save vaults.toml: {e}"))?;
+                        let path = reg.active_entry().map(|e| e.path.clone());
+                        if json {
+                            emit(json!({ "active": name, "path": path }))?;
+                        } else {
+                            println!("active vault: {name}");
+                            if let Some(p) = path {
+                                println!("{}", p.display());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        if json {
+                            Envelope::<serde_json::Value>::error(e).print()?;
+                        } else {
+                            eprintln!("{e}");
+                            std::process::exit(1);
+                        }
+                    }
                 }
             }
         },
@@ -250,7 +397,8 @@ fn main() -> anyhow::Result<()> {
                 titles_only,
                 json,
             } => {
-                let vault = omninote_core::vault::Vault::open(vault_root.clone())
+                let vault_root = require_vault(vault_arg)?;
+                let vault = omninote_core::vault::Vault::open(vault_root)
                     .map_err(|e| anyhow::anyhow!("vault open failed: {e}"))?;
                 let opts = omninote_core::search::SearchOpts {
                     case_sensitive: case,
@@ -262,17 +410,18 @@ fn main() -> anyhow::Result<()> {
                     omninote_core::search::search(&vault.notes, &query, opts)
                 };
                 if json {
-                    let out = serde_json::json!({
-                        "ok": true,
-                        "data": hits.iter().map(|h| serde_json::json!({
-                            "rel_path": h.rel_path,
-                            "title": h.title,
-                            "line_no": h.line_no,
-                            "snippet": h.snippet,
-                        })).collect::<Vec<_>>(),
-                        "meta": { "count": hits.len(), "query": query }
-                    });
-                    println!("{}", serde_json::to_string(&out)?);
+                    let data = hits
+                        .iter()
+                        .map(|h| {
+                            json!({
+                                "rel_path": h.rel_path,
+                                "title": h.title,
+                                "line_no": h.line_no,
+                                "snippet": h.snippet,
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    emit_meta(json!(data), json!({ "count": hits.len(), "query": query }))?;
                 } else {
                     if hits.is_empty() {
                         println!("no matches for: {query}");
@@ -289,19 +438,16 @@ fn main() -> anyhow::Result<()> {
         },
         Command::Link { action } => match action {
             LinkAction::Unresolved { json } => {
-                let vault = omninote_core::vault::Vault::open(vault_root.clone())
+                let vault_root = require_vault(vault_arg)?;
+                let vault = omninote_core::vault::Vault::open(vault_root)
                     .map_err(|e| anyhow::anyhow!("vault open failed: {e}"))?;
                 let unresolved = vault.index.unresolved_links(&vault.notes);
                 if json {
-                    let out = serde_json::json!({
-                        "ok": true,
-                        "data": unresolved.iter().map(|u| serde_json::json!({
-                            "target": u.target,
-                            "source": u.source,
-                        })).collect::<Vec<_>>(),
-                        "meta": { "count": unresolved.len() }
-                    });
-                    println!("{}", serde_json::to_string(&out)?);
+                    let data = unresolved
+                        .iter()
+                        .map(|u| json!({ "target": u.target, "source": u.source }))
+                        .collect::<Vec<_>>();
+                    emit_meta(json!(data), json!({ "count": unresolved.len() }))?;
                 } else {
                     println!("{} unresolved", unresolved.len());
                     for u in &unresolved {
@@ -310,23 +456,28 @@ fn main() -> anyhow::Result<()> {
                 }
             }
             LinkAction::Backlinks { file, json } => {
-                let vault = omninote_core::vault::Vault::open(vault_root.clone())
+                let vault_root = require_vault(vault_arg)?;
+                let vault = omninote_core::vault::Vault::open(vault_root)
                     .map_err(|e| anyhow::anyhow!("vault open failed: {e}"))?;
                 let target = vault.index.resolve(&file).cloned().ok_or_else(|| {
                     anyhow::anyhow!("file does not match any note in vault: {file}")
                 })?;
                 let backlinks = vault.index.backlinks_to(&target, &vault.notes);
                 if json {
-                    let out = serde_json::json!({
-                        "ok": true,
-                        "data": backlinks.iter().map(|b| serde_json::json!({
-                            "source": b.source,
-                            "is_embed": b.is_embed,
-                            "anchor": format_anchor(&b.anchor),
-                        })).collect::<Vec<_>>(),
-                        "meta": { "count": backlinks.len(), "target": target }
-                    });
-                    println!("{}", serde_json::to_string(&out)?);
+                    let data = backlinks
+                        .iter()
+                        .map(|b| {
+                            json!({
+                                "source": b.source,
+                                "is_embed": b.is_embed,
+                                "anchor": format_anchor(&b.anchor),
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    emit_meta(
+                        json!(data),
+                        json!({ "count": backlinks.len(), "target": target }),
+                    )?;
                 } else {
                     println!("{} backlinks → {}", backlinks.len(), target.display());
                     for b in &backlinks {
@@ -342,14 +493,45 @@ fn main() -> anyhow::Result<()> {
                 }
             }
         },
+        Command::Diff { since, json } => {
+            let vault_root = require_vault(vault_arg)?;
+            let report = omninote_core::snapshot::diff_since(&vault_root, &since)
+                .map_err(|e| anyhow::anyhow!("diff: {e}"))?;
+            if json {
+                emit(serde_json::to_value(&report)?)?;
+            } else if !report.is_git {
+                println!(
+                    "{} is not a git repo — `omninote diff` needs git history",
+                    vault_root.display()
+                );
+            } else if report.changed.is_empty() {
+                println!(
+                    "no changes since {} ({} commits)",
+                    report.since, report.commits
+                );
+            } else {
+                println!(
+                    "{} changed file(s) since {} ({} commits):",
+                    report.changed.len(),
+                    report.since,
+                    report.commits
+                );
+                for c in &report.changed {
+                    match &c.old_path {
+                        Some(old) => println!("  {} {} → {}", c.status, old, c.path),
+                        None => println!("  {} {}", c.status, c.path),
+                    }
+                }
+            }
+        }
 
-        // ────────── CAD-22 verbs ──────────
         Command::Daily {
             date,
             template,
             folder,
             json,
         } => {
+            let vault_root = require_vault(vault_arg)?;
             let opts = omninote_core::daily::DailyOpts {
                 date: date.as_deref().map(parse_naive_date).transpose()?,
                 template_name: template,
@@ -358,16 +540,12 @@ fn main() -> anyhow::Result<()> {
             let res = omninote_core::daily::ensure_daily(&vault_root, opts)
                 .map_err(|e| anyhow::anyhow!("daily: {e}"))?;
             if json {
-                let out = serde_json::json!({
-                    "ok": true,
-                    "data": {
-                        "path": res.path,
-                        "rel_path": res.rel_path,
-                        "created": res.created,
-                        "template_used": res.template_used,
-                    }
-                });
-                println!("{}", serde_json::to_string(&out)?);
+                emit(json!({
+                    "path": res.path,
+                    "rel_path": res.rel_path,
+                    "created": res.created,
+                    "template_used": res.template_used,
+                }))?;
             } else {
                 println!(
                     "{} {}",
@@ -381,17 +559,14 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Template { action } => match action {
             TemplateAction::List { json } => {
+                let vault_root = require_vault(vault_arg)?;
                 let list = omninote_core::templates::list_templates(&vault_root);
                 if json {
-                    let out = serde_json::json!({
-                        "ok": true,
-                        "data": list.iter().map(|t| serde_json::json!({
-                            "name": t.name,
-                            "path": t.path,
-                        })).collect::<Vec<_>>(),
-                        "meta": { "count": list.len() }
-                    });
-                    println!("{}", serde_json::to_string(&out)?);
+                    let data = list
+                        .iter()
+                        .map(|t| json!({ "name": t.name, "path": t.path }))
+                        .collect::<Vec<_>>();
+                    emit_meta(json!(data), json!({ "count": list.len() }))?;
                 } else {
                     if list.is_empty() {
                         println!("no templates in <vault>/Templates/");
@@ -407,6 +582,7 @@ fn main() -> anyhow::Result<()> {
                 out,
                 json,
             } => {
+                let vault_root = require_vault(vault_arg)?;
                 let body = omninote_core::templates::load_template(&vault_root, &name)
                     .map_err(|e| anyhow::anyhow!("template: {e}"))?;
                 let ctx = omninote_core::templates::TemplateContext::now(title);
@@ -416,14 +592,7 @@ fn main() -> anyhow::Result<()> {
                         .map_err(|e| anyhow::anyhow!("write {}: {e}", path.display()))?;
                 }
                 if json {
-                    let out_json = serde_json::json!({
-                        "ok": true,
-                        "data": {
-                            "rendered": rendered,
-                            "wrote_to": out,
-                        }
-                    });
-                    println!("{}", serde_json::to_string(&out_json)?);
+                    emit(json!({ "rendered": rendered, "wrote_to": out }))?;
                 } else if out.is_none() {
                     print!("{rendered}");
                 } else {
@@ -433,15 +602,12 @@ fn main() -> anyhow::Result<()> {
         },
         Command::Diary { action } => match action {
             DiaryAction::Append { text, ticket, json } => {
+                let vault_root = require_vault(vault_arg)?;
                 let path =
                     omninote_core::discipline::diary_quick(&vault_root, &text, ticket.as_deref())
                         .map_err(|e| anyhow::anyhow!("diary append: {e}"))?;
                 if json {
-                    let out = serde_json::json!({
-                        "ok": true,
-                        "data": { "path": path }
-                    });
-                    println!("{}", serde_json::to_string(&out)?);
+                    emit(json!({ "path": path }))?;
                 } else {
                     println!("appended to {}", path.display());
                 }
@@ -449,33 +615,27 @@ fn main() -> anyhow::Result<()> {
         },
         Command::Human { action } => match action {
             HumanAction::Ask { question, json } => {
+                let vault_root = require_vault(vault_arg)?;
                 let (path, qn) = omninote_core::discipline::human_ask(&vault_root, &question)
                     .map_err(|e| anyhow::anyhow!("human ask: {e}"))?;
                 if json {
-                    let out = serde_json::json!({
-                        "ok": true,
-                        "data": { "path": path, "q_id": qn }
-                    });
-                    println!("{}", serde_json::to_string(&out)?);
+                    emit(json!({ "path": path, "q_id": qn }))?;
                 } else {
                     println!("{} added to {}", qn, path.display());
                 }
             }
         },
         Command::Ticket { ticket_id, json } => {
+            let vault_root = require_vault(vault_arg)?;
             match omninote_core::discipline::ticket_status(&vault_root, &ticket_id) {
                 Some(t) => {
                     if json {
-                        let out = serde_json::json!({
-                            "ok": true,
-                            "data": {
-                                "ticket_id": t.ticket_id,
-                                "file": t.file,
-                                "line_no": t.line_no,
-                                "paragraph": t.paragraph,
-                            }
-                        });
-                        println!("{}", serde_json::to_string(&out)?);
+                        emit(json!({
+                            "ticket_id": t.ticket_id,
+                            "file": t.file,
+                            "line_no": t.line_no,
+                            "paragraph": t.paragraph,
+                        }))?;
                     } else {
                         println!("{} ({}:{})", t.ticket_id, t.file.display(), t.line_no);
                         println!("{}", t.paragraph);
@@ -483,11 +643,10 @@ fn main() -> anyhow::Result<()> {
                 }
                 None => {
                     if json {
-                        let out = serde_json::json!({
-                            "ok": false,
-                            "error": format!("ticket not found: {ticket_id}")
-                        });
-                        println!("{}", serde_json::to_string(&out)?);
+                        Envelope::<serde_json::Value>::error(format!(
+                            "ticket not found: {ticket_id}"
+                        ))
+                        .print()?;
                     } else {
                         eprintln!("ticket not found: {ticket_id}");
                         std::process::exit(1);
@@ -497,6 +656,7 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Discipline { action } => match action {
             DisciplineAction::Show { file, json } => {
+                let vault_root = require_vault(vault_arg)?;
                 let f = DisciplineFile::from_slug(&file).ok_or_else(|| {
                     anyhow::anyhow!(
                         "unknown discipline file '{file}' — try: diary|sprint|human|plan|jira|notion|eternal"
@@ -505,11 +665,7 @@ fn main() -> anyhow::Result<()> {
                 let raw = omninote_core::discipline::read_raw(&vault_root, f)
                     .map_err(|e| anyhow::anyhow!("show: {e}"))?;
                 if json {
-                    let out = serde_json::json!({
-                        "ok": true,
-                        "data": { "file": f.filename(), "content": raw }
-                    });
-                    println!("{}", serde_json::to_string(&out)?);
+                    emit(json!({ "file": f.filename(), "content": raw }))?;
                 } else {
                     print!("{raw}");
                 }
