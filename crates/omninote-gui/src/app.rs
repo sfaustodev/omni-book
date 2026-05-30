@@ -139,28 +139,14 @@ impl OmniNoteApp {
             match Vault::open(path) {
                 Ok(v) => {
                     let root = v.root.clone();
+                    let dark = v.config.dark_mode;
                     self.vault = Some(v);
                     self.active_note = None;
                     self.save_last_vault();
+                    // Re-apply both style and theme from the new vault's config so
+                    // its font/dark-mode take effect immediately, not next toggle.
                     self.apply_style(ctx);
-                    self.watcher = VaultWatcher::new(&root).ok();
-                }
-                Err(e) => self.error_msg = Some(e),
-            }
-        }
-    }
-
-    pub fn pick_vault(&mut self) {
-        if let Some(path) = rfd::FileDialog::new()
-            .set_title("Escolha (ou crie) uma pasta pra ser seu vault")
-            .pick_folder()
-        {
-            match Vault::open(path) {
-                Ok(v) => {
-                    let root = v.root.clone();
-                    self.vault = Some(v);
-                    self.active_note = None;
-                    self.save_last_vault();
+                    crate::theme::apply_theme(ctx, dark);
                     self.watcher = VaultWatcher::new(&root).ok();
                 }
                 Err(e) => self.error_msg = Some(e),
@@ -392,7 +378,7 @@ impl eframe::App for OmniNoteApp {
                     );
                     ui.add_space(20.0);
                     if ui.button("📂 Abrir / Criar Vault").clicked() {
-                        self.pick_vault();
+                        self.pick_vault_with_ctx(ctx);
                     }
                 });
             });

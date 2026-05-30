@@ -49,7 +49,7 @@ impl OmniNoteApp {
                             .on_hover_text("Trocar vault")
                             .clicked()
                         {
-                            self.pick_vault();
+                            self.pick_vault_with_ctx(ctx);
                         }
                     });
                 });
