@@ -81,10 +81,15 @@ impl LlmConfig {
     /// A present-but-malformed file is an error; a missing file is not.
     pub fn load_for_vault(vault_root: &Path) -> Result<Self> {
         let path = Self::path_for_vault(vault_root);
-        if path.exists() {
-            Self::load(&path)
-        } else {
-            Ok(Self::default())
+        // Only a genuinely absent file falls back to defaults; an existing but
+        // unreadable/malformed file must surface, not silently use defaults.
+        match Self::load(&path) {
+            Err(LlmError::ConfigRead { source, .. })
+                if source.kind() == std::io::ErrorKind::NotFound =>
+            {
+                Ok(Self::default())
+            }
+            other => other,
         }
     }
 
