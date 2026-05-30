@@ -103,7 +103,9 @@ impl LlmConfig {
     /// an empty credential.
     pub fn resolve_api_key(&self) -> Result<String> {
         match std::env::var(&self.api_key_env) {
-            Ok(v) if !v.is_empty() => Ok(v),
+            // Whitespace-only is treated as empty: a blank credential must fail
+            // closed, never reach a provider.
+            Ok(v) if !v.trim().is_empty() => Ok(v),
             _ => Err(LlmError::MissingApiKey(self.api_key_env.clone())),
         }
     }
