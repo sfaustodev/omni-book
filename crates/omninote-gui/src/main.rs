@@ -7,6 +7,22 @@ mod ui_sidebar;
 mod watcher;
 
 fn main() -> eframe::Result<()> {
+    // Surface the real panic message, location, and a backtrace even in release
+    // builds (eframe otherwise swallows them behind a generic abort).
+    std::panic::set_hook(Box::new(|info| {
+        eprintln!("\n[omninote] PANIC: {}", info);
+        if let Some(loc) = info.location() {
+            eprintln!(
+                "[omninote] at {}:{}:{}",
+                loc.file(),
+                loc.line(),
+                loc.column()
+            );
+        }
+        eprintln!("[omninote] backtrace (set RUST_BACKTRACE=1 for full):");
+        eprintln!("{}", std::backtrace::Backtrace::capture());
+    }));
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1200.0, 800.0])
