@@ -406,3 +406,24 @@ a8ee2c1 chore(discipline): sprint v1.1 plan (#4)
 **Notion status:** CAD-20 + CAD-21 ficam 👀 Revisão (não ✅ — per memory `feedback_auto_merge_when_ci_green` + discipline rule #13: ✅ exige string explícita humano "testado, pode fechar").
 
 **Próximo:** humano testa OmniNote contra vault real Obsidian → confirma → ✅ CAD-20 + CAD-21. Em paralelo: CAD-25 Fase B (UI implementation) desbloqueada por Q-01..Q-30 já respondidos (mas Q-01..Q-08 do HUMAN.md também resolvidos — 30 Qs do UI_DESIGN_v2.md são separadas, ainda pendentes).
+
+---
+
+### [fork-reconcile] [main-canonical] [CAD-24-25-ported]
+
+Descoberta + reconciliação de FORK. O repo tinha DUAS linhas paralelas (ancestral comum `2f511bc`):
+- **`main`** (esta): CAD-20/21/22 + CAD-23.1 RAG (#17) + CAD-23.2 auto-tag (#19) + fixes #14/#18. `omninote-ai` com `rag.rs`/`auto_tag.rs`/`embeddings.rs` (RAG real).
+- **`feat/omninote-v01`** (paralela, era a default do repo por engano): sessão de fan-out paralelo que entregou CAD-23 (só LlmProvider *scaffold*), CAD-24 (power CLI: `--json`/multi-vault/`diff`), CAD-25 (Obsidian GUI + char→byte fix + panic hook + OpenDyslexic).
+
+**Decisão humana (AskUserQuestion):** `main` é canônica (AI mais avançado, é o que este DIARY segue).
+
+**Reconciliação** (2 agentes paralelos, worktrees off `main`, clippy 1.96 = CI):
+- **CAD-24 → main:** `vaults.rs` + `snapshot.rs` + `envelope.rs` + verbos `vault list/add/switch` + `diff` + `--json` uniforme — PRESERVANDO `ask`/`tag`/`human` do main. `toml` já existia (sem dup). Mantido `#[tokio::main]` async do main.
+- **CAD-25 → main:** tema Obsidian + panic hook + OpenDyslexic + `FontFamily::Dyslexic` + **char→byte fix** (bug de perda-de-dado/pânico no cursor egui que o main TAMBÉM tinha — achado pelo agy na sessão da v01).
+- **CAD-23 LlmProvider scaffold DESCARTADO** (main já tem RAG real, superior).
+- Ports disjuntos (cli+core vs gui) → merge sem conflito. `main` CI **verde: 361 testes, clippy 1.96, build release ok**.
+- **Default branch do repo: `feat/omninote-v01` → `main`.** Acaba a confusão dos dois mains.
+
+**Limpeza junto:** fechados PRs zumbis #1/#2/#3 (single-crate obsoleto pré-workspace) + deletadas branches obsoletas (v04-v10, swiss-theme, q01-q02, cad-12). CodeRabbit desinstalado dos 3 repos (sem créditos → postava ✗ falso, não-bloqueante). rustup instalado → clippy local = CI (1.96), fecha o gap "verde local ≠ verde CI" (que mordeu 2× via toolchain drift).
+
+**Pendente:** deletar `feat/omninote-v01` (superada — único exclusivo era o scaffold descartado). Teste humano macOS (tema Obsidian, `Cmd+=` com acento, slash menu, `ask`/`tag`) pra fechar tickets.
