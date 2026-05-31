@@ -126,16 +126,10 @@ fn cfg_with_env(api_key_env: &str) -> LlmConfig {
 /// Minimal std-only executor — avoids a tokio dev-dependency for futures that
 /// resolve on first poll (the stubs return synchronously, no real await point).
 fn block_on<F: std::future::Future>(fut: F) -> F::Output {
-    use std::sync::Arc;
-    use std::task::{Context, Poll, Wake};
+    use std::task::{Context, Poll, Waker};
 
-    struct NoopWaker;
-    impl Wake for NoopWaker {
-        fn wake(self: Arc<Self>) {}
-    }
-
-    let waker = Arc::new(NoopWaker).into();
-    let mut cx = Context::from_waker(&waker);
+    let waker = Waker::noop();
+    let mut cx = Context::from_waker(waker);
     let mut fut = Box::pin(fut);
     loop {
         if let Poll::Ready(v) = fut.as_mut().poll(&mut cx) {

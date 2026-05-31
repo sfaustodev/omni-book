@@ -9,16 +9,10 @@ use tempfile::tempdir;
 /// completion; the stub futures never yield `Pending`.
 fn futures_block_on<F: std::future::Future>(fut: F) -> F::Output {
     use std::pin::pin;
-    use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+    use std::task::{Context, Poll, Waker};
 
-    fn noop(_: *const ()) {}
-    fn clone(_: *const ()) -> RawWaker {
-        RawWaker::new(std::ptr::null(), &VTABLE)
-    }
-    static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, noop, noop, noop);
-
-    let waker = unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) };
-    let mut cx = Context::from_waker(&waker);
+    let waker = Waker::noop();
+    let mut cx = Context::from_waker(waker);
     let mut fut = pin!(fut);
     loop {
         if let Poll::Ready(out) = fut.as_mut().poll(&mut cx) {
