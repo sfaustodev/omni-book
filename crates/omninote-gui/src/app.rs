@@ -60,8 +60,14 @@ impl OmniNoteApp {
 
         let vault = last_vault.and_then(|p| Vault::open(p).ok());
         register_custom_fonts(&cc.egui_ctx);
-        let dark = vault.as_ref().map(|v| v.config.dark_mode).unwrap_or(true);
-        theme::apply_theme(&cc.egui_ctx, dark);
+        // Startup respects the saved theme preset (dark/light/high-contrast/custom);
+        // the dark toggle still flips dark/light via apply_theme until the settings
+        // panel (Slice 4) drives the preset directly.
+        vault
+            .as_ref()
+            .map(|v| theme::Theme::from_preset(v.config.theme_preset, v.config.accent_color))
+            .unwrap_or_else(theme::Theme::obsidian_dark)
+            .apply(&cc.egui_ctx);
 
         let watcher = vault.as_ref().and_then(|v| VaultWatcher::new(&v.root).ok());
 

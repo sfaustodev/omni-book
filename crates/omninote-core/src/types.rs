@@ -138,6 +138,77 @@ pub struct AppConfig {
     pub line_height: f32,
     #[serde(default = "default_letter_spacing")]
     pub letter_spacing: f32,
+
+    // UI v2 (CAD-25 Fase B) — all serde-default for backwards-compat with v1.0 config.json.
+    #[serde(default = "default_true")]
+    pub right_rail_open: bool,
+    #[serde(default)]
+    pub right_rail_tab: RightRailTab,
+    #[serde(default)]
+    pub daily_auto_open: bool,
+    #[serde(default)]
+    pub default_template_for_daily: Option<String>,
+    /// Provider name as a string ("claude"/"grok"/"ollama"/"disabled") — kept a
+    /// string so `omninote-core` stays free of an `omninote-ai` dependency.
+    #[serde(default)]
+    pub llm_provider: String,
+    #[serde(default = "default_llm_model")]
+    pub llm_model_id: String,
+    #[serde(default = "default_accent")]
+    pub accent_color: [u8; 3],
+    #[serde(default)]
+    pub theme_preset: ThemePreset,
+    #[serde(default = "default_capture_hotkey")]
+    pub quick_capture_hotkey: String,
+    #[serde(default = "default_dictation_hotkey")]
+    pub dictation_hotkey: String,
+    #[serde(default = "default_dictation_locale")]
+    pub dictation_locale: String,
+    #[serde(default = "default_palette_hotkey")]
+    pub palette_hotkey: String,
+}
+
+/// Theme variant selected in settings. Maps to a gui-side `Theme` (egui colors).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThemePreset {
+    #[default]
+    ObsidianDark,
+    ObsidianLight,
+    HighContrast,
+    Custom,
+}
+
+/// Active tab in the right rail (320px panel).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RightRailTab {
+    #[default]
+    Backlinks,
+    Outline,
+    AiChat,
+}
+
+fn default_true() -> bool {
+    true
+}
+fn default_llm_model() -> String {
+    "claude-3-5-sonnet-latest".to_string()
+}
+fn default_accent() -> [u8; 3] {
+    [0x8b, 0x7c, 0xff]
+}
+fn default_capture_hotkey() -> String {
+    "Ctrl+Shift+Space".to_string()
+}
+fn default_dictation_hotkey() -> String {
+    "Ctrl+Shift+M".to_string()
+}
+fn default_dictation_locale() -> String {
+    "pt-BR".to_string()
+}
+fn default_palette_hotkey() -> String {
+    "Ctrl+P".to_string()
 }
 
 impl Default for AppConfig {
@@ -150,6 +221,18 @@ impl Default for AppConfig {
             font_size: default_font_size(),
             line_height: default_line_height(),
             letter_spacing: default_letter_spacing(),
+            right_rail_open: true,
+            right_rail_tab: RightRailTab::default(),
+            daily_auto_open: false,
+            default_template_for_daily: None,
+            llm_provider: String::new(),
+            llm_model_id: default_llm_model(),
+            accent_color: default_accent(),
+            theme_preset: ThemePreset::default(),
+            quick_capture_hotkey: default_capture_hotkey(),
+            dictation_hotkey: default_dictation_hotkey(),
+            dictation_locale: default_dictation_locale(),
+            palette_hotkey: default_palette_hotkey(),
         }
     }
 }
