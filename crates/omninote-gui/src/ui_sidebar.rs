@@ -40,11 +40,8 @@ impl OmniNoteApp {
                         {
                             if let Some(v) = &mut self.vault {
                                 v.config.dark_mode = !v.config.dark_mode;
-                                ctx.set_visuals(if v.config.dark_mode {
-                                    egui::Visuals::dark()
-                                } else {
-                                    egui::Visuals::light()
-                                });
+                                let dark = v.config.dark_mode;
+                                crate::theme::apply_theme(ctx, dark);
                             }
                         }
                         if ui
@@ -52,7 +49,7 @@ impl OmniNoteApp {
                             .on_hover_text("Trocar vault")
                             .clicked()
                         {
-                            self.pick_vault();
+                            self.pick_vault_with_ctx(ctx);
                         }
                     });
                 });
