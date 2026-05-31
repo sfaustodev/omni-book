@@ -33,8 +33,7 @@ open = "5"
 anyhow = "1"
 thiserror = "1"
 
-# AI layer deps (CAD-23 scaffold)
-toml = "0.8"
+# AI layer deps
 async-trait = "0.1"
 
 # Core-only deps
