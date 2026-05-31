@@ -29,8 +29,20 @@
 
 | # | ID | Tarefa | Status | Prio | Estimativa | Notas |
 |---|------|--------|--------|------|------------|-------|
-| 1 | CAD-22 | Phase 3 — Daily notes + templates + discipline CLI/MCP | 🔄 Em execução | ⚡ | 18h | branch `feat/cad-22-daily-discipline` |
+| 1 | CAD-22 | Phase 3 — Daily notes + templates + discipline CLI/MCP | 👀 Revisão | ⚡ | 18h | merged #15 — aguarda teste humano macOS |
 | 2 | CAD-25 (Fase B) | UI Design v2 — implementação egui | 🌱 Backlog | ⚡ | ~22h | bloqueado em Q-01..Q-30 (UI_DESIGN_v2.md) |
+
+### Pull-forward paralelo (sessão 2026-05-31) — v1.3 + salvage
+
+3 PRs per-ticket abertos via fan-out de 3 agentes (worktree-isolados) + trio gate completo (security/coverage/review, 3-way Claude+Codex+agy, 260 tests):
+
+| ID | PR | Status | Escopo |
+|----|-----|--------|--------|
+| CAD-23 | [#20](https://github.com/sfaustodev/omni-book/pull/20) | ✅ merged (👀 Revisão Notion) | crate `omninote-ai`: LlmProvider + llm.toml scaffold |
+| CAD-24 | [#21](https://github.com/sfaustodev/omni-book/pull/21) | 👀 Revisão (CI) | CLI `--json`, multi-vault, `diff --since` |
+| CAD-25 | [#22](https://github.com/sfaustodev/omni-book/pull/22) | 👀 Revisão (CI) | tema Obsidian, panic hook, OpenDyslexic, Cmd |
+
+Auto-merge desabilitado no repo → merge manual com CI verde. Branches obsoletos (`v04-v10`/`swiss`/`q01-q02`) NÃO pruned (humano escolheu ship sem prune).
 
 ### Dependency graph
 

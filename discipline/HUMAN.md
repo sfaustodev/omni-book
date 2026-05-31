@@ -53,3 +53,7 @@ _(nenhuma — Q-01 a Q-08 resolvidas em batch 2026-05-22)_
 **Decisão (humano):** (b) — adicionar `if root.is_file() { return Err("path is a file, expected dir".into()); }` no início de `Vault::open`. 1 linha + 1 teste, risco zero.
 **Razão:** comportamento atual retorna `Ok` com vault vazio (os `fs::create_dir_all` usam `let _ =` e engolem o erro) — pegadinha confusa. Barato de prevenir.
 **Followed-up in:** PR follow-up dedicado (não bundlar no CAD-12), pra manter histórico limpo.
+### Q-09 · agy (`--dangerously-skip-permissions`) bloqueado pelo classifier no trio gate · raised 2026-05-31 · resolved 2026-05-31
+**Decisão (humano):** aprovar a escalation + re-rodar coverage+review com agy pro consenso 3-way estrito.
+**Razão:** os 3 agentes cobrem blindspots distintos; agy achou 2 HIGH (char/byte index) que Claude+Codex passaram batido. Valeu o 3º ângulo.
+**Followed-up in:** agy rodou no 2º try (background), findings fixados, PRs abertos.

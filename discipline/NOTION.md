@@ -108,3 +108,17 @@ v1.3 ──── CAD-23 ⟂ CAD-24 (paralelo)
 | ✅ Concluída | Testado e aprovado |
 | 🧊 Congelada | Pausada |
 | 📦 Arquivada | Não vai ser feita |
+
+---
+
+## Sessão 2026-05-31 — CAD-23/24/25 shipped (fan-out paralelo)
+
+3 PRs per-ticket vs `feat/omninote-v01`, trio gate completo (3-way Claude+Codex+agy):
+
+| ID | PR | Notion status | Nota |
+|----|-----|---------------|------|
+| CAD-23 | [#20](https://github.com/sfaustodev/omni-book/pull/20) | 👀 Revisão | **merged**; aguarda teste humano macOS pra ✅ |
+| CAD-24 | [#21](https://github.com/sfaustodev/omni-book/pull/21) | 👀 Revisão | rebased (dup toml resolvido), CI rodando |
+| CAD-25 | [#22](https://github.com/sfaustodev/omni-book/pull/22) | 👀 Revisão | tema Obsidian (não Swiss), CI rodando |
+
+Mover pra ✅ Concluída só após "testado, pode fechar" do humano (rule #13). Push pro Notion MCP pendente (fazer no próximo sync).

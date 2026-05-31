@@ -310,3 +310,30 @@ a8ee2c1 chore(discipline): sprint v1.1 plan (#4)
 **Notion status:** CAD-20 + CAD-21 ficam 👀 Revisão (não ✅ — per memory `feedback_auto_merge_when_ci_green` + discipline rule #13: ✅ exige string explícita humano "testado, pode fechar").
 
 **Próximo:** humano testa OmniNote contra vault real Obsidian → confirma → ✅ CAD-20 + CAD-21. Em paralelo: CAD-25 Fase B (UI implementation) desbloqueada por Q-01..Q-30 já respondidos (mas Q-01..Q-08 do HUMAN.md também resolvidos — 30 Qs do UI_DESIGN_v2.md são separadas, ainda pendentes).
+
+---
+
+### [parallel-fanout] [3-way-gate] [char-byte-bug] [CAD-23-merged]
+
+Sessão paralela massiva (caveman mode). 3 agentes background worktree-isolados (crates disjuntos) → 3 features simultâneas:
+- **CAD-23** (omninote-ai): `LlmProvider` trait + `llm.toml` scaffold, sem rede/deps pesadas.
+- **CAD-24** (omninote-cli): `--json` envelope, multi-vault (`vaults.rs`), `diff --since` (`snapshot.rs`). Daemon hotkey adiado.
+- **CAD-25** (omninote-gui): salvage do branch obsoleto `swiss-theme` → panic hook + OpenDyslexic + Cmd modifier. Tema trocado **Swiss→Obsidian** a pedido humano (tokens de `07-omninote-obsidian.jsx`, acento violeta `#8b7cff`).
+
+**Descobertas:**
+- Branches `v04-v10`/`swiss`/`q01-q02` = OBSOLETAS (layout single-crate pré-workspace CAD-21). Diffstat `{crates/.../src => src}` denuncia revert do refactor → não-mergeáveis, só salvage. Não pruned (humano escolheu ship sem prune).
+- **Clippy RED no main** (toolchain drift rust-1.95 > CI do merge CAD-22): `explicit_auto_deref`×7 (mcp) + `field_reassign` (daily test). 3 agentes acharam independente. Fix `fix(lint)` isolado.
+- **Composition-check pegou dup `toml` key** no Cargo.toml (merge textual de 2 branches que adicionam toml em linhas diferentes → build fail). Cada PR re-deduped no rebase.
+
+**Trio gate (#26) — 3-way REAL (Claude+Codex+agy):**
+- Security: CLEAN (snapshot via `Command::arg` não-shell; `api_key_env` só NOME; sem traversal no threat model single-user).
+- Coverage: +36 testes adversariais (Claude config/vaults/envelope · Codex snapshot · agy ai). Achou+fixou whitespace-key fail-closed.
+- Review: 11 findings Codex (panic `parse_since` multibyte, wrong-vault fallthrough, json exit-0, relative path) → 9 fixed, 2 deferred. **agy achou 2 HIGH que Claude+Codex passaram batido: char-index-vs-byte-index** no cursor egui (`ui_editor`) → autoformat apaga texto / slash menu panic em notas não-ASCII. Fix single-point char→byte. **Esse é o valor do 3-way** — diversidade pega o que redundância não pega.
+
+**Tooling friction:** agy bloqueado pelo classifier (`--dangerously-skip-permissions`) até humano aprovar explícito. Codex 1ª run read-only sandbox → `-s workspace-write` no retry.
+
+**Ship:** split integration → 3 PRs per-ticket (cherry-pick gate commits sobre os feature commits originais; cada um já tinha lint bundled → green standalone). **#20 CAD-23 MERGED** (gh `--auto` fez fallback pra merge imediato — auto-merge não habilitado no repo → mergeou antes do CI; código já gated+green, risco baixo mas registrado). #21 CAD-24 rebased (dup toml resolvido) + #22 CAD-25 abertos, CI rodando, **merge manual** (auto-merge off).
+
+**Estado:** 260 tests green local. CAD-23 merged; CAD-24/25 👀 Revisão. Notion fica Revisão (rule #13 — falta teste humano macOS).
+
+**Próximo humano:** mergear #21+#22 com CI verde (ou habilitar auto-merge em Settings→General). Testar macOS: tema Obsidian, `Cmd+=` em linha com acento, slash `/` após `ç`. Confirmar → ✅ CAD-23/24/25.
