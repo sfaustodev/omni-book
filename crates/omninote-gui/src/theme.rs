@@ -1,10 +1,12 @@
-//! egui-specific theme — Swiss / Bauhaus palette + the bridge from the
+//! egui-specific theme — Obsidian-style palette + the bridge from the
 //! portable `omninote_core::types::FontFamily` enum to `egui::FontFamily`.
 //! Lives in the gui crate so `omninote-core` stays free of any UI dependency.
 //!
-//! Design language: rigorous grid, grotesk sans, a single warm accent,
-//! generous whitespace. Dark is the primary variant; the light variant keeps
-//! the same accent over a paper background so the `dark_mode` toggle is useful.
+//! Design language: dark editor canvas, calm blue-grays, a single soft-violet
+//! accent — mirrors Obsidian (tokens from
+//! `docs/design/omninote/project/styles/07-omninote-obsidian.jsx`). Dark is the
+//! primary variant; the light variant keeps the same violet accent over a paper
+//! background so the `dark_mode` toggle stays useful.
 
 use eframe::egui::{self, Color32};
 use omninote_core::types::FontFamily;
@@ -12,26 +14,26 @@ use omninote_core::types::FontFamily;
 /// Identifier the OpenDyslexic face is registered under in `FontDefinitions`.
 pub const OPEN_DYSLEXIC_NAME: &str = "OpenDyslexic";
 
-// Dark palette.
-pub const BG: Color32 = Color32::from_rgb(0x0e, 0x0e, 0x0e);
-pub const PANEL: Color32 = Color32::from_rgb(0x14, 0x14, 0x14);
-pub const BORDER: Color32 = Color32::from_rgb(0x26, 0x26, 0x26);
-pub const TEXT: Color32 = Color32::from_rgb(0xfa, 0xfa, 0xfa);
-pub const DIM: Color32 = Color32::from_rgb(0x8a, 0x8a, 0x8a);
+// Dark palette — Obsidian "soft violet": dark canvas, blue-gray panels.
+pub const BG: Color32 = Color32::from_rgb(0x1b, 0x1d, 0x22);
+pub const PANEL: Color32 = Color32::from_rgb(0x21, 0x24, 0x29);
+pub const BORDER: Color32 = Color32::from_rgb(0x2d, 0x30, 0x37);
+pub const TEXT: Color32 = Color32::from_rgb(0xda, 0xdd, 0xe2);
+pub const DIM: Color32 = Color32::from_rgb(0x8b, 0x8f, 0x98);
 
-// Light palette — paper background, ink text, lighter hairlines.
+// Light palette — paper background, ink text, same violet accent.
 pub const BG_LIGHT: Color32 = Color32::from_rgb(0xfa, 0xfa, 0xf7);
 pub const PANEL_LIGHT: Color32 = Color32::from_rgb(0xf0, 0xf0, 0xec);
 pub const BORDER_LIGHT: Color32 = Color32::from_rgb(0xd6, 0xd6, 0xd0);
-pub const TEXT_LIGHT: Color32 = Color32::from_rgb(0x14, 0x14, 0x14);
-pub const DIM_LIGHT: Color32 = Color32::from_rgb(0x60, 0x60, 0x60);
+pub const TEXT_LIGHT: Color32 = Color32::from_rgb(0x21, 0x24, 0x29);
+pub const DIM_LIGHT: Color32 = Color32::from_rgb(0x5e, 0x64, 0x70);
 
-// Shared accent — the single warm signal color in both variants.
-pub const ACCENT: Color32 = Color32::from_rgb(0xff, 0x5a, 0x1f);
-pub const ACCENT_INK: Color32 = Color32::from_rgb(0x00, 0x00, 0x00);
+// Shared accent — Obsidian soft violet, with near-black ink for text on accent.
+pub const ACCENT: Color32 = Color32::from_rgb(0x8b, 0x7c, 0xff);
+pub const ACCENT_INK: Color32 = Color32::from_rgb(0x0a, 0x0a, 0x0a);
 
-/// Apply the Swiss theme to the egui context. `dark` selects the variant; the
-/// accent and tight stroke baseline are shared. Re-applying is cheap and idempotent.
+/// Apply the Obsidian theme to the egui context. `dark` selects the variant; the
+/// violet accent and stroke baseline are shared. Re-applying is cheap and idempotent.
 pub fn apply_theme(ctx: &egui::Context, dark: bool) {
     let (bg, panel, border, text, dim) = if dark {
         (BG, PANEL, BORDER, TEXT, DIM)
