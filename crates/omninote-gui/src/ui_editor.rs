@@ -185,8 +185,18 @@ impl OmniNoteApp {
         }
 
         // Cmd+= math substitution on current line
-        // Extract cursor pos before output is dropped (output holds &mut note.content)
-        let cursor_pos = output.cursor_range.map(|r| r.primary.ccursor.index);
+        // Extract cursor pos before output is dropped (output holds &mut note.content).
+        // `ccursor.index` is a CHAR index; autoformat and the slash menu below index
+        // `content` by BYTE, so convert once here — a char index used as a byte offset
+        // corrupts/erases text (and can panic in replace_range) on non-ASCII lines.
+        let cursor_pos = output.cursor_range.map(|r| {
+            let char_idx = r.primary.ccursor.index;
+            note.content
+                .char_indices()
+                .nth(char_idx)
+                .map(|(byte_idx, _)| byte_idx)
+                .unwrap_or(note.content.len())
+        });
         let has_focus = output.response.has_focus();
         drop(output);
 
