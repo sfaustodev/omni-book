@@ -22,7 +22,9 @@ fn breadcrumb_path(rel_path: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// Word count over whitespace-separated tokens (good enough for a status hint).
+/// Word count over whitespace-separated tokens (a status hint, not a metric).
+/// Known limitation: CJK text without spaces counts as one "word"; a grapheme/
+/// script-aware count is deferred until there's a CJK user to justify it.
 fn word_count(content: &str) -> usize {
     content.split_whitespace().count()
 }

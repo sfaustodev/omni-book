@@ -33,8 +33,8 @@ impl OmniNoteApp {
                     .small_button("×")
                     .on_hover_text("Fechar (Cmd+W)")
                     .clicked()
+                    && self.flush_active()
                 {
-                    self.flush_active();
                     self.active_note = None;
                 }
             } else {

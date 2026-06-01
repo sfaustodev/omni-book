@@ -17,18 +17,38 @@ struct Heading {
     text: String,
 }
 
-/// Parse ATX headings (`#`..`######`) from note body, skipping fenced code so a
-/// `# comment` inside a ``` block isn't mistaken for a heading.
+/// Parse ATX headings (`#`..`######`) from note body, skipping fenced code.
+/// Tracks the *opening* fence kind (backtick vs tilde) so a `~~~` line inside a
+/// ```` ``` ```` block doesn't close it early, and requires CommonMark's ≤3-space
+/// indent so an indented code line (`    # x`) isn't read as a heading.
 fn outline(content: &str) -> Vec<Heading> {
     let mut out = Vec::new();
-    let mut in_fence = false;
+    let mut fence: Option<char> = None;
     for line in content.lines() {
+        let indent = line.len() - line.trim_start().len();
         let trimmed = line.trim_start();
-        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-            in_fence = !in_fence;
-            continue;
+        match fence {
+            None => {
+                if trimmed.starts_with("```") {
+                    fence = Some('`');
+                    continue;
+                } else if trimmed.starts_with("~~~") {
+                    fence = Some('~');
+                    continue;
+                }
+            }
+            Some('`') if trimmed.starts_with("```") => {
+                fence = None;
+                continue;
+            }
+            Some('~') if trimmed.starts_with("~~~") => {
+                fence = None;
+                continue;
+            }
+            Some(_) => continue,
         }
-        if in_fence {
+        // ATX headings allow at most 3 leading spaces; 4+ is an indented code block.
+        if indent > 3 {
             continue;
         }
         let hashes = trimmed.chars().take_while(|&c| c == '#').count();
@@ -84,8 +104,9 @@ impl OmniNoteApp {
         let Some(v) = &self.vault else { return };
 
         // Target-side resolution (handles aliases / path / case) via the core
-        // index, replacing the old substring match. Rebuilt per render — cheap
-        // for vault sizes here; cache later if it shows up in a profile.
+        // index, replacing the old substring match. The index rebuild is O(n) per
+        // frame — acceptable for typical vaults; a struct-level cache is a future
+        // perf slice. The per-source lookup below uses a map to avoid an O(n²) scan.
         let index = VaultIndex::build(&v.notes);
         let backlinks = index.backlinks_to(&note.rel_path, &v.notes);
 
@@ -93,6 +114,9 @@ impl OmniNoteApp {
             ui.label(RichText::new("Nenhum backlink ainda.").weak());
             return;
         }
+
+        let by_path: std::collections::HashMap<&std::path::Path, &omninote_core::types::Note> =
+            v.notes.iter().map(|n| (n.rel_path.as_path(), n)).collect();
 
         ui.label(
             RichText::new(format!("{} nota(s) apontam aqui", backlinks.len()))
@@ -106,10 +130,8 @@ impl OmniNoteApp {
             .id_salt("backlinks_scroll")
             .show(ui, |ui| {
                 for bl in &backlinks {
-                    let title = v
-                        .notes
-                        .iter()
-                        .find(|n| n.rel_path == bl.source)
+                    let source_note = by_path.get(bl.source.as_path()).copied();
+                    let title = source_note
                         .map(|n| n.title.clone())
                         .unwrap_or_else(|| bl.source.to_string_lossy().into_owned());
                     let label = if bl.is_embed {
@@ -118,7 +140,7 @@ impl OmniNoteApp {
                         format!("← {title}")
                     };
                     if ui.link(label).clicked() {
-                        if let Some(n) = v.notes.iter().find(|n| n.rel_path == bl.source) {
+                        if let Some(n) = source_note {
                             pending = Some(n.frontmatter.id.clone());
                         }
                     }
@@ -193,5 +215,25 @@ mod tests {
         assert_eq!(hs.len(), 1);
         assert_eq!(hs[0].depth, 4);
         assert_eq!(hs[0].text, "deep");
+    }
+
+    #[test]
+    fn outline_tracks_fence_kind_not_just_toggle() {
+        // Regression (triad): a ~~~ line inside a ``` block must NOT close it —
+        // otherwise the `# trap` after it would be read as a heading.
+        let md = "# Real\n```\n~~~\n# trap inside code\n```\n## After\n";
+        let hs = outline(md);
+        assert_eq!(hs.len(), 2);
+        assert_eq!(hs[0].text, "Real");
+        assert_eq!(hs[1].text, "After");
+    }
+
+    #[test]
+    fn outline_ignores_indented_code_headings() {
+        // Regression (triad): 4+ leading spaces = indented code, not a heading.
+        let hs = outline("# Real\n    # indented not heading\n## After\n");
+        assert_eq!(hs.len(), 2);
+        assert_eq!(hs[0].text, "Real");
+        assert_eq!(hs[1].text, "After");
     }
 }
