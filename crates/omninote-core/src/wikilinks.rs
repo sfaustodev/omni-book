@@ -162,6 +162,83 @@ pub fn extract(content: &str) -> Vec<Wikilink> {
     out
 }
 
+/// Like [`extract`], but also returns each link's byte span in `content`
+/// (covering the full `[[…]]` / `![[…]]` match including brackets). Used by the
+/// GUI inline renderer (CAD-25 Slice 3) to splice clickable widgets into the
+/// surrounding markdown text. Same code-region skipping as `extract`.
+pub fn extract_spans(content: &str) -> Vec<(Wikilink, std::ops::Range<usize>)> {
+    let bytes = content.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    let mut in_fence = false;
+    let mut at_line_start = true;
+    let mut in_inline_code = false;
+
+    while i < bytes.len() {
+        if at_line_start
+            && i + 2 < bytes.len()
+            && bytes[i] == b'`'
+            && bytes[i + 1] == b'`'
+            && bytes[i + 2] == b'`'
+        {
+            in_fence = !in_fence;
+            i += 3;
+            at_line_start = false;
+            continue;
+        }
+        if !in_fence && bytes[i] == b'`' {
+            in_inline_code = !in_inline_code;
+            i += 1;
+            at_line_start = false;
+            continue;
+        }
+        if bytes[i] == b'\n' {
+            at_line_start = true;
+            in_inline_code = false;
+            i += 1;
+            continue;
+        }
+        if !bytes[i].is_ascii_whitespace() {
+            at_line_start = false;
+        }
+        if in_fence || in_inline_code {
+            i += 1;
+            continue;
+        }
+
+        let is_embed =
+            i + 2 < bytes.len() && bytes[i] == b'!' && bytes[i + 1] == b'[' && bytes[i + 2] == b'[';
+        let is_link = !is_embed && i + 1 < bytes.len() && bytes[i] == b'[' && bytes[i + 1] == b'[';
+        if !is_link && !is_embed {
+            i += 1;
+            continue;
+        }
+
+        let match_start = i;
+        let start = if is_embed { i + 3 } else { i + 2 };
+        let mut end = start;
+        while end + 1 < bytes.len() && !(bytes[end] == b']' && bytes[end + 1] == b']') {
+            end += 1;
+        }
+        if end + 1 >= bytes.len() {
+            break;
+        }
+
+        let inner = content[start..end].trim();
+        if !inner.is_empty() {
+            let link = if is_embed {
+                classify_embed(inner)
+            } else {
+                parse_note_link(inner)
+            };
+            out.push((link, match_start..end + 2));
+        }
+        i = end + 2;
+    }
+
+    out
+}
+
 /// Inline tag extraction (`#tag` in body content, not frontmatter).
 /// Returns tags in order of appearance. Skips `#` inside code blocks and wikilinks.
 ///
@@ -833,6 +910,29 @@ mod tests {
     fn ignores_hash_in_code_fence() {
         let c = "antes #before\n```\n#not-a-tag\n```\n#after";
         assert_eq!(extract_inline_tags(c), vec!["before", "after"]);
+    }
+
+    #[test]
+    fn extract_spans_recorta_o_match_completo() {
+        let c = "vê [[Nota A]] e ![[img.png]] aqui";
+        let spans = extract_spans(c);
+        assert_eq!(spans.len(), 2);
+        // O span do 1º deve recortar exatamente "[[Nota A]]".
+        assert_eq!(&c[spans[0].1.clone()], "[[Nota A]]");
+        assert!(matches!(spans[0].0, Wikilink::Note(_)));
+        // O 2º recorta "![[img.png]]".
+        assert_eq!(&c[spans[1].1.clone()], "![[img.png]]");
+        assert!(matches!(spans[1].0, Wikilink::Image(_)));
+    }
+
+    #[test]
+    fn extract_spans_pula_code_e_casa_extract() {
+        let c = "`[[no code]]` mas [[real]] sim";
+        let spans = extract_spans(c);
+        assert_eq!(spans.len(), 1);
+        assert_eq!(&c[spans[0].1.clone()], "[[real]]");
+        // Mesma contagem que o extract (consistência entre as duas fns).
+        assert_eq!(spans.len(), extract(c).len());
     }
 
     #[test]

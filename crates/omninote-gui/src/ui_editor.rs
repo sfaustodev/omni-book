@@ -287,155 +287,28 @@ impl OmniNoteApp {
         }
         ui.separator();
 
-        egui_commonmark::CommonMarkViewer::new().show(ui, &mut self.md_cache, &note.content);
-        ui.separator();
-
-        // Wikilinks + embeds (v0.4 — CAD-10)
-        let wikis = omninote_core::wikilinks::extract(&note.content);
-        if !wikis.is_empty() {
-            self.render_wikilinks(ui, &wikis);
-            ui.separator();
+        // Inline renderer (CAD-25 Slice 3a): wikilinks/embeds/#tags rendered in
+        // the text flow, replacing the old "CommonMarkViewer + appendix" split.
+        // Resolution is delegated to the core VaultIndex (closure + the existing
+        // select_note_by_target), so md_render doesn't reimplement it.
+        let action = {
+            let is_resolved = |target: &str| {
+                self.vault
+                    .as_ref()
+                    .map(|v| v.index.resolve(target).is_some())
+                    .unwrap_or(false)
+            };
+            crate::md_render::render_body(ui, &mut self.md_cache, &note.content, &is_resolved)
+        };
+        match action {
+            Some(crate::md_render::MdAction::Navigate(target)) => {
+                self.select_note_by_target(&target);
+            }
+            Some(crate::md_render::MdAction::FilterTag(tag)) => self.query = tag,
+            None => {}
         }
 
         // Backlinks moved to the right rail (ui_right_rail.rs), which resolves
         // them target-side via the core index instead of a substring match.
-    }
-
-    /// Render wikilinks (`[[Title]]`) as clickable links and embeds (`![[file]]`)
-    /// as inline images (for image extensions) or open buttons (for other files).
-    ///
-    /// CAD-20: handles new grammar with aliases (`[[A|label]]`), anchors
-    /// (`[[A#H]]` / `[[A#^id]]`), path-based targets (`[[folder/A]]`), and
-    /// note-embed (`![[A]]`). Display uses alias if provided, otherwise target.
-    fn render_wikilinks(
-        &mut self,
-        ui: &mut egui::Ui,
-        wikis: &[omninote_core::wikilinks::Wikilink],
-    ) {
-        use omninote_core::wikilinks::Wikilink;
-        use std::collections::HashSet;
-
-        // Dedupe by display key while preserving order. Notes and note-embeds
-        // are surfaced together — both navigate to the same target.
-        let mut seen: HashSet<String> = HashSet::new();
-        // (display_label, target_to_resolve)
-        let mut notes: Vec<(String, String)> = Vec::new();
-        let mut images: Vec<String> = Vec::new();
-        let mut files: Vec<String> = Vec::new();
-        for w in wikis {
-            let key = match w {
-                Wikilink::Note(r) | Wikilink::NoteEmbed(r) => format!("n:{}", r.target),
-                Wikilink::Image(e) => format!("i:{}", e.path),
-                Wikilink::File(e) => format!("f:{}", e.path),
-            };
-            if !seen.insert(key) {
-                continue;
-            }
-            match w {
-                Wikilink::Note(r) | Wikilink::NoteEmbed(r) => {
-                    let label = r.alias.clone().unwrap_or_else(|| r.target.clone());
-                    notes.push((label, r.target.clone()));
-                }
-                Wikilink::Image(e) => images.push(e.path.clone()),
-                Wikilink::File(e) => files.push(e.path.clone()),
-            }
-        }
-
-        // Notes referenciadas (CAD-20: resolves via VaultIndex)
-        if !notes.is_empty() {
-            ui.collapsing(format!("🔗 Notas referenciadas ({})", notes.len()), |ui| {
-                let mut pending_select: Option<String> = None;
-                let mut pending_create: Option<String> = None;
-                for (label, target) in &notes {
-                    let resolved = self
-                        .vault
-                        .as_ref()
-                        .and_then(|v| v.index.resolve(target).cloned());
-
-                    ui.horizontal(|ui| {
-                        if resolved.is_some() {
-                            if ui.link(format!("→ {}", label)).clicked() {
-                                pending_select = Some(target.clone());
-                            }
-                        } else {
-                            ui.label(egui::RichText::new(format!("⚠ {}", label)).weak().italics())
-                                .on_hover_text(format!("Link não resolve: {target}"));
-                            if ui.small_button("➕ criar").clicked() {
-                                pending_create = Some(target.clone());
-                            }
-                        }
-                    });
-                }
-                if let Some(t) = pending_select {
-                    self.select_note_by_title(&t);
-                }
-                if let Some(t) = pending_create {
-                    self.create_note_from_wikilink(&t);
-                }
-            });
-        }
-
-        // Embeds: imagens
-        if !images.is_empty() {
-            ui.collapsing(format!("🖼 Imagens ({})", images.len()), |ui| {
-                if let Some(v) = &self.vault {
-                    for filename in &images {
-                        let path = v.root.join("_attachments").join(filename);
-                        if path.exists() {
-                            let uri = format!("file://{}", path.to_string_lossy());
-                            ui.label(egui::RichText::new(filename).size(11.0).weak());
-                            ui.add(
-                                egui::Image::new(uri)
-                                    .max_width(ui.available_width().min(600.0))
-                                    .maintain_aspect_ratio(true),
-                            );
-                        } else {
-                            ui.label(
-                                egui::RichText::new(format!("⚠ {} (não encontrado)", filename))
-                                    .weak(),
-                            );
-                        }
-                    }
-                }
-            });
-        }
-
-        // Embeds: arquivos (PDFs, etc)
-        if !files.is_empty() {
-            ui.collapsing(format!("📎 Arquivos ({})", files.len()), |ui| {
-                if let Some(v) = &self.vault {
-                    for filename in &files {
-                        let path = v.root.join("_attachments").join(filename);
-                        ui.horizontal(|ui| {
-                            if path.exists() {
-                                if ui.button(format!("📄 Abrir {}", filename)).clicked() {
-                                    let _ = open::that(&path);
-                                }
-                            } else {
-                                ui.label(
-                                    egui::RichText::new(format!("⚠ {} (não encontrado)", filename))
-                                        .weak(),
-                                );
-                            }
-                        });
-                    }
-                }
-            });
-        }
-    }
-
-    /// Create a new note matching a wikilink target title that doesn't exist yet.
-    fn create_note_from_wikilink(&mut self, title: &str) {
-        self.flush_active();
-        if let Some(v) = &mut self.vault {
-            match v.create_note(None, title, omninote_core::types::NoteType::default()) {
-                Ok(note) => {
-                    self.active_note = Some(note);
-                    self.editing = true;
-                    self.dirty = false;
-                }
-                Err(e) => self.error_msg = Some(e),
-            }
-        }
     }
 }

@@ -1,5 +1,6 @@
 // OmniNote GUI — egui app. Vault ops live in `omninote-core`.
 mod app;
+mod md_render;
 mod theme;
 mod ui_breadcrumb;
 mod ui_editor;

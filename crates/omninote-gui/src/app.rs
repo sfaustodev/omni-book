@@ -276,26 +276,6 @@ impl OmniNoteApp {
         }
     }
 
-    /// Find first note matching `title` (case-insensitive) and select it.
-    /// Returns true if found, false otherwise.
-    pub fn select_note_by_title(&mut self, title: &str) -> bool {
-        let target_id = self.vault.as_ref().and_then(|v| {
-            v.notes
-                .iter()
-                .find(|n| n.title.eq_ignore_ascii_case(title))
-                .map(|n| n.frontmatter.id.clone())
-        });
-        if let Some(id) = target_id {
-            self.select_note(&id);
-            true
-        } else {
-            // CAD-20: fall back to wikilink resolver (handles aliases, paths,
-            // case-insensitive matching). `title` here may actually be a full
-            // wikilink target like "folder/Note" or a frontmatter alias.
-            self.select_note_by_target(title)
-        }
-    }
-
     /// Resolve a wikilink target through the [`omninote_core::resolver::VaultIndex`]
     /// (filename / path / alias / case-insensitive) and select the resulting
     /// note. Returns true if resolved + selected, false if unresolved. CAD-20.
