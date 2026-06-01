@@ -2754,3 +2754,21 @@ Rough total: **~5500 LOC** of UI + handlers + theme + render. Plus tests (~30% o
 
 
 
+
+---
+
+## 10. Q-01..Q-30 — RESOLVED (2026-05-31)
+
+> Bloqueador da Fase B fechado. Defaults do doc ("Lean X… Confirm?") ratificados em batch, com 3 ajustes porque o backend de AI / multi-vault / snapshot **já existe** no `main` (CAD-23.1/.2 + CAD-24 portado).
+
+### Ajustados pela realidade atual (backend novo)
+- **Q-02** — Renderer markdown custom (pulldown-cmark): **FAZER AGORA** (Slice 3). Hover-preview é a killer feature.
+- **Q-10** — AI Chat: **REAL** (não stub). RAG (`omninote-ai`) já existe → o painel responde de verdade. Slice 6.
+- **Q-13** — Dictation UI: **ESCONDER** até CAD-23.3 (Whisper) existir. Sem backend, sem UI meia-boca.
+- **Q-26** — Deps: **sem `git2`** (Timeline reusa `omninote_core::snapshot`, shell-out). Entram só `pulldown-cmark` + `fuzzy-matcher` (~80KB).
+
+### Ratificados (defaults do doc)
+- **Q-01** single-tab agora, multi-tab depois · **Q-03** high-contrast ship now (preset `Theme::high_contrast` já existe) · **Q-04** color picker completo · **Q-05** `active_note` é a verdade (single-tab) · **Q-06** Inbox = bullets no topo · **Q-07** quick-capture in-app (daemon = CAD-24) · **Q-08** `Templates/` no root, suprimido da árvore · **Q-09** views read-only + dialog de append no DIARY · **Q-11** toast ancora na borda da tela · **Q-12** settings = modal scrollável · **Q-14** tickets só view local · **Q-15** onboarding em vault vazio / toast em existente · **Q-16** calendário pt-BR · **Q-17** `Frontmatter.aliases: Vec<String>` (verificar se CAD-20 já adicionou) · **Q-18** `#tag` strict + negative · **Q-19** `Projects/` manual (só surface) · **Q-20** Today = hoje + 2 anteriores · **Q-21** right-rail per-vault (campo `right_rail_open` já no `AppConfig`) · **Q-22** tab vazia = "Untitled" + dot · **Q-23** hover 400ms · **Q-24** frontmatter colapsado em view · **Q-25** embed abre na mesma aba · **Q-27** fontes embutidas · **Q-28** `_attachments/` flat · **Q-29** save-on-blur no switcher = sim · **Q-30** accent só no chrome (cores de NoteType fixas).
+
+### Implementação fatiada (1 PR por fatia, gate #26 por fatia)
+Slice 1 fundação (Theme+presets+AppConfig+status bar) → Slice 2 shell 3-painéis → Slice 3 md_render → Slice 4 overlays → Slice 5 views tipadas → Slice 6 AI surfaces. Plano: `~/.claude/plans/e-agora-bora-pa-optimized-pearl.md`.

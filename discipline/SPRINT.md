@@ -32,31 +32,38 @@ CAD-23 foi fatiado em 4 subtasks shipáveis (per decisão AskUserQuestion 2026-0
 | # | ID | Tarefa | Status | Prio | Estimativa | Notas |
 |---|------|--------|--------|------|------------|-------|
 | 1 | CAD-23.1 | RAG search (omninote-ai + ask CLI/MCP) | ✅ Done (PR #17 + hotfix #18) | ⚡ | 12h | mergeado main |
-| 2 | CAD-23.2 | Auto-tag + summary | 🔄 Em execução | ⚡ | 6h | branch `feat/cad-23-2-auto-tag` — Phases A-E done, PR pending |
-| 3 | CAD-23.3 | Dictation Whisper | 🌱 Backlog | ⚡ | 10h | depende 23.1 done ✅ |
-| 4 | CAD-23.4 | OCR PDF | 🌱 Backlog | 📌 | 8h | depende 23.1 done ✅ |
-| 5 | CAD-24 | Power automation (quick-capture + multi-vault + diff) | 🌱 Backlog | 📌 | 20h | depende CAD-23 done |
-| 6 | CAD-25 (Fase B) | UI Design v2 — implementação egui | 🚫 Bloqueado | ⚡ | ~22h | aguarda batch Q-01..Q-30 (UI_DESIGN_v2.md) |
+| 2 | CAD-23.2 | Auto-tag + summary | ✅ Done (PR #19) | ⚡ | 6h | mergeado main |
+| 3 | CAD-23.3 | Dictation Whisper (local) | 🌱 Backlog | ⚡ | 10h | depende 23.1 ✅ · whisper-rs offline |
+| 4 | CAD-23.4 | OCR PDF (local) | 🌱 Backlog | 📌 | 8h | depende 23.1 ✅ · tesseract local |
+| 5 | CAD-24 | Power automation | 🔄 Parcial | 📌 | 20h | multi-vault + diff + `--json` portados pro main; falta só o daemon `omninote-capture` (hotkey global) |
+| 6 | CAD-25 (Fase B) | UI Design v2 — implementação egui | 🔄 Em execução | ⚡ | ~50h | **DESBLOQUEADO** (Q-01..Q-30 resolvidas, doc §10). Fatiado em 6 slices. Slice 1 (fundação) gated pelo trio, em PR. |
+
+### CAD-25 Fase B — slices
+
+| Slice | Escopo | Status |
+|-------|--------|--------|
+| 1 | Fundação: `Theme` struct + 4 presets + AppConfig UI-v2 fields + status bar | 🔄 trio-gated, em PR |
+| 2 | Shell 3-painéis + chrome (titlebar/breadcrumb/tabs/right-rail) | 🌱 |
+| 3 | Renderer markdown custom (`md_render.rs`, hover-preview/embeds/#tags) | 🌱 |
+| 4 | Overlays (command palette, settings, toasts, calendar, onboarding) | 🌱 |
+| 5 | Views tipadas (sprint/diary/human/tickets/timeline/daily) | 🌱 |
+| 6 | AI surfaces (chat RAG real) + dictation hidden + a11y polish | 🌱 |
 
 ### Dependency graph
 
 ```
-CAD-23.1 RAG (Phase A-F) → ship → confirma humano → ✅
-  ├─→ CAD-23.2 auto-tag (LLM)
-  ├─→ CAD-23.3 dictation (whisper-rs)
-  └─→ CAD-23.4 OCR (leptess/tesseract)
-       ↓
-       CAD-24 power automation
-
-CAD-25 Fase B ⟂ blocked on Q-01..Q-30
+CAD-23.1 RAG ✅ → CAD-23.2 auto-tag ✅
+                  ├─→ CAD-23.3 dictation (whisper-rs local)  ⟂ paralelo
+                  └─→ CAD-23.4 OCR (tesseract local)         ⟂ paralelo
+CAD-24 power: multi-vault/diff/json ✅ no main · daemon pendente
+CAD-25 Fase B: desbloqueado → slices 1→6 incrementais
 ```
 
 ### Parallel work strategy
 
-- **CAD-23.1** é o caminho principal — foundation pra todas outras AI tasks.
-- Após shipped, **CAD-23.2/.3/.4** podem rodar em paralelo (cada uma toca módulo próprio em omninote-ai).
-- **CAD-24** segue depois.
-- **CAD-25 Fase B** permanece blocked até user responder Q-01..Q-30 (UI design questions).
+- **CAD-25 Fase B** é o caminho principal agora (desbloqueado). Incremental, 1 PR por slice, gate #26 por slice.
+- **CAD-23.3/.4** (dictation/OCR local) podem rodar em paralelo quando o foco voltar pra AI — módulos disjuntos em `omninote-ai`.
+- **CAD-24 daemon** (`omninote-capture`) é a última peça de power automation.
 
 ---
 

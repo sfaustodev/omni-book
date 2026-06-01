@@ -39,9 +39,8 @@ impl OmniNoteApp {
                             .clicked()
                         {
                             if let Some(v) = &mut self.vault {
-                                v.config.dark_mode = !v.config.dark_mode;
-                                let dark = v.config.dark_mode;
-                                crate::theme::apply_theme(ctx, dark);
+                                crate::app::toggle_light_dark(&mut v.config);
+                                crate::app::theme_for_config(&v.config).apply(ctx);
                             }
                         }
                         if ui
