@@ -1,7 +1,6 @@
 use crate::app::OmniNoteApp;
 use egui::RichText;
-use omninote_core::types::{ConfirmAction, NoteType};
-use std::path::Path;
+use omninote_core::types::NoteType;
 
 /// v0.8 — items shown in the slash menu when user types `/` at start of a line.
 /// Returns (label, snippet). Snippet replaces the `/` character.
@@ -41,36 +40,9 @@ impl OmniNoteApp {
                 return;
             }
 
-            // Sticky header
-            ui.horizontal(|ui| {
-                if let Some(note) = &self.active_note {
-                    if let Some(parent) = note.rel_path.parent() {
-                        if parent != Path::new("") {
-                            ui.label(
-                                RichText::new(parent.to_string_lossy().as_ref())
-                                    .weak()
-                                    .size(11.0),
-                            );
-                            ui.label(RichText::new("·").weak());
-                        }
-                    }
-                }
-                if ui
-                    .selectable_label(self.editing, "✎ Editar")
-                    .on_hover_text("Cmd+E")
-                    .clicked()
-                {
-                    self.editing = !self.editing;
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if let Some(id) = self.active_note.as_ref().map(|n| n.frontmatter.id.clone()) {
-                        if ui.button("🗑").on_hover_text("Deletar nota").clicked() {
-                            self.confirm_action = Some(ConfirmAction::DeleteNote(id));
-                        }
-                    }
-                });
-            });
-            ui.separator();
+            // Tab strip + breadcrumb (CAD-25 Slice 2) replace the old sticky header.
+            self.show_tab_strip(ui);
+            self.show_breadcrumb(ui);
 
             egui::ScrollArea::vertical()
                 .id_salt("editor_scroll")
@@ -325,34 +297,8 @@ impl OmniNoteApp {
             ui.separator();
         }
 
-        // Backlinks
-        let backlinks: Vec<(String, String)> = if let Some(v) = &self.vault {
-            v.notes
-                .iter()
-                .filter(|n| {
-                    n.frontmatter.id != note.frontmatter.id
-                        && (n.frontmatter.linked_note.as_deref() == Some(&note.frontmatter.id)
-                            || n.content.contains(&format!("[[{}]]", note.title)))
-                })
-                .map(|n| (n.frontmatter.id.clone(), n.title.clone()))
-                .collect()
-        } else {
-            vec![]
-        };
-
-        if !backlinks.is_empty() {
-            ui.collapsing(format!("🔗 Backlinks ({})", backlinks.len()), |ui| {
-                let mut pending: Option<String> = None;
-                for (id, title) in &backlinks {
-                    if ui.link(format!("← {}", title)).clicked() {
-                        pending = Some(id.clone());
-                    }
-                }
-                if let Some(id) = pending {
-                    self.select_note(&id);
-                }
-            });
-        }
+        // Backlinks moved to the right rail (ui_right_rail.rs), which resolves
+        // them target-side via the core index instead of a substring match.
     }
 
     /// Render wikilinks (`[[Title]]`) as clickable links and embeds (`![[file]]`)

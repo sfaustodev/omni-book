@@ -186,21 +186,26 @@ impl OmniNoteApp {
         }
     }
 
-    pub fn flush_active(&mut self) {
+    /// Persist the active note. Returns `true` if it saved (or there was nothing
+    /// to save). On a disk failure it returns `false`, keeps `dirty=true`, and
+    /// sets `error_msg` — so callers (Cmd+W / tab close) don't drop unsaved work
+    /// just because the write failed.
+    pub fn flush_active(&mut self) -> bool {
         if !self.dirty {
-            return;
+            return true;
         }
         let note = match self.active_note.take() {
             Some(n) => n,
             None => {
                 self.dirty = false;
-                return;
+                return true;
             }
         };
 
         // Set self-write window so notify events from our save are ignored
         self.self_write_until = std::time::Instant::now() + std::time::Duration::from_millis(400);
 
+        let mut save_err: Option<String> = None;
         if let Some(v) = &mut self.vault {
             let desired = format!(
                 "{}.md",
@@ -219,16 +224,22 @@ impl OmniNoteApp {
                         let mut n = renamed;
                         n.frontmatter = note.frontmatter.clone();
                         n.content = note.content.clone();
-                        let _ = v.save_note(&n);
+                        if let Err(e) = v.save_note(&n) {
+                            save_err = Some(e);
+                        }
                         n
                     }
                     Err(_) => {
-                        let _ = v.save_note(&note);
+                        if let Err(e) = v.save_note(&note) {
+                            save_err = Some(e);
+                        }
                         note
                     }
                 }
             } else {
-                let _ = v.save_note(&note);
+                if let Err(e) = v.save_note(&note) {
+                    save_err = Some(e);
+                }
                 note
             };
 
@@ -244,8 +255,14 @@ impl OmniNoteApp {
             self.active_note = Some(note);
         }
 
+        if let Some(e) = save_err {
+            // Keep dirty so the next autosave retries; surface the failure.
+            self.error_msg = Some(format!("Falha ao salvar: {e}"));
+            return false;
+        }
         self.dirty = false;
         self.last_save = std::time::Instant::now();
+        true
     }
 
     pub fn select_note(&mut self, id: &str) {
@@ -366,19 +383,28 @@ impl eframe::App for OmniNoteApp {
         let new_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::N);
         let edit_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::E);
         let settings_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Comma);
+        let close_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::W);
         let dark_sc = egui::KeyboardShortcut::new(
             egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
             egui::Key::D,
         );
 
-        let (new, toggle_edit, settings, toggle_dark) = ctx.input_mut(|i| {
+        let (new, toggle_edit, settings, close, toggle_dark) = ctx.input_mut(|i| {
             (
                 i.consume_shortcut(&new_sc),
                 i.consume_shortcut(&edit_sc),
                 i.consume_shortcut(&settings_sc),
+                i.consume_shortcut(&close_sc),
                 i.consume_shortcut(&dark_sc),
             )
         });
+        if close && self.active_note.is_some() {
+            // Only drop the note if it actually persisted — otherwise keep it
+            // open (flush_active sets error_msg) so edits aren't silently lost.
+            if self.flush_active() {
+                self.active_note = None;
+            }
+        }
         if new {
             self.show_new = true;
         }
@@ -430,8 +456,12 @@ impl eframe::App for OmniNoteApp {
             return;
         }
 
+        // Panel order: top/bottom chrome and side panels reserve their space
+        // before the editor's CentralPanel fills what remains.
+        self.show_titlebar(ctx);
         self.show_statusbar(ctx);
         self.show_sidebar(ctx);
+        self.show_right_rail(ctx);
         self.show_editor(ctx);
         self.show_modals(ctx);
     }
