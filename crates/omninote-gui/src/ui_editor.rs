@@ -287,18 +287,21 @@ impl OmniNoteApp {
         }
         ui.separator();
 
-        // Inline renderer (CAD-25 Slice 3a): wikilinks/embeds/#tags rendered in
-        // the text flow, replacing the old "CommonMarkViewer + appendix" split.
-        // Resolution is delegated to the core VaultIndex (closure + the existing
-        // select_note_by_target), so md_render doesn't reimplement it.
+        // Inline renderer (CAD-25 Slice 3a/3b): wikilinks/embeds/#tags rendered in
+        // the text flow, with hover previews. Resolution is delegated to the core
+        // VaultIndex (closure resolves target → note, returning title + excerpt);
+        // md_render doesn't reimplement resolution.
         let action = {
-            let is_resolved = |target: &str| {
-                self.vault
-                    .as_ref()
-                    .map(|v| v.index.resolve(target).is_some())
-                    .unwrap_or(false)
+            let resolve = |target: &str| {
+                let v = self.vault.as_ref()?;
+                let rel = v.index.resolve(target)?;
+                let n = v.notes.iter().find(|n| &n.rel_path == rel)?;
+                Some(crate::md_render::LinkPreview {
+                    title: n.title.clone(),
+                    excerpt: crate::md_render::preview_excerpt(&n.content),
+                })
             };
-            crate::md_render::render_body(ui, &mut self.md_cache, &note.content, &is_resolved)
+            crate::md_render::render_body(ui, &mut self.md_cache, &note.content, &resolve)
         };
         match action {
             Some(crate::md_render::MdAction::Navigate(target)) => {

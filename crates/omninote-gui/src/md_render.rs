@@ -21,15 +21,22 @@ pub enum MdAction {
     FilterTag(String),
 }
 
-/// Render note body with inline OmniNote tokens. `is_resolved` tells whether a
-/// wikilink target points to an existing note (used for broken-link styling) —
-/// the caller wires this to the core `VaultIndex`. Returns the first action the
-/// user triggered this frame, or None.
+/// Resolved preview of a wikilink target, shown on hover (Slice 3b). `None` from
+/// the resolver means the link is broken (rendered italic/weak).
+pub struct LinkPreview {
+    pub title: String,
+    /// First non-empty lines of the target's body (already trimmed/capped).
+    pub excerpt: String,
+}
+
+/// Render note body with inline OmniNote tokens. `resolve` maps a wikilink target
+/// to a [`LinkPreview`] (or `None` if broken) — the caller wires this to the core
+/// `VaultIndex` + note bodies. Returns the first action the user triggered.
 pub fn render_body(
     ui: &mut egui::Ui,
     md_cache: &mut egui_commonmark::CommonMarkCache,
     content: &str,
-    is_resolved: &dyn Fn(&str) -> bool,
+    resolve: &dyn Fn(&str) -> Option<LinkPreview>,
 ) -> Option<MdAction> {
     let mut action = None;
     for line in content.lines() {
@@ -38,10 +45,37 @@ pub fn render_body(
             egui_commonmark::CommonMarkViewer::new().show(ui, md_cache, line);
             continue;
         }
-        let a = render_inline_line(ui, line, is_resolved);
+        let a = render_inline_line(ui, line, resolve);
         action = action.or(a);
     }
     action
+}
+
+/// Build the excerpt shown in a hover popup: the first few non-empty body lines,
+/// skipping a YAML frontmatter block, capped so the popup stays small.
+pub fn preview_excerpt(content: &str) -> String {
+    let mut lines = content.lines().peekable();
+    // Skip a leading `---` frontmatter fence if present.
+    if lines.peek().map(|l| l.trim_end()) == Some("---") {
+        lines.next();
+        for l in lines.by_ref() {
+            if l.trim_end() == "---" {
+                break;
+            }
+        }
+    }
+    let body: Vec<&str> = lines
+        .map(|l| l.trim_end())
+        .filter(|l| !l.is_empty())
+        .take(4)
+        .collect();
+    let joined = body.join("\n");
+    if joined.chars().count() > 240 {
+        let head: String = joined.chars().take(240).collect();
+        format!("{head}…")
+    } else {
+        joined
+    }
 }
 
 /// Render one line containing tokens as a wrapped row of widgets. The action is
@@ -50,7 +84,7 @@ pub fn render_body(
 fn render_inline_line(
     ui: &mut egui::Ui,
     line: &str,
-    is_resolved: &dyn Fn(&str) -> bool,
+    resolve: &dyn Fn(&str) -> Option<LinkPreview>,
 ) -> Option<MdAction> {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
@@ -64,14 +98,27 @@ fn render_inline_line(
             match link {
                 Wikilink::Note(r) | Wikilink::NoteEmbed(r) => {
                     let label = r.alias.clone().unwrap_or_else(|| r.target.clone());
-                    // Broken links (no matching note) render italic+weak as a hint
-                    // until the dashed-red-underline styling lands with 3b.
-                    let text = if is_resolved(&r.target) {
+                    let preview = resolve(&r.target);
+                    // Broken links (no resolution) render italic+weak.
+                    let text = if preview.is_some() {
                         RichText::new(format!("🔗 {label}"))
                     } else {
                         RichText::new(format!("🔗 {label}")).italics().weak()
                     };
-                    if ui.link(text).clicked() {
+                    let mut resp = ui.link(text);
+                    // Hover preview (Slice 3b) — egui's default tooltip delay (~400ms)
+                    // matches Q-23, so no manual timer needed.
+                    if let Some(p) = &preview {
+                        resp = resp.on_hover_ui(|ui| {
+                            ui.set_max_width(320.0);
+                            ui.label(RichText::new(&p.title).strong());
+                            if !p.excerpt.is_empty() {
+                                ui.separator();
+                                ui.label(RichText::new(&p.excerpt).weak());
+                            }
+                        });
+                    }
+                    if resp.clicked() {
                         action = action.or(Some(MdAction::Navigate(r.target.clone())));
                     }
                 }
@@ -125,21 +172,23 @@ mod tests {
     use super::*;
 
     /// Drive `render_body` headless to confirm it doesn't panic on token-bearing
-    /// content and reports a navigation action for a resolvable link. (Resolution
-    /// itself lives in the core index, stubbed here by `is_resolved`.)
+    /// content (links with previews + tags). Resolution is stubbed.
     #[test]
-    fn render_body_reports_navigate_on_link() {
+    fn render_body_renders_tokens_without_panic() {
         let ctx = egui::Context::default();
         let mut cache = egui_commonmark::CommonMarkCache::default();
         let mut got = None;
         let _ = ctx.run(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 got = render_body(ui, &mut cache, "veja [[Alvo]] e #tag aqui", &|t| {
-                    t == "Alvo"
+                    (t == "Alvo").then(|| LinkPreview {
+                        title: "Alvo".into(),
+                        excerpt: "corpo".into(),
+                    })
                 });
             });
         });
-        // No click in a headless run, so no action — but it must render cleanly.
+        // No click in a headless run → no action — must render cleanly.
         assert!(got.is_none());
     }
 
@@ -148,5 +197,27 @@ mod tests {
         // Sanity that the core span extraction the renderer relies on is stable.
         let spans = extract_spans("a [[X]] b ![[y.png]] c");
         assert_eq!(spans.len(), 2);
+    }
+
+    #[test]
+    fn preview_excerpt_skips_frontmatter_and_caps() {
+        let md = "---\ntype: daily\ntags: [x]\n---\n\nPrimeira linha real.\nSegunda linha.\n";
+        let ex = preview_excerpt(md);
+        assert!(ex.starts_with("Primeira linha real."));
+        assert!(!ex.contains("type: daily"));
+        assert!(ex.contains("Segunda linha."));
+    }
+
+    #[test]
+    fn preview_excerpt_caps_long_body() {
+        let long = "x".repeat(500);
+        let ex = preview_excerpt(&long);
+        assert!(ex.ends_with('…'));
+        assert!(ex.chars().count() <= 241);
+    }
+
+    #[test]
+    fn preview_excerpt_empty_for_blank_note() {
+        assert_eq!(preview_excerpt("---\nonly: frontmatter\n---\n"), "");
     }
 }
