@@ -391,6 +391,7 @@ impl eframe::App for OmniNoteApp {
             return;
         }
 
+        self.show_statusbar(ctx);
         self.show_sidebar(ctx);
         self.show_editor(ctx);
         self.show_modals(ctx);
