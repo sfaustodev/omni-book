@@ -292,7 +292,7 @@ impl OmniNoteApp {
         // VaultIndex (closure resolves target → note, returning title + excerpt);
         // md_render doesn't reimplement resolution.
         let action = {
-            let resolve = |target: &str| {
+            let note_res = |target: &str| {
                 let v = self.vault.as_ref()?;
                 let rel = v.index.resolve(target)?;
                 let n = v.notes.iter().find(|n| &n.rel_path == rel)?;
@@ -301,7 +301,17 @@ impl OmniNoteApp {
                     excerpt: crate::md_render::preview_excerpt(&n.content),
                 })
             };
-            crate::md_render::render_body(ui, &mut self.md_cache, &note.content, &resolve)
+            let asset_res = |filename: &str| {
+                let v = self.vault.as_ref()?;
+                let path = v.root.join("_attachments").join(filename);
+                path.exists()
+                    .then(|| format!("file://{}", path.to_string_lossy()))
+            };
+            let resolvers = crate::md_render::Resolvers {
+                note: &note_res,
+                asset_uri: &asset_res,
+            };
+            crate::md_render::render_body(ui, &mut self.md_cache, &note.content, &resolvers)
         };
         match action {
             Some(crate::md_render::MdAction::Navigate(target)) => {

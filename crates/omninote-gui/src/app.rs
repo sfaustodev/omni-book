@@ -89,6 +89,9 @@ impl OmniNoteApp {
 
         let vault = last_vault.and_then(|p| Vault::open(p).ok());
         register_custom_fonts(&cc.egui_ctx);
+        // Required for `egui::Image::new("file://…")` to load attachments from
+        // disk in the inline renderer (CAD-25 Slice 3 image embeds).
+        egui_extras::install_image_loaders(&cc.egui_ctx);
         vault
             .as_ref()
             .map(|v| theme_for_config(&v.config))
