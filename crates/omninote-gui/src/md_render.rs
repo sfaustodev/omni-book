@@ -96,29 +96,16 @@ fn render_inline_line(
                 render_text_with_tags(ui, &line[cursor..range.start], &mut action);
             }
             match link {
-                Wikilink::Note(r) | Wikilink::NoteEmbed(r) => {
+                Wikilink::Note(r) => {
                     let label = r.alias.clone().unwrap_or_else(|| r.target.clone());
-                    let preview = resolve(&r.target);
-                    // Broken links (no resolution) render italic+weak.
-                    let text = if preview.is_some() {
-                        RichText::new(format!("🔗 {label}"))
-                    } else {
-                        RichText::new(format!("🔗 {label}")).italics().weak()
-                    };
-                    let mut resp = ui.link(text);
-                    // Hover preview (Slice 3b) — egui's default tooltip delay (~400ms)
-                    // matches Q-23, so no manual timer needed.
-                    if let Some(p) = &preview {
-                        resp = resp.on_hover_ui(|ui| {
-                            ui.set_max_width(320.0);
-                            ui.label(RichText::new(&p.title).strong());
-                            if !p.excerpt.is_empty() {
-                                ui.separator();
-                                ui.label(RichText::new(&p.excerpt).weak());
-                            }
-                        });
+                    if link_with_hover(ui, &label, resolve(&r.target).as_ref()) {
+                        action = action.or(Some(MdAction::Navigate(r.target.clone())));
                     }
-                    if resp.clicked() {
+                }
+                Wikilink::NoteEmbed(r) => {
+                    // `![[Note]]` shows the target's content inline as a card,
+                    // rather than a link you have to follow.
+                    if embed_card(ui, &r.target, resolve(&r.target).as_ref()) {
                         action = action.or(Some(MdAction::Navigate(r.target.clone())));
                     }
                 }
@@ -135,6 +122,69 @@ fn render_inline_line(
         action
     })
     .inner
+}
+
+/// An inline `[[link]]`: accent text, hover preview, broken→italic/weak.
+/// Returns true if clicked (caller navigates).
+fn link_with_hover(ui: &mut egui::Ui, label: &str, preview: Option<&LinkPreview>) -> bool {
+    let text = if preview.is_some() {
+        RichText::new(format!("🔗 {label}"))
+    } else {
+        RichText::new(format!("🔗 {label}")).italics().weak()
+    };
+    let mut resp = ui.link(text);
+    // egui's default tooltip delay (~400ms) matches Q-23 — no manual timer.
+    if let Some(p) = preview {
+        resp = resp.on_hover_ui(|ui| {
+            ui.set_max_width(320.0);
+            ui.label(RichText::new(&p.title).strong());
+            if !p.excerpt.is_empty() {
+                ui.separator();
+                ui.label(RichText::new(&p.excerpt).weak());
+            }
+        });
+    }
+    resp.clicked()
+}
+
+/// An `![[Note]]` embed: a bordered card showing the target's title + excerpt
+/// inline, with an "abrir →" affordance. Returns true if the user asked to open
+/// it (click on the card or the link). Broken embeds show a compact warning.
+fn embed_card(ui: &mut egui::Ui, target: &str, preview: Option<&LinkPreview>) -> bool {
+    let mut open = false;
+    egui::Frame::group(ui.style())
+        .inner_margin(egui::Margin::symmetric(10.0, 8.0))
+        .show(ui, |ui| {
+            ui.vertical(|ui| {
+                ui.set_max_width(560.0);
+                match preview {
+                    Some(p) => {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(format!("⧉ {}", p.title)).strong());
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui.link("abrir →").clicked() {
+                                        open = true;
+                                    }
+                                },
+                            );
+                        });
+                        if !p.excerpt.is_empty() {
+                            ui.label(RichText::new(&p.excerpt).weak().size(12.0));
+                        }
+                    }
+                    None => {
+                        ui.label(
+                            RichText::new(format!("⧉ {target} — nota não encontrada"))
+                                .italics()
+                                .weak(),
+                        );
+                    }
+                }
+            });
+        });
+    open
 }
 
 /// Render a plain-text run, turning `#tag` occurrences into clickable chips.
@@ -180,16 +230,29 @@ mod tests {
         let mut got = None;
         let _ = ctx.run(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                got = render_body(ui, &mut cache, "veja [[Alvo]] e #tag aqui", &|t| {
+                // Link, embed card, and tag in one pass — must all render cleanly.
+                got = render_body(ui, &mut cache, "[[Alvo]]\n![[Alvo]]\nfim #tag", &|t| {
                     (t == "Alvo").then(|| LinkPreview {
                         title: "Alvo".into(),
-                        excerpt: "corpo".into(),
+                        excerpt: "corpo da nota".into(),
                     })
                 });
             });
         });
         // No click in a headless run → no action — must render cleanly.
         assert!(got.is_none());
+    }
+
+    #[test]
+    fn render_body_handles_broken_embed_without_panic() {
+        let ctx = egui::Context::default();
+        let mut cache = egui_commonmark::CommonMarkCache::default();
+        let _ = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                // Unresolved embed → warning card, no panic.
+                render_body(ui, &mut cache, "![[Fantasma]]", &|_| None);
+            });
+        });
     }
 
     #[test]
