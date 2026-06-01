@@ -3,6 +3,7 @@ mod app;
 mod theme;
 mod ui_editor;
 mod ui_modals;
+mod ui_right_rail;
 mod ui_sidebar;
 mod ui_statusbar;
 mod watcher;

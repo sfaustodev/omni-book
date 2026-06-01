@@ -50,6 +50,15 @@ impl OmniNoteApp {
                         {
                             self.pick_vault_with_ctx(ctx);
                         }
+                        if ui
+                            .small_button("⊟")
+                            .on_hover_text("Painel direito (backlinks/outline)")
+                            .clicked()
+                        {
+                            if let Some(v) = &mut self.vault {
+                                v.config.right_rail_open = !v.config.right_rail_open;
+                            }
+                        }
                     });
                 });
                 ui.separator();

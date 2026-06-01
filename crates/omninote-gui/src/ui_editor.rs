@@ -325,34 +325,8 @@ impl OmniNoteApp {
             ui.separator();
         }
 
-        // Backlinks
-        let backlinks: Vec<(String, String)> = if let Some(v) = &self.vault {
-            v.notes
-                .iter()
-                .filter(|n| {
-                    n.frontmatter.id != note.frontmatter.id
-                        && (n.frontmatter.linked_note.as_deref() == Some(&note.frontmatter.id)
-                            || n.content.contains(&format!("[[{}]]", note.title)))
-                })
-                .map(|n| (n.frontmatter.id.clone(), n.title.clone()))
-                .collect()
-        } else {
-            vec![]
-        };
-
-        if !backlinks.is_empty() {
-            ui.collapsing(format!("🔗 Backlinks ({})", backlinks.len()), |ui| {
-                let mut pending: Option<String> = None;
-                for (id, title) in &backlinks {
-                    if ui.link(format!("← {}", title)).clicked() {
-                        pending = Some(id.clone());
-                    }
-                }
-                if let Some(id) = pending {
-                    self.select_note(&id);
-                }
-            });
-        }
+        // Backlinks moved to the right rail (ui_right_rail.rs), which resolves
+        // them target-side via the core index instead of a substring match.
     }
 
     /// Render wikilinks (`[[Title]]`) as clickable links and embeds (`![[file]]`)

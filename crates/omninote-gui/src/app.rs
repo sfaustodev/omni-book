@@ -432,6 +432,9 @@ impl eframe::App for OmniNoteApp {
 
         self.show_statusbar(ctx);
         self.show_sidebar(ctx);
+        // Right rail before the central editor: side panels claim their width
+        // first, then the editor's CentralPanel fills what's left.
+        self.show_right_rail(ctx);
         self.show_editor(ctx);
         self.show_modals(ctx);
     }
