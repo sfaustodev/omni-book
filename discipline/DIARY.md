@@ -427,3 +427,23 @@ Descoberta + reconciliação de FORK. O repo tinha DUAS linhas paralelas (ancest
 **Limpeza junto:** fechados PRs zumbis #1/#2/#3 (single-crate obsoleto pré-workspace) + deletadas branches obsoletas (v04-v10, swiss-theme, q01-q02, cad-12). CodeRabbit desinstalado dos 3 repos (sem créditos → postava ✗ falso, não-bloqueante). rustup instalado → clippy local = CI (1.96), fecha o gap "verde local ≠ verde CI" (que mordeu 2× via toolchain drift).
 
 **Pendente:** deletar `feat/omninote-v01` (superada — único exclusivo era o scaffold descartado). Teste humano macOS (tema Obsidian, `Cmd+=` com acento, slash menu, `ask`/`tag`) pra fechar tickets.
+
+### [CAD-25-slice1] [triad-gate] [stdin-deadlock]
+
+CAD-25 Fase B desbloqueada (Q-01..Q-30 resolvidas em batch, doc §10). Implementação incremental — 1 PR por slice, gate #26 por slice.
+
+**Slice 1 (fundação):** `theme.rs` flat consts → `Theme` struct com 4 presets (obsidian_dark/light/high_contrast/custom) + `from_preset`/`apply`; `AppConfig` ganhou ~13 campos UI-v2 (§1.7) serde-default + enums ThemePreset/RightRailTab; status bar (chrome bottom panel). 3 commits.
+
+**Trio gate na passoca (Claude+Codex+agy):** 5 findings, todos fixados.
+- **HIGH theme/dark_mode desync** — Codex E agy convergiram. Config v1.0 light virava dark silenciosamente (startup lia só theme_preset). Fix: `theme_for_config` (honra dark_mode enquanto preset=default) + `toggle_light_dark` (cicla preset, 2 fontes em sync).
+- **HIGH apply_theme wrapper** apagava HighContrast/Custom no toggle → removido, callers preset-aware.
+- **HIGH luminância `bg.r()<0x80`** frágil → `Theme.dark: bool` explícito.
+- **HIGH error_msg swallow** (pré-existente no main!) — early-return de no-vault comia o erro de vault-open. Movido antes do return.
+- **MED** enum wire format snake_case→lowercase (consistência com FontFamily/NoteType).
+- +2 regression tests. 366 testes, clippy 1.96 GREEN.
+
+**[stdin-deadlock] gate (rule #31):** 1ª rodada codex/agy travou esperando stdin (CLI headless em background sem EOF → pendura pra sempre, parecia "demorou muito"). Trava mecânica: **todo disparo headless de codex/agy leva `< /dev/null` + `timeout N`**. Re-disparado com fix → rodaram normal. 2ª vez de friction com CLI background nesta saga (1ª foi codex read-only sandbox → `-s workspace-write`).
+
+**Valor do trio comprovado de novo:** eu (autor) validei compat MECÂNICA do serde e dei ✅; os outros 2 acharam a compat SEMÂNTICA (tema invertido) que eu não vi. Autor normaliza próprias suposições — gate pega.
+
+**Pendente:** PR da Slice 1 (+ Phase 0 docs encaixado). Slices 2-6 seguem, cada uma com seu gate.
