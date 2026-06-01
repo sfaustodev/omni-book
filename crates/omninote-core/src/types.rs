@@ -150,6 +150,7 @@ pub struct AppConfig {
     pub default_template_for_daily: Option<String>,
     /// Provider name as a string ("claude"/"grok"/"ollama"/"disabled") — kept a
     /// string so `omninote-core` stays free of an `omninote-ai` dependency.
+    /// Empty by default = AI disabled until the user configures it (fail-safe).
     #[serde(default)]
     pub llm_provider: String,
     #[serde(default = "default_llm_model")]
@@ -169,8 +170,9 @@ pub struct AppConfig {
 }
 
 /// Theme variant selected in settings. Maps to a gui-side `Theme` (egui colors).
+/// `lowercase` wire format matches the sibling `FontFamily`/`NoteType` enums.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "lowercase")]
 pub enum ThemePreset {
     #[default]
     ObsidianDark,
@@ -181,7 +183,7 @@ pub enum ThemePreset {
 
 /// Active tab in the right rail (320px panel).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "lowercase")]
 pub enum RightRailTab {
     #[default]
     Backlinks,

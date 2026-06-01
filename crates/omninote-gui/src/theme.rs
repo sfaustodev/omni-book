@@ -4,7 +4,8 @@
 //! `egui::FontFamily`. Lives in the gui crate so `omninote-core` stays UI-free.
 //!
 //! Every `ui_*.rs` pulls colors from a `Theme`, so switching preset is a single
-//! re-bind. `apply_theme(ctx, dark)` is kept as a thin back-compat wrapper.
+//! re-bind via `Theme::from_preset(..).apply(ctx)` (or the app's
+//! `theme_for_config`, which also honours the legacy `dark_mode` flag).
 
 use eframe::egui::{self, Color32};
 use omninote_core::types::{FontFamily, ThemePreset};
@@ -12,7 +13,10 @@ use omninote_core::types::{FontFamily, ThemePreset};
 /// Identifier the OpenDyslexic face is registered under in `FontDefinitions`.
 pub const OPEN_DYSLEXIC_NAME: &str = "OpenDyslexic";
 
-/// Full token set for one theme variant.
+/// Full token set for one theme variant. `dark` is carried explicitly rather
+/// than inferred from a colour channel — a single-channel heuristic misclassifies
+/// non-greyscale backgrounds (bright green r=0 reads "dark", dark red r>128 reads
+/// "light"), which would pick the wrong egui base visuals.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Theme {
     pub bg: Color32,
@@ -23,6 +27,8 @@ pub struct Theme {
     pub accent: Color32,
     /// Text/ink drawn on top of an accent fill.
     pub accent_ink: Color32,
+    /// Whether this variant uses egui's dark base visuals.
+    pub dark: bool,
 }
 
 impl Theme {
@@ -36,6 +42,7 @@ impl Theme {
             dim: Color32::from_rgb(0x8b, 0x8f, 0x98),
             accent: Color32::from_rgb(0x8b, 0x7c, 0xff),
             accent_ink: Color32::from_rgb(0x0a, 0x0a, 0x0a),
+            dark: true,
         }
     }
 
@@ -49,6 +56,7 @@ impl Theme {
             dim: Color32::from_rgb(0x5e, 0x64, 0x70),
             accent: Color32::from_rgb(0x8b, 0x7c, 0xff),
             accent_ink: Color32::from_rgb(0x0a, 0x0a, 0x0a),
+            dark: false,
         }
     }
 
@@ -62,6 +70,7 @@ impl Theme {
             dim: Color32::from_rgb(0xcc, 0xcc, 0xcc),
             accent: Color32::from_rgb(0xff, 0xff, 0x00),
             accent_ink: Color32::from_rgb(0x00, 0x00, 0x00),
+            dark: true,
         }
     }
 
@@ -84,8 +93,7 @@ impl Theme {
 
     /// Bind this token set onto the egui context. Cheap and idempotent.
     pub fn apply(&self, ctx: &egui::Context) {
-        let dark = self.bg.r() < 0x80;
-        let mut visuals = if dark {
+        let mut visuals = if self.dark {
             egui::Visuals::dark()
         } else {
             egui::Visuals::light()
@@ -116,17 +124,6 @@ impl Theme {
         visuals.hyperlink_color = self.accent;
         ctx.set_visuals(visuals);
     }
-}
-
-/// Back-compat wrapper for existing callers (sidebar/modals/app dark toggle).
-/// Prefer `Theme::from_preset(..).apply(ctx)` in new code.
-pub fn apply_theme(ctx: &egui::Context, dark: bool) {
-    let theme = if dark {
-        Theme::obsidian_dark()
-    } else {
-        Theme::obsidian_light()
-    };
-    theme.apply(ctx);
 }
 
 /// Map a portable `FontFamily` (core, no egui dep) to its `egui::FontFamily`.
@@ -172,5 +169,58 @@ mod tests {
             Theme::from_preset(ThemePreset::Custom, accent).accent,
             Color32::from_rgb(1, 2, 3)
         );
+    }
+
+    #[test]
+    fn legacy_light_user_not_flipped_to_dark() {
+        // A v1.0 config (dark_mode=false, no theme_preset) must resolve to the
+        // light theme, not the ObsidianDark default. Regression for the
+        // disconnected-source-of-truth bug between dark_mode and theme_preset.
+        use omninote_core::types::AppConfig;
+        let cfg = AppConfig {
+            dark_mode: false,
+            ..Default::default()
+        };
+        assert_eq!(crate::app::theme_for_config(&cfg), Theme::obsidian_light());
+
+        let dark_cfg = AppConfig {
+            dark_mode: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            crate::app::theme_for_config(&dark_cfg),
+            Theme::obsidian_dark()
+        );
+
+        // An explicit non-default preset wins regardless of dark_mode.
+        let hc = AppConfig {
+            dark_mode: false,
+            theme_preset: ThemePreset::HighContrast,
+            ..Default::default()
+        };
+        assert_eq!(crate::app::theme_for_config(&hc), Theme::high_contrast());
+    }
+
+    #[test]
+    fn toggle_preserves_high_contrast_and_flips_obsidian() {
+        use omninote_core::types::{AppConfig, ThemePreset};
+
+        // Plain obsidian flips dark↔light, keeping both sources of truth in sync.
+        let mut cfg = AppConfig {
+            dark_mode: true,
+            theme_preset: ThemePreset::ObsidianDark,
+            ..Default::default()
+        };
+        crate::app::toggle_light_dark(&mut cfg);
+        assert!(!cfg.dark_mode);
+        assert_eq!(cfg.theme_preset, ThemePreset::ObsidianLight);
+
+        // High-contrast is an accessibility choice — a dark toggle must not drop it.
+        let mut hc = AppConfig {
+            theme_preset: ThemePreset::HighContrast,
+            ..Default::default()
+        };
+        crate::app::toggle_light_dark(&mut hc);
+        assert_eq!(hc.theme_preset, ThemePreset::HighContrast);
     }
 }

@@ -10,6 +10,35 @@ use std::path::PathBuf;
 const OPEN_DYSLEXIC_OTF: &[u8] = include_bytes!("../assets/fonts/OpenDyslexic-Regular.otf");
 
 /// Register bundled custom fonts. Call once before applying theme/styles.
+/// Resolve a config to its concrete theme. While `theme_preset` is still at its
+/// default (no settings panel writes it yet — that's Slice 4), honour the legacy
+/// `dark_mode` flag so a v1.0 user in light mode isn't silently flipped to dark.
+/// An explicitly-chosen preset (light/high-contrast/custom) always wins.
+pub(crate) fn theme_for_config(cfg: &omninote_core::types::AppConfig) -> theme::Theme {
+    use omninote_core::types::ThemePreset;
+    if cfg.theme_preset == ThemePreset::ObsidianDark && !cfg.dark_mode {
+        theme::Theme::obsidian_light()
+    } else {
+        theme::Theme::from_preset(cfg.theme_preset, cfg.accent_color)
+    }
+}
+
+/// Flip light↔dark in-place, preserving an accessibility/custom preset. Keeps
+/// `dark_mode` and `theme_preset` in sync so neither source of truth drifts.
+pub(crate) fn toggle_light_dark(cfg: &mut omninote_core::types::AppConfig) {
+    use omninote_core::types::ThemePreset;
+    cfg.dark_mode = !cfg.dark_mode;
+    // Only the plain Obsidian presets track the light/dark boolean; high-contrast
+    // and custom are deliberate choices left untouched.
+    cfg.theme_preset = match cfg.theme_preset {
+        ThemePreset::ObsidianDark | ThemePreset::ObsidianLight if cfg.dark_mode => {
+            ThemePreset::ObsidianDark
+        }
+        ThemePreset::ObsidianDark | ThemePreset::ObsidianLight => ThemePreset::ObsidianLight,
+        other => other,
+    };
+}
+
 fn register_custom_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
@@ -60,12 +89,9 @@ impl OmniNoteApp {
 
         let vault = last_vault.and_then(|p| Vault::open(p).ok());
         register_custom_fonts(&cc.egui_ctx);
-        // Startup respects the saved theme preset (dark/light/high-contrast/custom);
-        // the dark toggle still flips dark/light via apply_theme until the settings
-        // panel (Slice 4) drives the preset directly.
         vault
             .as_ref()
-            .map(|v| theme::Theme::from_preset(v.config.theme_preset, v.config.accent_color))
+            .map(|v| theme_for_config(&v.config))
             .unwrap_or_else(theme::Theme::obsidian_dark)
             .apply(&cc.egui_ctx);
 
@@ -145,14 +171,14 @@ impl OmniNoteApp {
             match Vault::open(path) {
                 Ok(v) => {
                     let root = v.root.clone();
-                    let dark = v.config.dark_mode;
+                    let theme = theme_for_config(&v.config);
                     self.vault = Some(v);
                     self.active_note = None;
                     self.save_last_vault();
-                    // Re-apply both style and theme from the new vault's config so
-                    // its font/dark-mode take effect immediately, not next toggle.
+                    // Re-apply style + full theme (preset-aware) from the new vault's
+                    // config so font and theme take effect immediately, not next toggle.
                     self.apply_style(ctx);
-                    crate::theme::apply_theme(ctx, dark);
+                    theme.apply(ctx);
                     self.watcher = VaultWatcher::new(&root).ok();
                 }
                 Err(e) => self.error_msg = Some(e),
@@ -364,10 +390,23 @@ impl eframe::App for OmniNoteApp {
         }
         if toggle_dark {
             if let Some(v) = &mut self.vault {
-                v.config.dark_mode = !v.config.dark_mode;
-                let dark = v.config.dark_mode;
-                theme::apply_theme(ctx, dark);
+                toggle_light_dark(&mut v.config);
+                theme_for_config(&v.config).apply(ctx);
             }
+        }
+
+        // Error window is rendered before the no-vault early return below, so a
+        // failed vault open (which leaves vault=None) still surfaces its message
+        // instead of being swallowed by the welcome screen.
+        if let Some(err) = self.error_msg.clone() {
+            egui::Window::new("Erro")
+                .collapsible(false)
+                .show(ctx, |ui| {
+                    ui.label(&err);
+                    if ui.button("OK").clicked() {
+                        self.error_msg = None;
+                    }
+                });
         }
 
         if self.vault.is_none() {
@@ -395,17 +434,6 @@ impl eframe::App for OmniNoteApp {
         self.show_sidebar(ctx);
         self.show_editor(ctx);
         self.show_modals(ctx);
-
-        if let Some(err) = self.error_msg.clone() {
-            egui::Window::new("Erro")
-                .collapsible(false)
-                .show(ctx, |ui| {
-                    ui.label(&err);
-                    if ui.button("OK").clicked() {
-                        self.error_msg = None;
-                    }
-                });
-        }
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
