@@ -366,19 +366,25 @@ impl eframe::App for OmniNoteApp {
         let new_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::N);
         let edit_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::E);
         let settings_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Comma);
+        let close_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::W);
         let dark_sc = egui::KeyboardShortcut::new(
             egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
             egui::Key::D,
         );
 
-        let (new, toggle_edit, settings, toggle_dark) = ctx.input_mut(|i| {
+        let (new, toggle_edit, settings, close, toggle_dark) = ctx.input_mut(|i| {
             (
                 i.consume_shortcut(&new_sc),
                 i.consume_shortcut(&edit_sc),
                 i.consume_shortcut(&settings_sc),
+                i.consume_shortcut(&close_sc),
                 i.consume_shortcut(&dark_sc),
             )
         });
+        if close && self.active_note.is_some() {
+            self.flush_active();
+            self.active_note = None;
+        }
         if new {
             self.show_new = true;
         }
@@ -430,10 +436,11 @@ impl eframe::App for OmniNoteApp {
             return;
         }
 
+        // Panel order: top/bottom chrome and side panels reserve their space
+        // before the editor's CentralPanel fills what remains.
+        self.show_titlebar(ctx);
         self.show_statusbar(ctx);
         self.show_sidebar(ctx);
-        // Right rail before the central editor: side panels claim their width
-        // first, then the editor's CentralPanel fills what's left.
         self.show_right_rail(ctx);
         self.show_editor(ctx);
         self.show_modals(ctx);
