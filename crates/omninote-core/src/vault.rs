@@ -261,6 +261,35 @@ impl Vault {
         out
     }
 
+    /// Resolve an embed filename (`![[foo.png]]`) to an absolute path **inside**
+    /// this vault's `_attachments/`, or `None` if it doesn't exist or would
+    /// escape the directory.
+    ///
+    /// Security (CWE-22): `filename` comes from note content, which in a shared/
+    /// downloaded vault may be authored by a third party. `Path::join` does NOT
+    /// contain traversal (`join("../x")` escapes), and `starts_with` compares
+    /// raw components (so `_attachments/../etc` "starts with" `_attachments`).
+    /// So we reject any separator/`..`/root component up front, then canonicalize
+    /// and re-verify the result stays under the canonical `_attachments` dir.
+    pub fn attachment_path(&self, filename: &str) -> Option<PathBuf> {
+        let name = filename.trim();
+        if name.is_empty() {
+            return None;
+        }
+        // A legitimate attachment name is a single path component — no dir parts.
+        let mut comps = Path::new(name).components();
+        match (comps.next(), comps.next()) {
+            (Some(std::path::Component::Normal(_)), None) => {}
+            _ => return None, // multi-component, `..`, absolute, etc.
+        }
+        let attach_dir = self.root.join("_attachments");
+        let candidate = attach_dir.join(name);
+        // Canonicalize both and confirm containment (defends against symlinks).
+        let base = attach_dir.canonicalize().ok()?;
+        let real = candidate.canonicalize().ok()?;
+        real.starts_with(&base).then_some(real)
+    }
+
     pub fn import_attachment(&self, src: &Path) -> Result<String, String> {
         let attach_dir = self.root.join("_attachments");
         fs::create_dir_all(&attach_dir).map_err(|e| e.to_string())?;
@@ -329,6 +358,29 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let vault = Vault::open(dir.path().to_path_buf()).unwrap();
         (vault, dir)
+    }
+
+    #[test]
+    fn attachment_path_blocks_traversal_and_accepts_legit() {
+        let (vault, _dir) = temp_vault();
+        let attach = vault.root.join("_attachments");
+        std::fs::create_dir_all(&attach).unwrap();
+        std::fs::write(attach.join("foto.png"), b"img").unwrap();
+        // Also drop a file OUTSIDE _attachments to try to escape to.
+        std::fs::write(vault.root.join("secret.md"), b"top secret").unwrap();
+
+        // Legit single-component filename resolves.
+        assert!(vault.attachment_path("foto.png").is_some());
+
+        // Traversal attempts are all rejected (CWE-22).
+        assert!(vault.attachment_path("../secret.md").is_none());
+        assert!(vault.attachment_path("../../etc/passwd").is_none());
+        assert!(vault.attachment_path("sub/foto.png").is_none());
+        assert!(vault.attachment_path("/etc/passwd").is_none());
+        assert!(vault.attachment_path("..").is_none());
+        assert!(vault.attachment_path("").is_none());
+        // Nonexistent legit name → None (doesn't exist), not a panic.
+        assert!(vault.attachment_path("ghost.png").is_none());
     }
 
     #[test]

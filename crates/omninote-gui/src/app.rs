@@ -89,6 +89,9 @@ impl OmniNoteApp {
 
         let vault = last_vault.and_then(|p| Vault::open(p).ok());
         register_custom_fonts(&cc.egui_ctx);
+        // Required for `egui::Image::new("file://…")` to load attachments from
+        // disk in the inline renderer (CAD-25 Slice 3 image embeds).
+        egui_extras::install_image_loaders(&cc.egui_ctx);
         vault
             .as_ref()
             .map(|v| theme_for_config(&v.config))
@@ -273,26 +276,6 @@ impl OmniNoteApp {
                 self.editing = false;
                 self.dirty = false;
             }
-        }
-    }
-
-    /// Find first note matching `title` (case-insensitive) and select it.
-    /// Returns true if found, false otherwise.
-    pub fn select_note_by_title(&mut self, title: &str) -> bool {
-        let target_id = self.vault.as_ref().and_then(|v| {
-            v.notes
-                .iter()
-                .find(|n| n.title.eq_ignore_ascii_case(title))
-                .map(|n| n.frontmatter.id.clone())
-        });
-        if let Some(id) = target_id {
-            self.select_note(&id);
-            true
-        } else {
-            // CAD-20: fall back to wikilink resolver (handles aliases, paths,
-            // case-insensitive matching). `title` here may actually be a full
-            // wikilink target like "folder/Note" or a frontmatter alias.
-            self.select_note_by_target(title)
         }
     }
 
