@@ -334,6 +334,76 @@ pub fn extract_inline_tags(content: &str) -> Vec<String> {
     out
 }
 
+/// Extract the body under an ATX heading whose text matches `heading`
+/// (case-insensitive, trimmed), up to the next heading of the same or shallower
+/// depth. Used by `![[Note#Heading]]` embeds (CAD-25) to show just that section.
+/// Returns `None` if the heading isn't found. Skips fenced code so a `#` inside
+/// a code block isn't treated as a heading boundary.
+pub fn section_under_heading(content: &str, heading: &str) -> Option<String> {
+    let want = heading.trim();
+    let mut in_fence: Option<char> = None;
+    let mut collecting: Option<usize> = None; // depth of the matched heading
+    let mut out: Vec<&str> = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        // Fence tracking (same kind-aware logic as the outline parser).
+        match in_fence {
+            None if trimmed.starts_with("```") => {
+                in_fence = Some('`');
+                if collecting.is_some() {
+                    out.push(line);
+                }
+                continue;
+            }
+            None if trimmed.starts_with("~~~") => {
+                in_fence = Some('~');
+                if collecting.is_some() {
+                    out.push(line);
+                }
+                continue;
+            }
+            Some('`') if trimmed.starts_with("```") => {
+                in_fence = None;
+                if collecting.is_some() {
+                    out.push(line);
+                }
+                continue;
+            }
+            Some('~') if trimmed.starts_with("~~~") => {
+                in_fence = None;
+                if collecting.is_some() {
+                    out.push(line);
+                }
+                continue;
+            }
+            Some(_) => {
+                if collecting.is_some() {
+                    out.push(line);
+                }
+                continue;
+            }
+            None => {}
+        }
+
+        let hashes = trimmed.chars().take_while(|&c| c == '#').count();
+        let is_heading = (1..=6).contains(&hashes) && trimmed[hashes..].starts_with(' ');
+
+        if let Some(depth) = collecting {
+            // A heading of same-or-shallower depth ends the section.
+            if is_heading && hashes <= depth {
+                break;
+            }
+            out.push(line);
+        } else if is_heading && trimmed[hashes..].trim().eq_ignore_ascii_case(want) {
+            collecting = Some(hashes);
+        }
+    }
+
+    collecting?;
+    Some(out.join("\n").trim().to_string())
+}
+
 // ---------- internals ----------
 
 fn classify_embed(inner: &str) -> Wikilink {
@@ -910,6 +980,40 @@ mod tests {
     fn ignores_hash_in_code_fence() {
         let c = "antes #before\n```\n#not-a-tag\n```\n#after";
         assert_eq!(extract_inline_tags(c), vec!["before", "after"]);
+    }
+
+    #[test]
+    fn section_under_heading_extrai_ate_proximo_heading() {
+        let md = "# Topo\nintro\n## Sprint\nlinha A\nlinha B\n## Outro\nlinha C\n";
+        let s = section_under_heading(md, "Sprint").unwrap();
+        assert_eq!(s, "linha A\nlinha B");
+    }
+
+    #[test]
+    fn section_under_heading_case_insensitive_e_nested() {
+        // Heading aninhado (### dentro da seção ##) faz parte da seção, mas um
+        // ## (mesma profundidade) encerra.
+        let md = "## Alvo\ntexto\n### Sub\nmais\n## Fim\nfora\n";
+        let s = section_under_heading(md, "alvo").unwrap();
+        assert!(s.contains("texto"));
+        assert!(s.contains("### Sub"));
+        assert!(s.contains("mais"));
+        assert!(!s.contains("fora"));
+    }
+
+    #[test]
+    fn section_under_heading_ausente_retorna_none() {
+        assert!(section_under_heading("# A\nx\n", "Inexistente").is_none());
+    }
+
+    #[test]
+    fn section_under_heading_ignora_hash_em_code_fence() {
+        let md = "## Alvo\nantes\n```\n## nao e heading\n```\ndepois\n## Fim\nfora\n";
+        let s = section_under_heading(md, "Alvo").unwrap();
+        assert!(s.contains("antes"));
+        assert!(s.contains("## nao e heading")); // dentro do fence, faz parte
+        assert!(s.contains("depois"));
+        assert!(!s.contains("fora"));
     }
 
     #[test]

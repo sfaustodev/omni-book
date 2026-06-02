@@ -292,13 +292,20 @@ impl OmniNoteApp {
         // VaultIndex (closure resolves target → note, returning title + excerpt);
         // md_render doesn't reimplement resolution.
         let action = {
-            let note_res = |target: &str| {
+            let note_res = |target: &str, heading: Option<&str>| {
                 let v = self.vault.as_ref()?;
                 let rel = v.index.resolve(target)?;
                 let n = v.notes.iter().find(|n| &n.rel_path == rel)?;
+                // `![[Note#H]]` previews just that section; plain links the head.
+                let excerpt = match heading {
+                    Some(h) => omninote_core::wikilinks::section_under_heading(&n.content, h)
+                        .map(|s| crate::md_render::preview_excerpt(&s))
+                        .unwrap_or_default(),
+                    None => crate::md_render::preview_excerpt(&n.content),
+                };
                 Some(crate::md_render::LinkPreview {
                     title: n.title.clone(),
-                    excerpt: crate::md_render::preview_excerpt(&n.content),
+                    excerpt,
                 })
             };
             let asset_res = |filename: &str| {

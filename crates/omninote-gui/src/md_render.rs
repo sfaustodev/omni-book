@@ -9,7 +9,16 @@
 //! so the caller (`show_view_panel`) drives `select_note` / sidebar search.
 
 use egui::RichText;
-use omninote_core::wikilinks::{extract_inline_tags, extract_spans, Wikilink};
+use omninote_core::wikilinks::{extract_inline_tags, extract_spans, Anchor, Wikilink};
+
+/// Pull the heading text from a wikilink anchor (`#Heading`), ignoring block
+/// refs (`#^id`) which don't map to a section.
+fn heading_anchor(anchor: &Option<Anchor>) -> Option<&str> {
+    match anchor {
+        Some(Anchor::Heading(h)) => Some(h.as_str()),
+        _ => None,
+    }
+}
 
 /// What the user clicked in the rendered body, surfaced to the caller.
 pub enum MdAction {
@@ -32,8 +41,9 @@ pub struct LinkPreview {
 /// Resolvers the inline renderer needs, both wired by the caller (which knows the
 /// vault). Keeping `md_render` free of vault knowledge (hard-rule §0 #11).
 pub struct Resolvers<'a> {
-    /// Wikilink target → preview (`None` = broken link).
-    pub note: &'a dyn Fn(&str) -> Option<LinkPreview>,
+    /// `(target, heading?)` → preview (`None` = broken link). When `heading` is
+    /// `Some`, the excerpt should be that section of the target (`![[Note#H]]`).
+    pub note: &'a dyn Fn(&str, Option<&str>) -> Option<LinkPreview>,
     /// Attachment filename → a `file://` URI egui can load (`None` = missing).
     pub asset_uri: &'a dyn Fn(&str) -> Option<String>,
 }
@@ -102,14 +112,16 @@ fn render_inline_line(ui: &mut egui::Ui, line: &str, res: &Resolvers) -> Option<
             match link {
                 Wikilink::Note(r) => {
                     let label = r.alias.clone().unwrap_or_else(|| r.target.clone());
-                    if link_with_hover(ui, &label, (res.note)(&r.target).as_ref()) {
+                    let heading = heading_anchor(&r.anchor);
+                    if link_with_hover(ui, &label, (res.note)(&r.target, heading).as_ref()) {
                         action = action.or(Some(MdAction::Navigate(r.target.clone())));
                     }
                 }
                 Wikilink::NoteEmbed(r) => {
-                    // `![[Note]]` shows the target's content inline as a card,
-                    // rather than a link you have to follow.
-                    if embed_card(ui, &r.target, (res.note)(&r.target).as_ref()) {
+                    // `![[Note]]` shows the target inline as a card; `![[Note#H]]`
+                    // shows just that section (the caller slices it).
+                    let heading = heading_anchor(&r.anchor);
+                    if embed_card(ui, &r.target, (res.note)(&r.target, heading).as_ref()) {
                         action = action.or(Some(MdAction::Navigate(r.target.clone())));
                     }
                 }
@@ -255,7 +267,7 @@ mod tests {
         let mut got = None;
         let _ = ctx.run(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                let note = |t: &str| {
+                let note = |t: &str, _h: Option<&str>| {
                     (t == "Alvo").then(|| LinkPreview {
                         title: "Alvo".into(),
                         excerpt: "corpo da nota".into(),
@@ -285,7 +297,7 @@ mod tests {
         let mut cache = egui_commonmark::CommonMarkCache::default();
         let _ = ctx.run(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                let note = |_: &str| None;
+                let note = |_: &str, _: Option<&str>| None;
                 let asset = |_: &str| None;
                 let res = Resolvers {
                     note: &note,
