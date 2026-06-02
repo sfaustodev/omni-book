@@ -21,6 +21,7 @@ egui_commonmark.workspace = true
 egui_extras.workspace = true
 rfd.workspace = true
 notify.workspace = true
+fuzzy-matcher.workspace = true
 
 # Shared with core (gui uses serde/chrono/uuid/dirs/open directly)
 serde.workspace = true

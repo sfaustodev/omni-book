@@ -261,6 +261,29 @@ impl Vault {
         out
     }
 
+    /// Quick-capture: prepend a timestamped bullet to `Inbox.md` (Q-06 — plain
+    /// bullets at the top of the file, newest first, append-friendly). Creates
+    /// the file with an `# Inbox` heading on first capture.
+    pub fn append_inbox_line(&self, text: &str) -> Result<(), String> {
+        let line = text.trim();
+        if line.is_empty() {
+            return Err("linha vazia".into());
+        }
+        let inbox = self.root.join("Inbox.md");
+        let stamp = chrono::Local::now().format("%Y-%m-%d %H:%M");
+        let bullet = format!("- {stamp} · {line}\n");
+        let existing = std::fs::read_to_string(&inbox).unwrap_or_default();
+        let new = if existing.is_empty() {
+            format!("# Inbox\n\n{bullet}")
+        } else if let Some(rest) = existing.strip_prefix("# Inbox\n") {
+            // Insert the bullet right after the heading (newest first).
+            format!("# Inbox\n{}", insert_after_blank(rest, &bullet))
+        } else {
+            format!("{bullet}{existing}")
+        };
+        std::fs::write(&inbox, new).map_err(|e| e.to_string())
+    }
+
     /// Resolve an embed filename (`![[foo.png]]`) to an absolute path **inside**
     /// this vault's `_attachments/`, or `None` if it doesn't exist or would
     /// escape the directory.
@@ -331,6 +354,16 @@ pub fn sanitize_filename(name: &str) -> String {
         .to_string()
 }
 
+/// Insert `bullet` after the leading blank line of `rest` (the body after the
+/// `# Inbox` heading), so captures land newest-first under the heading.
+fn insert_after_blank(rest: &str, bullet: &str) -> String {
+    if let Some(after) = rest.strip_prefix('\n') {
+        format!("\n{bullet}{after}")
+    } else {
+        format!("\n{bullet}{rest}")
+    }
+}
+
 pub fn sanitize_filename_pub(name: &str) -> String {
     sanitize_filename(name)
 }
@@ -358,6 +391,21 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let vault = Vault::open(dir.path().to_path_buf()).unwrap();
         (vault, dir)
+    }
+
+    #[test]
+    fn append_inbox_prepends_newest_first_under_heading() {
+        let (vault, _dir) = temp_vault();
+        vault.append_inbox_line("primeira").unwrap();
+        vault.append_inbox_line("segunda").unwrap();
+        let content = std::fs::read_to_string(vault.root.join("Inbox.md")).unwrap();
+        assert!(content.starts_with("# Inbox\n"));
+        let pos_seg = content.find("segunda").unwrap();
+        let pos_pri = content.find("primeira").unwrap();
+        // Newest (segunda) appears before primeira.
+        assert!(pos_seg < pos_pri);
+        // Empty input rejected.
+        assert!(vault.append_inbox_line("   ").is_err());
     }
 
     #[test]

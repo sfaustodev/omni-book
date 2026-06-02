@@ -4,6 +4,31 @@
 
 ---
 
+## 2026-06-02 — triad-codex-section wikilinks adversarial coverage
+
+**Tickets touched:** CAD-25 Slice 3 adjacent coverage (no Notion/JIRA write; `discipline/JIRA.md` absent in worktree)
+
+**Done:**
+- Added `crates/omninote-core/tests/triad_codex_section.rs` using public API import `use omninote_core::wikilinks::*;`.
+- Covered `section_under_heading`: unclosed fence EOF, mixed fence marker, 7+ hashes, missing post-hash space, EOF heading with empty body, duplicate heading first-match, CJK/emoji body, empty input, large 20k-block input.
+- Covered `extract_spans`: adjacent links, inline-code skip, unclosed embed EOF, UTF-8-safe byte ranges with CJK path/alias.
+- Wrote `reports_fausto/triad-cov-codex-slice3.md` with covered risk classes.
+
+**Verification:**
+- `PATH="/opt/homebrew/opt/rustup/bin:$PATH" cargo test -p omninote-core` → passed.
+- Results: unit tests 214 passed / 0 failed / 1 ignored; integration tests incl. new file passed; doctests 0.
+
+**Files changed:**
+- `crates/omninote-core/tests/triad_codex_section.rs`
+- `reports_fausto/triad-cov-codex-slice3.md`
+- `discipline/PLAN.md`
+- `discipline/DIARY.md`
+
+**Next session should start with:**
+- If continuing CAD-25 Slice 3, keep these tests as the Codex slice coverage baseline and avoid changing production parser unless a future failing test requires it.
+
+---
+
 ## 2026-05-23 — CAD-23.2 auto-tag + summary (Phases A-E)
 
 **Tickets touched:** CAD-23.2 (sub-task de CAD-23, sprint v1.3)
