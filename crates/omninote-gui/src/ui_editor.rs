@@ -309,10 +309,11 @@ impl OmniNoteApp {
                 })
             };
             let asset_res = |filename: &str| {
+                // attachment_path validates against traversal (CWE-22) + confirms
+                // the file is inside the vault's _attachments dir.
                 let v = self.vault.as_ref()?;
-                let path = v.root.join("_attachments").join(filename);
-                path.exists()
-                    .then(|| format!("file://{}", path.to_string_lossy()))
+                let path = v.attachment_path(filename)?;
+                Some(format!("file://{}", path.to_string_lossy()))
             };
             let resolvers = crate::md_render::Resolvers {
                 note: &note_res,
