@@ -57,16 +57,50 @@ pub fn render_body(
     resolvers: &Resolvers,
 ) -> Option<MdAction> {
     let mut action = None;
-    for line in content.lines() {
-        // Fast path: a line with no tokens and no '#' renders as real markdown.
-        if extract_spans(line).is_empty() && !line.contains('#') {
+    for (line, in_code) in lines_with_code_flag(content) {
+        // A line inside a fenced code block (or a fence delimiter) renders verbatim
+        // — its `[[text]]` is code, not a wikilink. Outside code, inline-render
+        // lines with tokens and fast-path the rest.
+        if in_code || (extract_spans(line).is_empty() && !line.contains('#')) {
             egui_commonmark::CommonMarkViewer::new().show(ui, md_cache, line);
-            continue;
+        } else {
+            action = action.or(render_inline_line(ui, line, resolvers));
         }
-        let a = render_inline_line(ui, line, resolvers);
-        action = action.or(a);
     }
     action
+}
+
+/// Pair each line with whether it lies inside a fenced code block (the fence
+/// delimiter lines count as code too). Tracks fence kind across lines so a `~~~`
+/// inside a ``` block doesn't close it. Pure → unit-testable without egui.
+fn lines_with_code_flag(content: &str) -> Vec<(&str, bool)> {
+    let mut out = Vec::new();
+    let mut fence: Option<char> = None;
+    for line in content.lines() {
+        let t = line.trim_start();
+        match fence {
+            Some(kind) => {
+                out.push((line, true)); // delimiter or body — both verbatim
+                let closes =
+                    (kind == '`' && t.starts_with("```")) || (kind == '~' && t.starts_with("~~~"));
+                if closes {
+                    fence = None;
+                }
+            }
+            None => {
+                if t.starts_with("```") {
+                    fence = Some('`');
+                    out.push((line, true));
+                } else if t.starts_with("~~~") {
+                    fence = Some('~');
+                    out.push((line, true));
+                } else {
+                    out.push((line, false));
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Build the excerpt shown in a hover popup: the first few non-empty body lines,
@@ -257,6 +291,30 @@ fn render_text_with_tags(ui: &mut egui::Ui, text: &str, action: &mut Option<MdAc
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn code_block_lines_flagged_so_wikilinks_stay_literal() {
+        // Regression (triad review): a [[link]] inside a fenced code block must be
+        // treated as code (verbatim), not inline-rendered as a clickable link.
+        let md = "antes [[Real]]\n```\nlet x = [[nao link]];\n```\ndepois [[Outro]]";
+        let flags = lines_with_code_flag(md);
+        assert_eq!(flags.len(), 5);
+        assert!(!flags[0].1, "linha de texto normal");
+        assert!(flags[1].1, "abertura ```");
+        assert!(flags[2].1, "corpo do código — [[nao link]] é literal");
+        assert!(flags[3].1, "fechamento ```");
+        assert!(!flags[4].1, "texto após o bloco volta a ser normal");
+    }
+
+    #[test]
+    fn mixed_fence_markers_dont_close_early() {
+        // ~~~ inside a ``` block must NOT close it.
+        let md = "```\n~~~\n[[ainda codigo]]\n```\n[[agora link]]";
+        let flags = lines_with_code_flag(md);
+        assert!(flags[1].1, "~~~ dentro de ``` é código");
+        assert!(flags[2].1, "ainda dentro do bloco");
+        assert!(!flags[4].1, "fora do bloco");
+    }
 
     /// Drive `render_body` headless to confirm it doesn't panic on every token
     /// kind: link, embed card, image, and tag. Resolution is stubbed.
