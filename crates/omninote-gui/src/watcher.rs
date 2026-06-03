@@ -41,10 +41,16 @@ impl VaultWatcher {
                 }
                 for p in event.paths {
                     let s = p.to_string_lossy();
-                    if s.contains("/.omninote/") || s.contains("\\.omninote\\") {
-                        continue;
-                    }
-                    if s.contains("/_attachments/") || s.contains("\\_attachments\\") {
+                    // Skip OmniNote internals, attachments, and heavy build/VCS
+                    // trees (a vault containing a code project churns target/ etc.).
+                    if s.contains("/.omninote/")
+                        || s.contains("\\.omninote\\")
+                        || s.contains("/_attachments/")
+                        || s.contains("\\_attachments\\")
+                        || s.contains("/target/")
+                        || s.contains("/node_modules/")
+                        || s.contains("/.git/")
+                    {
                         continue;
                     }
                     if p.extension().and_then(|e| e.to_str()) != Some("md") {

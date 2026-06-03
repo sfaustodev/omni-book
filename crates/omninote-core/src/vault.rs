@@ -11,6 +11,10 @@ pub struct Vault {
     /// Wikilink resolution index — rebuilt after every `reload_notes()`.
     /// CAD-20 (Phase 1 link parity).
     pub index: VaultIndex,
+    /// Sorted folder list (rel paths), refreshed on reload and folder/note
+    /// mutations. Cached so the sidebar never walks the disk on a render frame —
+    /// a live walk per frame pegged a CPU core and kept egui from settling.
+    folders: Vec<PathBuf>,
 }
 
 impl Vault {
@@ -41,6 +45,7 @@ impl Vault {
             notes: Vec::new(),
             config,
             index: VaultIndex::default(),
+            folders: Vec::new(),
         };
         v.reload_notes();
         Ok(v)
@@ -48,32 +53,55 @@ impl Vault {
 
     pub fn reload_notes(&mut self) {
         self.notes.clear();
-        for entry in WalkDir::new(&self.root).into_iter().filter_map(|e| e.ok()) {
+        // `filter_entry` PRUNES heavy directories before descending into them.
+        // Critical for vaults that contain (or are) a code project: without this,
+        // WalkDir walks every file under target/ node_modules/ .git/ (hundreds of
+        // thousands), freezing the app on a real-world folder. Plain post-filtering
+        // would still traverse those trees.
+        let root = self.root.clone();
+        let walker = WalkDir::new(&self.root)
+            .into_iter()
+            .filter_entry(|e| e.path() == root || !is_pruned_dir(e.path()));
+        for entry in walker.filter_map(|e| e.ok()) {
             let path = entry.path();
-            if !path.is_file() {
-                continue;
-            }
-            let path_str = path.to_string_lossy();
-            if path_str.contains("/.omninote/") || path_str.contains("\\.omninote\\") {
-                continue;
-            }
-            if path_str.contains("/_attachments/") || path_str.contains("\\_attachments\\") {
-                continue;
-            }
-            if path.extension().and_then(|s| s.to_str()) != Some("md") {
+            if !path.is_file() || !is_loadable(path) {
                 continue;
             }
             if let Ok(note) = self.read_note(path) {
                 self.notes.push(note);
             }
         }
+        self.rescan_folders();
         // Rebuild resolver index after every reload (CAD-20).
         self.index = VaultIndex::build(&self.notes);
     }
 
+    /// Recompute the cached folder list (sorted rel paths, pruned dirs excluded).
+    /// Called on reload and after folder/note mutations — never on a render frame.
+    fn rescan_folders(&mut self) {
+        let root = self.root.clone();
+        let mut folders: Vec<PathBuf> = WalkDir::new(&self.root)
+            .into_iter()
+            .filter_entry(|e| e.path() == root || !is_pruned_dir(e.path()))
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().is_dir() && e.path() != root)
+            .filter_map(|e| e.path().strip_prefix(&root).ok().map(Path::to_path_buf))
+            .collect();
+        folders.sort();
+        self.folders = folders;
+    }
+
     fn read_note(&self, path: &Path) -> Result<Note, String> {
         let raw = fs::read_to_string(path).map_err(|e| e.to_string())?;
-        let (mut frontmatter, content) = parse_frontmatter(&raw);
+        let is_md = path.extension().and_then(|s| s.to_str()) == Some("md");
+        // Only markdown carries OmniNote frontmatter. For .txt/.env, keep the
+        // bytes verbatim so a later save can't inject a YAML header and corrupt
+        // the file.
+        let (mut frontmatter, content) = if is_md {
+            parse_frontmatter(&raw)
+        } else {
+            (Frontmatter::default(), raw)
+        };
         let title = path
             .file_stem()
             .and_then(|s| s.to_str())
@@ -98,14 +126,40 @@ impl Vault {
     }
 
     pub fn save_note(&self, note: &Note) -> Result<(), String> {
-        let mut out = String::from("---\n");
-        out.push_str(&serde_yaml::to_string(&note.frontmatter).map_err(|e| e.to_string())?);
-        out.push_str("---\n\n");
-        out.push_str(&note.content);
+        let is_md = note.path.extension().and_then(|s| s.to_str()) == Some("md");
+        let out = if is_md {
+            let mut s = String::from("---\n");
+            s.push_str(&serde_yaml::to_string(&note.frontmatter).map_err(|e| e.to_string())?);
+            s.push_str("---\n\n");
+            s.push_str(&note.content);
+            s
+        } else {
+            // .txt/.env etc. are stored verbatim — no frontmatter header.
+            note.content.clone()
+        };
         if let Some(parent) = note.path.parent() {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         fs::write(&note.path, out).map_err(|e| e.to_string())
+    }
+
+    /// Set a note's type by id, persist it to frontmatter, and reload. Only
+    /// markdown notes carry frontmatter, so this is rejected for .txt/.env.
+    pub fn set_note_type(&mut self, id: &str, note_type: NoteType) -> Result<(), String> {
+        let idx = self
+            .notes
+            .iter()
+            .position(|n| n.frontmatter.id == id)
+            .ok_or("nota não encontrada")?;
+        let is_md = self.notes[idx].path.extension().and_then(|s| s.to_str()) == Some("md");
+        if !is_md {
+            return Err("categoria disponível só em notas .md".into());
+        }
+        self.notes[idx].frontmatter.note_type = note_type;
+        let note = self.notes[idx].clone();
+        self.save_note(&note)?;
+        self.reload_notes();
+        Ok(())
     }
 
     pub fn create_note(
@@ -215,6 +269,7 @@ impl Vault {
         fs::rename(&old_path, &new_path).map_err(|e| e.to_string())?;
         self.notes[idx].path = new_path.clone();
         self.notes[idx].rel_path = new_path.strip_prefix(&self.root).unwrap().to_path_buf();
+        self.rescan_folders();
         Ok(())
     }
 
@@ -225,6 +280,7 @@ impl Vault {
             .unwrap_or_else(|| self.root.clone());
         let path = parent_abs.join(safe);
         fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+        self.rescan_folders();
         Ok(path)
     }
 
@@ -246,19 +302,7 @@ impl Vault {
     }
 
     pub fn list_folders(&self) -> Vec<PathBuf> {
-        let mut out = Vec::new();
-        for entry in WalkDir::new(&self.root).into_iter().filter_map(|e| e.ok()) {
-            if !entry.path().is_dir() || entry.path() == self.root {
-                continue;
-            }
-            let rel = entry.path().strip_prefix(&self.root).unwrap();
-            let s = rel.to_string_lossy();
-            if s.starts_with(".omninote") || s.starts_with("_attachments") {
-                continue;
-            }
-            out.push(rel.to_path_buf());
-        }
-        out
+        self.folders.clone()
     }
 
     /// Quick-capture: prepend a timestamped bullet to `Inbox.md` (Q-06 — plain
@@ -354,6 +398,48 @@ pub fn sanitize_filename(name: &str) -> String {
         .to_string()
 }
 
+/// Files OmniNote treats as notes: markdown, plus plain-text (`.txt`) and env
+/// files (`.env`, `.env.*`) the user wants to read. Everything else (binaries,
+/// source, configs) is ignored so a vault can point at a code repo and surface
+/// only the textual files.
+fn is_loadable(path: &Path) -> bool {
+    if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+        if matches!(ext, "md" | "txt" | "env") {
+            return true;
+        }
+    }
+    let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+    name == ".env" || name.starts_with(".env.")
+}
+
+/// Directories WalkDir must not descend into: OmniNote internals, attachments,
+/// and the heavy build/VCS/dependency trees that explode a scan when a vault
+/// happens to contain a code project. Matched by directory name only (so a note
+/// literally named `target.md` is unaffected).
+fn is_pruned_dir(path: &Path) -> bool {
+    if !path.is_dir() {
+        return false;
+    }
+    let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+        return false;
+    };
+    // Hidden dotfolders (.git, .obsidian, .omninote, .vscode, .venv, …) never
+    // belong in the tree; plus heavy build/dependency dirs that would otherwise
+    // make WalkDir traverse hundreds of thousands of files and freeze the app.
+    name.starts_with('.')
+        || matches!(
+            name,
+            "_attachments"
+                | "target"
+                | "node_modules"
+                | "venv"
+                | "__pycache__"
+                | "dist"
+                | "build"
+                | "vendor"
+        )
+}
+
 /// Insert `bullet` after the leading blank line of `rest` (the body after the
 /// `# Inbox` heading), so captures land newest-first under the heading.
 fn insert_after_blank(rest: &str, bullet: &str) -> String {
@@ -391,6 +477,169 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let vault = Vault::open(dir.path().to_path_buf()).unwrap();
         (vault, dir)
+    }
+
+    #[test]
+    fn reload_prunes_heavy_dirs() {
+        // Regression: a vault that contains a code project must NOT walk target/
+        // node_modules/ .git/ — only real notes get indexed, fast.
+        let (mut vault, _dir) = temp_vault();
+        std::fs::write(vault.root.join("real.md"), "# Real\nnota de verdade").unwrap();
+        for heavy in ["target", "node_modules", ".git"] {
+            let d = vault.root.join(heavy).join("deep");
+            std::fs::create_dir_all(&d).unwrap();
+            // A .md hidden inside a pruned dir must be ignored.
+            std::fs::write(d.join("buried.md"), "# Buried").unwrap();
+        }
+        vault.reload_notes();
+        let titles: Vec<&str> = vault.notes.iter().map(|n| n.title.as_str()).collect();
+        assert_eq!(titles, vec!["real"], "só a nota fora dos dirs podados");
+        assert!(is_pruned_dir(&vault.root.join("target")));
+        assert!(!is_pruned_dir(&vault.root.join("real.md"))); // arquivo, não dir
+    }
+
+    #[test]
+    fn is_loadable_accepts_text_kinds() {
+        for ok in ["a.md", "b.txt", "c.env", ".env", ".env.local"] {
+            assert!(is_loadable(Path::new(ok)), "{ok} deveria carregar");
+        }
+        for no in ["x.png", "y.rs", "z.json"] {
+            assert!(!is_loadable(Path::new(no)), "{no} não deveria carregar");
+        }
+    }
+
+    #[test]
+    fn is_pruned_dir_prunes_dotfolders() {
+        // is_pruned_dir checks is_dir(), so the dirs must exist on disk.
+        let dir = tempfile::tempdir().unwrap();
+        for d in [".obsidian", ".vscode", "_attachments", "target", "Notes"] {
+            std::fs::create_dir_all(dir.path().join(d)).unwrap();
+        }
+        assert!(is_pruned_dir(&dir.path().join(".obsidian")));
+        assert!(is_pruned_dir(&dir.path().join(".vscode")));
+        assert!(is_pruned_dir(&dir.path().join("_attachments")));
+        assert!(is_pruned_dir(&dir.path().join("target")));
+        assert!(!is_pruned_dir(&dir.path().join("Notes")));
+    }
+
+    #[test]
+    fn reload_loads_txt_and_env_ignores_binary() {
+        let (mut vault, _dir) = temp_vault();
+        std::fs::write(vault.root.join("note.md"), "# Note").unwrap();
+        std::fs::write(vault.root.join("readme.txt"), "plain text").unwrap();
+        std::fs::write(vault.root.join(".env"), "KEY=value").unwrap();
+        std::fs::write(vault.root.join("logo.png"), b"\x89PNG binary").unwrap();
+        vault.reload_notes();
+        assert_eq!(vault.notes.len(), 3, "md + txt + env, sem o png");
+        let rels: Vec<String> = vault
+            .notes
+            .iter()
+            .map(|n| n.rel_path.to_string_lossy().to_string())
+            .collect();
+        assert!(rels.iter().any(|r| r == "note.md"));
+        assert!(rels.iter().any(|r| r == "readme.txt"));
+        assert!(rels.iter().any(|r| r == ".env"));
+        assert!(
+            !rels.iter().any(|r| r.contains("logo.png")),
+            "png não pode carregar; got {rels:?}"
+        );
+    }
+
+    #[test]
+    fn list_folders_excludes_dotfolders() {
+        let (mut vault, _dir) = temp_vault();
+        for d in ["Notes", ".obsidian", ".omninote"] {
+            std::fs::create_dir_all(vault.root.join(d)).unwrap();
+        }
+        // `list_folders` reads a cache refreshed on reload/mutation, not the live
+        // disk — reload after the external mkdir so the cache reflects it.
+        vault.reload_notes();
+        let folders: Vec<String> = vault
+            .list_folders()
+            .iter()
+            .map(|f| f.to_string_lossy().to_string())
+            .collect();
+        assert!(folders.iter().any(|f| f == "Notes"));
+        assert!(
+            !folders.iter().any(|f| f.contains(".obsidian")),
+            "dotfolder leaked: {folders:?}"
+        );
+        assert!(
+            !folders.iter().any(|f| f.contains(".omninote")),
+            "dotfolder leaked: {folders:?}"
+        );
+    }
+
+    #[test]
+    fn list_folders_is_sorted_and_cached() {
+        let (mut vault, _dir) = temp_vault();
+        for d in ["Zebra", "Alpha", "Mango"] {
+            std::fs::create_dir_all(vault.root.join(d)).unwrap();
+        }
+        vault.reload_notes();
+        let folders: Vec<String> = vault
+            .list_folders()
+            .iter()
+            .map(|f| f.to_string_lossy().to_string())
+            .collect();
+        assert_eq!(folders, ["Alpha", "Mango", "Zebra"]);
+        // create_folder refreshes the cache without an explicit reload.
+        vault.create_folder(None, "Beta").unwrap();
+        let after: Vec<String> = vault
+            .list_folders()
+            .iter()
+            .map(|f| f.to_string_lossy().to_string())
+            .collect();
+        assert_eq!(after, ["Alpha", "Beta", "Mango", "Zebra"]);
+    }
+
+    #[test]
+    fn save_note_txt_is_raw() {
+        let (vault, _dir) = temp_vault();
+        let path = vault.root.join("config.txt");
+        let note = Note {
+            path: path.clone(),
+            rel_path: PathBuf::from("config.txt"),
+            frontmatter: Frontmatter::default(),
+            title: "config".into(),
+            content: "KEY=value\nFOO=bar\n".into(),
+        };
+        vault.save_note(&note).unwrap();
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(on_disk, "KEY=value\nFOO=bar\n");
+        assert!(
+            !on_disk.contains("---"),
+            ".txt não pode ter header de frontmatter; got:\n{on_disk}"
+        );
+    }
+
+    #[test]
+    fn set_note_type_persists_for_md() {
+        let (mut v, _d) = temp_vault();
+        let md = v
+            .create_note(None, "Categorizar", NoteType::Resumo)
+            .unwrap();
+        v.set_note_type(&md.frontmatter.id, NoteType::Codigo)
+            .unwrap();
+        let reloaded = v
+            .notes
+            .iter()
+            .find(|n| n.frontmatter.id == md.frontmatter.id)
+            .expect("nota recarregada");
+        assert_eq!(reloaded.frontmatter.note_type, NoteType::Codigo);
+
+        // Non-md note: set_note_type is rejected.
+        std::fs::write(v.root.join("settings.env"), "A=1").unwrap();
+        v.reload_notes();
+        let env_id = v
+            .notes
+            .iter()
+            .find(|n| n.rel_path.to_string_lossy() == "settings.env")
+            .expect("env note loaded")
+            .frontmatter
+            .id
+            .clone();
+        assert!(v.set_note_type(&env_id, NoteType::Codigo).is_err());
     }
 
     #[test]
