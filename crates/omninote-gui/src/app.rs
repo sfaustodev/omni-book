@@ -45,11 +45,18 @@ fn register_custom_fonts(ctx: &egui::Context) {
         theme::OPEN_DYSLEXIC_NAME.to_owned(),
         egui::FontData::from_static(OPEN_DYSLEXIC_OTF),
     );
-    fonts
-        .families
-        .entry(egui::FontFamily::Name(theme::OPEN_DYSLEXIC_NAME.into()))
-        .or_default()
-        .insert(0, theme::OPEN_DYSLEXIC_NAME.to_owned());
+    // OpenDyslexic ships no emoji/symbol glyphs. Register it as the primary face
+    // but append egui's default proportional chain (which carries the emoji
+    // fonts) as fallback — otherwise every icon renders as tofu when the
+    // dyslexic family is active.
+    let mut chain = vec![theme::OPEN_DYSLEXIC_NAME.to_owned()];
+    if let Some(default_prop) = fonts.families.get(&egui::FontFamily::Proportional) {
+        chain.extend(default_prop.iter().cloned());
+    }
+    fonts.families.insert(
+        egui::FontFamily::Name(theme::OPEN_DYSLEXIC_NAME.into()),
+        chain,
+    );
     ctx.set_fonts(fonts);
 }
 
