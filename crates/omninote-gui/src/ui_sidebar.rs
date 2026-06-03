@@ -132,6 +132,7 @@ impl OmniNoteApp {
             vec![]
         };
 
+        let mut pending_folder_retype: Option<(PathBuf, NoteType)> = None;
         for folder in folders {
             let name = folder
                 .file_name()
@@ -163,11 +164,42 @@ impl OmniNoteApp {
                     }
                     ui.close_menu();
                 }
+                ui.menu_button("🏷 Categoria (pasta toda)", |ui| {
+                    for t in NoteType::all() {
+                        if ui.button(format!("{} {}", t.icon(), t.label())).clicked() {
+                            pending_folder_retype = Some((folder.clone(), t));
+                            ui.close_menu();
+                        }
+                    }
+                });
                 if ui.button("🗑 Deletar pasta").clicked() {
                     self.confirm_action = Some(ConfirmAction::DeleteFolder(folder.clone()));
                     ui.close_menu();
                 }
             });
+        }
+
+        if let Some((folder, t)) = pending_folder_retype {
+            let res = self
+                .vault
+                .as_mut()
+                .map(|v| v.set_folder_note_type(&folder, t));
+            match res {
+                Some(Ok(n)) => {
+                    if let Some(active) = &mut self.active_note {
+                        if active.rel_path.starts_with(&folder)
+                            && active.path.extension().and_then(|s| s.to_str()) == Some("md")
+                        {
+                            active.frontmatter.note_type = t;
+                        }
+                    }
+                    self.self_write_until =
+                        std::time::Instant::now() + std::time::Duration::from_millis(400);
+                    self.toast_success(format!("{n} nota(s) → {}", t.label()));
+                }
+                Some(Err(e)) => self.toast_error(e),
+                None => {}
+            }
         }
     }
 
