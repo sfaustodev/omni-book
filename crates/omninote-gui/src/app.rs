@@ -98,6 +98,10 @@ pub struct OmniNoteApp {
     /// Calendar popover (daily-note picker) open state + viewed (year, month).
     pub calendar_open: bool,
     pub calendar_ym: Option<(i32, u32)>,
+    /// Last known selection/cursor byte range in the content editor, captured
+    /// while the editor has it so the right-click format menu can act on it even
+    /// after the menu steals focus.
+    pub editor_sel: Option<(usize, usize)>,
 }
 
 impl OmniNoteApp {
@@ -148,6 +152,7 @@ impl OmniNoteApp {
             onboarding_done: false,
             calendar_open: false,
             calendar_ym: None,
+            editor_sel: None,
         };
         app.apply_style(&cc.egui_ctx);
         app
