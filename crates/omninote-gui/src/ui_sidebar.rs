@@ -3,10 +3,6 @@ use egui::RichText;
 use omninote_core::types::{ConfirmAction, NoteType};
 use std::path::{Path, PathBuf};
 
-/// Drag-and-drop payload: id of the note being dragged.
-#[derive(Clone, Debug)]
-pub struct NoteIdPayload(pub String);
-
 impl OmniNoteApp {
     pub fn show_sidebar(&mut self, ctx: &egui::Context) {
         egui::SidePanel::left("sidebar")
@@ -144,62 +140,34 @@ impl OmniNoteApp {
                 .to_string();
             let folder_clone = folder.clone();
 
-            // Folder = drop zone for moving notes (v0.7)
-            let dnd_response = ui.dnd_drop_zone::<NoteIdPayload, _>(egui::Frame::default(), |ui| {
-                let header = egui::CollapsingHeader::new(format!("📁 {}", name))
-                    .id_salt(format!("folder_{}", folder.to_string_lossy()))
-                    .default_open(true)
-                    .show(ui, |ui| {
-                        self.show_folder_tree(ui, folder_clone.clone());
-                        self.show_notes_in_folder(ui, &folder_clone);
-                    });
-
-                header.header_response.context_menu(|ui| {
-                    if ui.button("📄+ Nova nota aqui").clicked() {
-                        if let Some(v) = &mut self.vault {
-                            let rel = folder.clone();
-                            match v.create_note(Some(&rel), "", NoteType::default()) {
-                                Ok(note) => {
-                                    self.active_note = Some(note);
-                                    self.editing = true;
-                                    self.dirty = false;
-                                }
-                                Err(e) => self.error_msg = Some(e),
-                            }
-                        }
-                        ui.close_menu();
-                    }
-                    if ui.button("🗑 Deletar pasta").clicked() {
-                        self.confirm_action = Some(ConfirmAction::DeleteFolder(folder.clone()));
-                        ui.close_menu();
-                    }
+            let header = egui::CollapsingHeader::new(format!("📁 {}", name))
+                .id_salt(format!("folder_{}", folder.to_string_lossy()))
+                .default_open(true)
+                .show(ui, |ui| {
+                    self.show_folder_tree(ui, folder_clone.clone());
+                    self.show_notes_in_folder(ui, &folder_clone);
                 });
-            });
 
-            // Handle drop on this folder
-            if let Some(payload) = dnd_response.1 {
-                let id = payload.0.clone();
-                if let Some(v) = &mut self.vault {
-                    match v.move_note_by_id(&id, Some(&folder)) {
-                        Ok(()) => {
-                            // Update active_note path if it was the moved note
-                            if let Some(active) = &mut self.active_note {
-                                if active.frontmatter.id == id {
-                                    if let Some(fresh) =
-                                        v.notes.iter().find(|n| n.frontmatter.id == id).cloned()
-                                    {
-                                        *active = fresh;
-                                    }
-                                }
+            header.header_response.context_menu(|ui| {
+                if ui.button("📄+ Nova nota aqui").clicked() {
+                    if let Some(v) = &mut self.vault {
+                        let rel = folder.clone();
+                        match v.create_note(Some(&rel), "", NoteType::default()) {
+                            Ok(note) => {
+                                self.active_note = Some(note);
+                                self.editing = true;
+                                self.dirty = false;
                             }
-                            // Self-write window so watcher doesn't bounce
-                            self.self_write_until =
-                                std::time::Instant::now() + std::time::Duration::from_millis(400);
+                            Err(e) => self.error_msg = Some(e),
                         }
-                        Err(e) => self.error_msg = Some(e),
                     }
+                    ui.close_menu();
                 }
-            }
+                if ui.button("🗑 Deletar pasta").clicked() {
+                    self.confirm_action = Some(ConfirmAction::DeleteFolder(folder.clone()));
+                    ui.close_menu();
+                }
+            });
         }
     }
 
@@ -208,7 +176,7 @@ impl OmniNoteApp {
         let type_filter = self.type_filter;
         let active_id = self.active_note.as_ref().map(|n| n.frontmatter.id.clone());
 
-        let notes: Vec<(String, String)> = if let Some(v) = &self.vault {
+        let notes: Vec<(String, String, NoteType)> = if let Some(v) = &self.vault {
             v.notes
                 .iter()
                 .filter(|n| {
@@ -224,6 +192,7 @@ impl OmniNoteApp {
                     (
                         n.frontmatter.id.clone(),
                         format!("{} {}", n.frontmatter.note_type.icon(), n.title),
+                        n.frontmatter.note_type,
                     )
                 })
                 .collect()
@@ -231,25 +200,53 @@ impl OmniNoteApp {
             vec![]
         };
 
+        let move_targets: Vec<PathBuf> = self
+            .vault
+            .as_ref()
+            .map(|v| v.list_folders())
+            .unwrap_or_default();
+
         let mut pending_select: Option<String> = None;
         let mut pending_delete: Option<String> = None;
+        let mut pending_retype: Option<(String, NoteType)> = None;
+        let mut pending_move: Option<(String, Option<PathBuf>)> = None;
 
-        for (id, label) in notes {
+        for (id, label, current_type) in notes {
             let is_active = active_id.as_deref() == Some(&id);
-            let drag_id = egui::Id::new(format!("note_drag_{}", id));
-            let resp = ui
-                .dnd_drag_source(drag_id, NoteIdPayload(id.clone()), |ui| {
-                    ui.selectable_label(is_active, &label)
-                })
-                .response;
+            let resp = ui.selectable_label(is_active, &label);
             if resp.clicked() {
                 pending_select = Some(id.clone());
             }
             resp.context_menu(|ui| {
-                if ui.button("✎ Editar").clicked() {
+                if ui.button("📖 Abrir").clicked() {
                     pending_select = Some(id.clone());
                     ui.close_menu();
                 }
+                ui.menu_button("🏷 Categoria", |ui| {
+                    for t in NoteType::all() {
+                        let marker = if t == current_type { "● " } else { "   " };
+                        if ui
+                            .button(format!("{}{} {}", marker, t.icon(), t.label()))
+                            .clicked()
+                        {
+                            pending_retype = Some((id.clone(), t));
+                            ui.close_menu();
+                        }
+                    }
+                });
+                ui.menu_button("📁 Mover para", |ui| {
+                    if ui.button("⌂ (raiz)").clicked() {
+                        pending_move = Some((id.clone(), None));
+                        ui.close_menu();
+                    }
+                    for f in &move_targets {
+                        if ui.button(format!("📁 {}", f.to_string_lossy())).clicked() {
+                            pending_move = Some((id.clone(), Some(f.clone())));
+                            ui.close_menu();
+                        }
+                    }
+                });
+                ui.separator();
                 if ui.button("🗑 Deletar").clicked() {
                     pending_delete = Some(id.clone());
                     ui.close_menu();
@@ -259,6 +256,49 @@ impl OmniNoteApp {
 
         if let Some(id) = pending_select {
             self.select_note(&id);
+        }
+        if let Some((id, t)) = pending_retype {
+            let res = self.vault.as_mut().map(|v| v.set_note_type(&id, t));
+            match res {
+                Some(Ok(())) => {
+                    if let Some(active) = &mut self.active_note {
+                        if active.frontmatter.id == id {
+                            active.frontmatter.note_type = t;
+                        }
+                    }
+                    self.self_write_until =
+                        std::time::Instant::now() + std::time::Duration::from_millis(400);
+                    self.toast_success(format!("Categoria → {}", t.label()));
+                }
+                Some(Err(e)) => self.toast_error(e),
+                None => {}
+            }
+        }
+        if let Some((id, dest)) = pending_move {
+            let res = self
+                .vault
+                .as_mut()
+                .map(|v| v.move_note_by_id(&id, dest.as_deref()));
+            match res {
+                Some(Ok(())) => {
+                    if let Some(active) = &mut self.active_note {
+                        if active.frontmatter.id == id {
+                            if let Some(v) = &self.vault {
+                                if let Some(fresh) =
+                                    v.notes.iter().find(|n| n.frontmatter.id == id).cloned()
+                                {
+                                    *active = fresh;
+                                }
+                            }
+                        }
+                    }
+                    self.self_write_until =
+                        std::time::Instant::now() + std::time::Duration::from_millis(400);
+                    self.toast_success("Nota movida");
+                }
+                Some(Err(e)) => self.toast_error(e),
+                None => {}
+            }
         }
         if let Some(id) = pending_delete {
             self.confirm_action = Some(ConfirmAction::DeleteNote(id));
