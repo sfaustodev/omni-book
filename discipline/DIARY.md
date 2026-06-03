@@ -4,6 +4,24 @@
 
 ---
 
+## 2026-06-03 — [human-test-cascade] [busy-loop-90cpu] [front-back-parallel] [pr-split]
+
+Teste humano da Slice 4 (vault demo `~/omninote-demo`) destravou cascata de bugs + 3 features. Branch `feat/cad-25b-slice4-overlays` (bugs de teste humano = mesma branch, rule #13).
+
+**[busy-loop-90cpu] — achado de ouro (só apareceu porque TESTEI, não só compilei).** App idle com vault aberto pegava **90-94% de um core**. 392 testes verdes não pegaram (tempdir de teste = 2-3 arquivos). Diagnóstico por `sample` (profiler macOS, não-sudo no próprio processo): thread main dirigida por observer do CFRunLoop chamando `update()` do egui sem parar; folhas quentes `stat`/`__getdirentries64`. Raiz: **`Vault::list_folders()` fazia `WalkDir` no disco inteiro A CADA FRAME** (no `show_folder_tree` recursivo + nos move-targets do `show_notes_in_folder`), ordem não-determinística → layout do egui nunca assentava → repaint contínuo. Welcome (sem vault/sidebar) = 0.2%, por isso só explodia com vault aberto. **Fix:** cache de pastas (`folders: Vec<PathBuf>` no `Vault`, populado em `reload_notes`/mutações via `rescan_folders`, ordenado); `list_folders()` devolve clone. **94% → 0.8%.** Candidata-a-trava (rule #31): *I/O de FS no caminho de render do egui = veneno duplo (CPU + repaint que não converge)* → gate possível: grep/lint proibindo `WalkDir`/`fs::` dentro de `show_*`/`update`.
+
+**[freeze-prequel]** `last_vault` apontava pra `/Users/jf/Projects` (raiz de todos os projetos: 1279 .md + centenas de milhar em target/.git) → `reload_notes` recursivo afogava o I/O. Fix: `is_pruned_dir` poda dotfolders (`.git/.obsidian/.omninote/.vscode`) + dirs pesados via `filter_entry` (poda ANTES de descer). Guarda `e.path()==root` senão tempdir `.tmpXXXX` zera o vault (pegou 7 testes).
+
+**5 bugs de teste humano:** (1) OpenDyslexic → todo ícone virava `?` (tofu): família `Name` sem fallback de emoji → fix herda a cadeia proporcional padrão (NotoEmoji). (2) Não abria nota + cursor de mãozinha: `dnd_drag_source` (drag-reorder v0.7 meio-pronto) engolia o clique → removido, drag vira menu "Mover para". (3) Sem categoria no botão direito → menu novo (Abrir/Categoria/Mover/Deletar). (4) `.omninote`/`.obsidian` visíveis → poda dotfolders. (5) Vault não carregava em repo (só `.md`) → aceita `.md/.txt/.env`, ignora resto; `.txt/.env` salvos **raw** (`read_note`/`save_note` extension-aware) pra não injetar frontmatter num `.env`.
+
+**3 features novas:** categoria de pasta inteira (`set_folder_note_type` recursivo, pula não-md); menu de formatação markdown no botão direito do editor (`MdFormat`+`apply_md_format` puro, `editor_sel` sobrevive ao foco roubado pelo menu); acabamento visual (cards pintados à mão).
+
+**[front-back-parallel]** Padrão repetido: 2-4 subagentes em paralelo por **arquivo disjunto** (core `vault.rs` ⟂ gui `app.rs`/`ui_editor.rs` ⟂ meu `theme.rs`/`ui_sidebar.rs`), contrato de assinatura combinado, eu integro+gate. Polish visual eu faço à mão (estética cruza arquivos com 1 idioma; agente cego à tela = incoerência).
+
+**[pr-split]** Decisão humana: **front (acabamento) vai pra PR próprio**. Separado via `reset --soft`+reconstrução (sem `git add -p`, bloqueado no ambiente): `slice4` = funcional puro (alvo do triad), branch stacked `feat/cad-25b-ui-polish` = cards+arredondamento.
+
+**Estado:** 6 commits slice4 + 1 ui-polish. **450 testes verdes**, clippy 1.96, fmt. App 0.8% idle. **Pendente:** triad-review do slice4 → PR; teste humano do acabamento (desenhado às cegas, binário não é `.app` registrado → sem screenshot); front PR após slice4 mergear.
+
 ## 2026-06-02 — triad-codex-section wikilinks adversarial coverage
 
 **Tickets touched:** CAD-25 Slice 3 adjacent coverage (no Notion/JIRA write; `discipline/JIRA.md` absent in worktree)
