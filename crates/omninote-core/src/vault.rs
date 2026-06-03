@@ -162,6 +162,36 @@ impl Vault {
         Ok(())
     }
 
+    /// Set the type on every markdown note inside `folder` (recursively — the
+    /// whole subtree). Non-md files are skipped. Returns how many notes changed.
+    /// `folder` is a vault-relative path (as produced by `list_folders`).
+    pub fn set_folder_note_type(
+        &mut self,
+        folder: &Path,
+        note_type: NoteType,
+    ) -> Result<usize, String> {
+        let targets: Vec<usize> = self
+            .notes
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| {
+                n.path.extension().and_then(|s| s.to_str()) == Some("md")
+                    && n.rel_path.starts_with(folder)
+            })
+            .map(|(i, _)| i)
+            .collect();
+        for &i in &targets {
+            self.notes[i].frontmatter.note_type = note_type;
+            let note = self.notes[i].clone();
+            self.save_note(&note)?;
+        }
+        let changed = targets.len();
+        if changed > 0 {
+            self.reload_notes();
+        }
+        Ok(changed)
+    }
+
     pub fn create_note(
         &mut self,
         folder: Option<&Path>,
@@ -640,6 +670,59 @@ mod tests {
             .id
             .clone();
         assert!(v.set_note_type(&env_id, NoteType::Codigo).is_err());
+    }
+
+    #[test]
+    fn set_folder_note_type_recurses_subtree() {
+        let (mut v, _d) = temp_vault();
+        v.create_note(Some(Path::new("Projetos")), "A", NoteType::Resumo)
+            .unwrap();
+        v.create_note(Some(Path::new("Projetos/Sub")), "B", NoteType::Resumo)
+            .unwrap();
+        v.create_note(None, "Raiz", NoteType::Resumo).unwrap();
+
+        let changed = v
+            .set_folder_note_type(Path::new("Projetos"), NoteType::Codigo)
+            .unwrap();
+        assert_eq!(changed, 2, "só as duas notas sob Projetos");
+
+        // ids são regenerados no create; casa por título/rel_path.
+        let a = v.notes.iter().find(|n| n.title == "A").unwrap();
+        let b = v.notes.iter().find(|n| n.title == "B").unwrap();
+        let raiz = v.notes.iter().find(|n| n.title == "Raiz").unwrap();
+        assert_eq!(a.frontmatter.note_type, NoteType::Codigo);
+        assert_eq!(b.frontmatter.note_type, NoteType::Codigo);
+        assert_eq!(raiz.frontmatter.note_type, NoteType::Resumo);
+    }
+
+    #[test]
+    fn set_folder_note_type_skips_non_md() {
+        let (mut v, _d) = temp_vault();
+        v.create_note(Some(Path::new("Docs")), "Guia", NoteType::Resumo)
+            .unwrap();
+        std::fs::write(v.root.join("Docs/readme.txt"), "x").unwrap();
+        v.reload_notes();
+
+        let changed = v
+            .set_folder_note_type(Path::new("Docs"), NoteType::Citacao)
+            .unwrap();
+        assert_eq!(changed, 1, "só o .md conta");
+
+        let txt = v
+            .notes
+            .iter()
+            .find(|n| n.rel_path.to_string_lossy() == "Docs/readme.txt")
+            .expect("txt note loaded");
+        assert_eq!(txt.frontmatter.note_type, NoteType::Resumo);
+    }
+
+    #[test]
+    fn set_folder_note_type_empty_folder_returns_zero() {
+        let (mut v, _d) = temp_vault();
+        let changed = v
+            .set_folder_note_type(Path::new("Inexistente"), NoteType::Duvida)
+            .unwrap();
+        assert_eq!(changed, 0);
     }
 
     #[test]
