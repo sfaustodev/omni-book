@@ -35,7 +35,7 @@ thiserror = "1"
 # Core-only deps
 meval = "0.2"
 pulldown-cmark = "0.12"
-lopdf = "0.34"
+lopdf = "0.42"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 # GUI deps
