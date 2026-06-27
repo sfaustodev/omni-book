@@ -93,6 +93,12 @@ impl Theme {
         Color32::from_rgba_unmultiplied(a.r(), a.g(), a.b(), 48)
     }
 
+    /// True for the pure-black high-contrast preset, where a translucent row wash
+    /// is invisible — callers draw a solid accent outline instead. WCAG (§1.8).
+    pub fn is_high_contrast(&self) -> bool {
+        self.bg == Color32::BLACK
+    }
+
     /// Resolve the preset selected in `AppConfig` to a concrete token set.
     pub fn from_preset(preset: ThemePreset, accent: [u8; 3]) -> Self {
         match preset {
