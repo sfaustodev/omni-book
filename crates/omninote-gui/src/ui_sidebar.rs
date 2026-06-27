@@ -243,10 +243,86 @@ impl OmniNoteApp {
         let mut pending_retype: Option<(String, NoteType)> = None;
         let mut pending_move: Option<(String, Option<PathBuf>)> = None;
 
+        let theme = self
+            .vault
+            .as_ref()
+            .map(|v| crate::app::theme_for_config(&v.config))
+            .unwrap_or_else(crate::theme::Theme::obsidian_dark);
+        let font_id = egui::TextStyle::Body.resolve(ui.style());
+        let row_w = ui.available_width();
+        // Scale row height and char-width estimate with the font so large a11y
+        // fonts don't overflow the fixed card nor bleed past the panel. (triad-agy)
+        let row_h = (font_id.size * 1.8).max(28.0).round();
+        let char_w = 7.2 * (font_id.size / 14.0);
+        let max_chars = (((row_w - 30.0) / char_w) as usize).max(8);
+
         for (id, label, current_type) in notes {
             let is_active = active_id.as_deref() == Some(&id);
-            let resp = ui.selectable_label(is_active, &label);
-            if resp.clicked() {
+            // Hand-painted row card: accent wash + left bar when active, faint wash
+            // on hover. Focusable so keyboard Tab/Enter reaches the list; a solid
+            // outline (not a translucent wash) in high-contrast. (triad-agy)
+            let (rect, resp) =
+                ui.allocate_exact_size(egui::vec2(row_w, row_h), egui::Sense::click());
+            let hc = theme.is_high_contrast();
+            if is_active {
+                if hc {
+                    ui.painter().rect_stroke(
+                        rect,
+                        egui::Rounding::same(6.0),
+                        egui::Stroke::new(2.0, theme.accent),
+                    );
+                } else {
+                    ui.painter()
+                        .rect_filled(rect, egui::Rounding::same(6.0), theme.row_selected());
+                }
+                let bar =
+                    egui::Rect::from_min_max(rect.min, egui::pos2(rect.min.x + 3.0, rect.max.y));
+                ui.painter()
+                    .rect_filled(bar, egui::Rounding::same(1.5), theme.accent);
+            } else if resp.hovered() {
+                if hc {
+                    ui.painter().rect_stroke(
+                        rect,
+                        egui::Rounding::same(6.0),
+                        egui::Stroke::new(1.0, theme.accent),
+                    );
+                } else {
+                    ui.painter()
+                        .rect_filled(rect, egui::Rounding::same(6.0), theme.row_hover());
+                }
+            }
+            // Keyboard focus ring — selectable_label drew one; the manual paint must too.
+            if resp.has_focus() {
+                ui.painter().rect_stroke(
+                    rect,
+                    egui::Rounding::same(6.0),
+                    egui::Stroke::new(1.5, theme.accent),
+                );
+            }
+            // Clip the painted label to the row so a long title can't bleed past the
+            // panel under the scrollbar/editor when the font is large. (triad-agy)
+            ui.painter().with_clip_rect(rect).text(
+                egui::pos2(rect.left() + 12.0, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                truncate_chars(&label, max_chars),
+                font_id.clone(),
+                theme.text,
+            );
+            let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+            // Re-announce to AccessKit — the hand-painted row replaced
+            // selectable_label, which would otherwise drop screen-reader semantics.
+            resp.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::SelectableLabel,
+                    true,
+                    is_active,
+                    &label,
+                )
+            });
+            // Keyboard activation: Enter/Space selects the focused row.
+            let kbd_select = resp.has_focus()
+                && ui.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Space));
+            if resp.clicked() || kbd_select {
                 pending_select = Some(id.clone());
             }
             resp.context_menu(|ui| {
@@ -336,4 +412,15 @@ impl OmniNoteApp {
             self.confirm_action = Some(ConfirmAction::DeleteNote(id));
         }
     }
+}
+
+/// Truncate a label to `max` chars with an ellipsis. Row text is painted (not an
+/// auto-clipping widget), so an over-long title would otherwise bleed under the
+/// scrollbar.
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    let kept: String = s.chars().take(max.saturating_sub(1)).collect();
+    format!("{kept}…")
 }

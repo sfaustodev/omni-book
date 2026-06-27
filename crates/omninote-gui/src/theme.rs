@@ -81,6 +81,24 @@ impl Theme {
         t
     }
 
+    /// Translucent accent wash for a hovered list row (paints over the panel).
+    pub fn row_hover(&self) -> Color32 {
+        let a = self.accent;
+        Color32::from_rgba_unmultiplied(a.r(), a.g(), a.b(), 22)
+    }
+
+    /// Stronger accent wash for the selected/active list row.
+    pub fn row_selected(&self) -> Color32 {
+        let a = self.accent;
+        Color32::from_rgba_unmultiplied(a.r(), a.g(), a.b(), 48)
+    }
+
+    /// True for the pure-black high-contrast preset, where a translucent row wash
+    /// is invisible — callers draw a solid accent outline instead. WCAG (§1.8).
+    pub fn is_high_contrast(&self) -> bool {
+        self.bg == Color32::BLACK
+    }
+
     /// Resolve the preset selected in `AppConfig` to a concrete token set.
     pub fn from_preset(preset: ThemePreset, accent: [u8; 3]) -> Self {
         match preset {
@@ -122,7 +140,28 @@ impl Theme {
         visuals.selection.bg_fill = self.accent.linear_multiply(0.35);
         visuals.selection.stroke = egui::Stroke::new(1.0, self.accent);
         visuals.hyperlink_color = self.accent;
+
+        // Rounded, modern chrome — softens buttons, chips, popups and menus so
+        // the UI reads as finished cards rather than raw rectangles.
+        let r = egui::Rounding::same(6.0);
+        visuals.widgets.noninteractive.rounding = r;
+        visuals.widgets.inactive.rounding = r;
+        visuals.widgets.hovered.rounding = r;
+        visuals.widgets.active.rounding = r;
+        visuals.widgets.open.rounding = r;
+        visuals.window_rounding = egui::Rounding::same(10.0);
+        visuals.menu_rounding = egui::Rounding::same(8.0);
+
         ctx.set_visuals(visuals);
+        // Breathing room inside buttons/menus. Only set the HORIZONTAL item gap —
+        // `item_spacing.y` is the accessibility line-height owned by `apply_style()`.
+        // Overwriting the whole vec2 here wiped the user's line spacing on every
+        // theme/vault switch that re-runs apply() without apply_style() after it.
+        ctx.style_mut(|style| {
+            style.spacing.item_spacing.x = 8.0;
+            style.spacing.button_padding = egui::vec2(9.0, 5.0);
+            style.spacing.menu_margin = egui::Margin::symmetric(6.0, 6.0);
+        });
     }
 }
 
