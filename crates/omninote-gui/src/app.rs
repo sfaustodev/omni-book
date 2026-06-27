@@ -319,6 +319,11 @@ impl OmniNoteApp {
                 self.active_note = Some(note.clone());
                 self.editing = false;
                 self.dirty = false;
+                // Drop any selection carried from the previous note — a stale
+                // byte range must never act on a different buffer. The consumer
+                // also clamps, but resetting at the switch is the real cure.
+                // CAD-25b Slice 4. Covers select_note_by_target too (delegates here).
+                self.editor_sel = None;
             }
         }
     }

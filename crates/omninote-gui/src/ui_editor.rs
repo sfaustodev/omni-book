@@ -87,7 +87,9 @@ pub fn apply_md_format(content: &str, sel: (usize, usize), fmt: MdFormat) -> Str
         // index after a '\n' that falls before `b`.
         let mut starts = vec![first];
         for (i, ch) in content.char_indices() {
-            if ch == '\n' && i + 1 > first && i < b {
+            // `i + 1 < b` (not `i < b`): a selection ending right after a '\n'
+            // must not prefix the empty line that newline opens. CAD-25b Slice 4.
+            if ch == '\n' && i + 1 > first && i + 1 < b {
                 starts.push(i + 1);
             }
         }
@@ -546,5 +548,16 @@ mod tests {
     #[test]
     fn range_past_end_is_clamped() {
         assert_eq!(apply_md_format("hi", (0, 99), MdFormat::InlineCode), "`hi`");
+    }
+    #[test]
+    fn line_prefix_selection_ending_in_newline_skips_empty_line() {
+        // CAD-25b Slice 4: a selection ending right after a '\n' must NOT prefix
+        // the empty trailing line that newline opens.
+        assert_eq!(
+            apply_md_format("a\nb\n", (0, 4), MdFormat::Bullet),
+            "- a\n- b\n"
+        );
+        // Single line selected through its trailing newline → only that line.
+        assert_eq!(apply_md_format("foo\n", (0, 4), MdFormat::H2), "## foo\n");
     }
 }
