@@ -790,27 +790,18 @@ impl ServerHandler for OmniNoteMcp {
     }
 }
 
-fn resolve_vault() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("OMNINOTE_VAULT") {
-        let pb = PathBuf::from(p);
-        if pb.exists() {
-            return Some(pb);
-        }
-    }
-    let last = dirs::config_dir()?.join("omninote").join("last_vault");
-    std::fs::read_to_string(last)
-        .ok()
-        .map(|s| PathBuf::from(s.trim()))
-        .filter(|p| p.exists())
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let vault_root = resolve_vault().ok_or_else(|| {
-        anyhow::anyhow!(
-            "no vault: set OMNINOTE_VAULT env or open the GUI once to seed ~/.config/omninote/last_vault"
-        )
-    })?;
+    // Share the CLI's resolver so `omninote vault switch NAME` (vaults.toml
+    // registry) takes effect here too, with the same fail-closed semantics on a
+    // corrupt registry.
+    let vault_root = match omninote_core::vaults::resolve_active(None) {
+        Ok(Some(p)) => p,
+        Ok(None) => anyhow::bail!(
+            "no vault: set OMNINOTE_VAULT, run `omninote vault add`, or open the GUI once"
+        ),
+        Err(e) => anyhow::bail!("vault resolution failed: {e}"),
+    };
     eprintln!("omninote-mcp starting · vault: {}", vault_root.display());
     let server = OmniNoteMcp::new(vault_root);
     let transport = stdio();
