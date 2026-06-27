@@ -508,12 +508,111 @@ pub fn parse_frontmatter(raw: &str) -> (Frontmatter, String) {
     }
     let after = &raw[3..];
     if let Some(end) = after.find("\n---") {
-        let yaml = &after[..end].trim_start_matches('\n');
-        let rest = &after[end + 4..].trim_start_matches('\n');
-        let fm: Frontmatter = serde_yaml::from_str(yaml).unwrap_or_default();
-        return (fm, rest.to_string());
+        let yaml = after[..end].trim_start_matches('\n');
+        let rest = after[end + 4..].trim_start_matches('\n');
+        return (frontmatter_from_yaml(yaml), rest.to_string());
     }
     (Frontmatter::default(), raw.to_string())
+}
+
+/// Parse a frontmatter YAML block DEFENSIVELY. `from_str::<Frontmatter>(yaml)`
+/// fails — and the old `unwrap_or_default` then DROPPED EVERYTHING — the moment
+/// any modeled field has an unexpected shape: a foreign Obsidian note with
+/// `type: book`, no `id:`, or a scalar `tags: rust` (all valid YAML that Obsidian
+/// writes). Routing through a permissive `Mapping` and extracting each modeled
+/// field tolerantly means a hostile/foreign frontmatter never wipes the note's
+/// other keys — they land in `extra` and round-trip. An unknown `type:` value
+/// normalizes to the default (OmniNote's type enum is fixed at 6 variants and the
+/// original string can't coexist with the modeled `type` key on save), but every
+/// non-modeled key survives. CAD-25b Slice 4 (data-loss fix — real failure paths).
+fn frontmatter_from_yaml(yaml: &str) -> Frontmatter {
+    use serde_yaml::Value;
+
+    // A bare scalar / list (not a key:value mapping) has nothing structured to
+    // preserve — fall back to default, same as an empty frontmatter.
+    let mut map: serde_yaml::Mapping = match serde_yaml::from_str(yaml) {
+        Ok(m) => m,
+        Err(_) => return Frontmatter::default(),
+    };
+
+    fn take(m: &mut serde_yaml::Mapping, k: &str) -> Option<Value> {
+        m.remove(Value::String(k.to_string()))
+    }
+    fn as_string(v: &Value) -> Option<String> {
+        match v {
+            Value::String(s) => Some(s.clone()),
+            Value::Number(n) => Some(n.to_string()),
+            Value::Bool(b) => Some(b.to_string()),
+            _ => None,
+        }
+    }
+    // Obsidian commonly writes a single tag/alias as a bare scalar (`tags: rust`),
+    // which is valid YAML but not a sequence — accept both shapes.
+    fn as_string_vec(v: Value) -> Vec<String> {
+        match v {
+            Value::Sequence(seq) => seq.iter().filter_map(as_string).collect(),
+            other => as_string(&other).into_iter().collect(),
+        }
+    }
+
+    let id = take(&mut map, "id")
+        .as_ref()
+        .and_then(as_string)
+        .unwrap_or_default();
+    // Unknown enum value (`type: book`) → None → default Resumo. The key is still
+    // consumed so it does not also re-emit via `extra` and collide with `type`.
+    let note_type = take(&mut map, "type")
+        .and_then(|v| serde_yaml::from_value::<NoteType>(v).ok())
+        .unwrap_or_default();
+    let tags = take(&mut map, "tags")
+        .map(as_string_vec)
+        .unwrap_or_default();
+    let source = take(&mut map, "source")
+        .as_ref()
+        .and_then(as_string)
+        .unwrap_or_default();
+    let source_link = take(&mut map, "source_link")
+        .as_ref()
+        .and_then(as_string)
+        .unwrap_or_default();
+    let linked_note = take(&mut map, "linked_note").as_ref().and_then(as_string);
+    let attachments = take(&mut map, "attachments")
+        .map(as_string_vec)
+        .unwrap_or_default();
+    let created = take(&mut map, "created")
+        .as_ref()
+        .and_then(as_string)
+        .unwrap_or_default();
+    let aliases = take(&mut map, "aliases")
+        .map(as_string_vec)
+        .unwrap_or_default();
+    let summary = take(&mut map, "summary")
+        .as_ref()
+        .and_then(as_string)
+        .unwrap_or_default();
+
+    // Everything left is an unmodeled key — preserve it verbatim.
+    let extra = map
+        .into_iter()
+        .filter_map(|(k, v)| match k {
+            Value::String(s) => Some((s, v)),
+            _ => None,
+        })
+        .collect();
+
+    Frontmatter {
+        id,
+        note_type,
+        tags,
+        source,
+        source_link,
+        linked_note,
+        attachments,
+        created,
+        aliases,
+        summary,
+        extra,
+    }
 }
 
 #[cfg(test)]
@@ -963,7 +1062,11 @@ mod tests {
         assert!(out.contains("publish: true"), "bool preserved:\n{out}");
         assert!(out.contains("rating: 5"), "integer preserved:\n{out}");
         assert!(out.contains("cssclass: wide"), "string preserved:\n{out}");
-        assert!(out.contains("areas:"), "list preserved:\n{out}");
+        // Assert the ITEMS, not just the `areas:` key — a key-only contains()
+        // passes even if the list items are dropped. serde_yaml emits a block
+        // list (`areas:\n- a\n- b`), so check the items directly.
+        assert!(out.contains("- a"), "list item a preserved:\n{out}");
+        assert!(out.contains("- b"), "list item b preserved:\n{out}");
     }
 
     #[test]
@@ -995,6 +1098,108 @@ mod tests {
         assert!(raw.contains("publish: true"), "got:\n{raw}");
         assert!(raw.contains("cover: img/banner.png"), "got:\n{raw}");
         assert!(raw.contains("rating: 5"), "got:\n{raw}");
+    }
+
+    #[test]
+    fn foreign_note_unknown_type_preserves_other_keys() {
+        // Review finding (major): a foreign note whose `type:` is not an OmniNote
+        // variant used to wipe the ENTIRE frontmatter (strict deserialize failed →
+        // unwrap_or_default). Now the unknown type normalizes to the default but
+        // sibling keys survive in `extra`.
+        let (mut v, _d) = temp_vault();
+        let path = v.root.join("book.md");
+        std::fs::write(
+            &path,
+            "---\nid: b1\ntype: book\nauthor: Tolkien\nrating: 5\n---\n\nCorpo.",
+        )
+        .unwrap();
+        v.reload_notes();
+        let note = v
+            .notes
+            .iter()
+            .find(|n| n.rel_path.to_string_lossy() == "book.md")
+            .expect("nota carregada")
+            .clone();
+        assert!(
+            note.frontmatter.extra.contains_key("author"),
+            "author perdido"
+        );
+        assert!(
+            note.frontmatter.extra.contains_key("rating"),
+            "rating perdido"
+        );
+        assert_eq!(
+            note.frontmatter.note_type,
+            NoteType::Resumo,
+            "type desconhecido normaliza p/ default"
+        );
+        v.save_note(&note).unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("author: Tolkien"), "got:\n{raw}");
+        assert!(raw.contains("rating: 5"), "got:\n{raw}");
+    }
+
+    #[test]
+    fn foreign_note_missing_id_preserves_custom_keys() {
+        // Review finding (major): a `---` block with no `id:` (Obsidian dashboard /
+        // folder notes) used to drop cssclass/publish/cover. Now they survive; the
+        // id is derived from rel_path by read_note.
+        let (mut v, _d) = temp_vault();
+        let path = v.root.join("dash.md");
+        std::fs::write(
+            &path,
+            "---\ntype: resumo\ncssclass: dashboard\npublish: false\n---\n\nCorpo.",
+        )
+        .unwrap();
+        v.reload_notes();
+        let note = v
+            .notes
+            .iter()
+            .find(|n| n.rel_path.to_string_lossy() == "dash.md")
+            .expect("nota carregada")
+            .clone();
+        assert!(
+            note.frontmatter.extra.contains_key("cssclass"),
+            "cssclass perdido"
+        );
+        assert!(
+            note.frontmatter.extra.contains_key("publish"),
+            "publish perdido"
+        );
+        v.save_note(&note).unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("cssclass: dashboard"), "got:\n{raw}");
+        assert!(raw.contains("publish: false"), "got:\n{raw}");
+    }
+
+    #[test]
+    fn foreign_note_scalar_tags_preserves_other_keys() {
+        // Review finding (major): a scalar `tags: rust` (valid YAML that Obsidian
+        // writes) used to fail Vec<String> deserialization and wipe everything.
+        // Now the scalar is accepted as a single-element list; custom keys survive.
+        let (mut v, _d) = temp_vault();
+        let path = v.root.join("scalar.md");
+        std::fs::write(
+            &path,
+            "---\nid: s1\ntype: resumo\ntags: rust\ncssclass: note\n---\n\nCorpo.",
+        )
+        .unwrap();
+        v.reload_notes();
+        let note = v
+            .notes
+            .iter()
+            .find(|n| n.rel_path.to_string_lossy() == "scalar.md")
+            .expect("nota carregada")
+            .clone();
+        assert_eq!(
+            note.frontmatter.tags,
+            vec!["rust"],
+            "tag escalar vira lista de um elemento"
+        );
+        assert!(
+            note.frontmatter.extra.contains_key("cssclass"),
+            "cssclass perdido"
+        );
     }
 
     #[test]
