@@ -231,6 +231,7 @@ mod tests {
                 created: String::new(),
                 aliases: aliases.into_iter().map(|s| s.to_string()).collect(),
                 summary: String::new(),
+                extra: Default::default(),
             },
             title,
             content: content.to_string(),

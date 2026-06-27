@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -72,6 +73,15 @@ pub struct Frontmatter {
     /// Omitted from serialization when empty so existing notes stay clean.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub summary: String,
+    /// Unknown frontmatter keys — Obsidian custom fields (`cssclass`, `publish`,
+    /// `cover`, Dataview inline fields, …) that OmniNote does not model. Captured
+    /// on parse and re-emitted on save so a round-trip never drops a key. Without
+    /// this, deserializing into the fixed struct above and re-serializing silently
+    /// discards anything unrecognized. `flatten` splices the map inline (no `extra:`
+    /// wrapper); `BTreeMap` keeps key order deterministic for stable git diffs on a
+    /// versioned vault. CAD-25b Slice 4 (data-loss fix).
+    #[serde(flatten, default)]
+    pub extra: BTreeMap<String, serde_yaml::Value>,
 }
 
 #[derive(Clone, Debug)]

@@ -180,6 +180,23 @@ impl Vault {
             })
             .map(|(i, _)| i)
             .collect();
+        // Pre-flight: a filesystem vault has no multi-file transaction, so a
+        // mid-loop save failure would leave the folder half-categorized. Verify
+        // every target exists and is writable BEFORE touching any of them, so the
+        // common failure (read-only / missing file) aborts with zero writes.
+        // Fail-safe, not atomic: a disk-full or a race after this check can still
+        // partial-write; `reload_notes()` below re-syncs memory from disk regardless.
+        for &i in &targets {
+            let p = &self.notes[i].path;
+            let meta = fs::metadata(p)
+                .map_err(|e| format!("não posso categorizar a pasta: {} ({e})", p.display()))?;
+            if meta.permissions().readonly() {
+                return Err(format!(
+                    "não posso categorizar a pasta: arquivo somente-leitura {}",
+                    p.display()
+                ));
+            }
+        }
         for &i in &targets {
             self.notes[i].frontmatter.note_type = note_type;
             let note = self.notes[i].clone();
@@ -225,6 +242,7 @@ impl Vault {
             created: chrono::Utc::now().to_rfc3339(),
             aliases: vec![],
             summary: String::new(),
+            extra: Default::default(),
         };
         let title_str = path.file_stem().unwrap().to_string_lossy().to_string();
         let rel_path = path.strip_prefix(&self.root).unwrap().to_path_buf();
@@ -725,6 +743,41 @@ mod tests {
         assert_eq!(changed, 0);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn set_folder_note_type_preflight_rejects_readonly() {
+        // Atomicity guard (CAD-25b Slice 4): one read-only target must abort the
+        // whole bulk op BEFORE any writable sibling is rewritten (validate-all-
+        // then-write). Unix-only: relies on chmod semantics.
+        use std::os::unix::fs::PermissionsExt;
+        let (mut v, _d) = temp_vault();
+        v.create_note(Some(Path::new("Bulk")), "Editavel", NoteType::Resumo)
+            .unwrap();
+        let locked = v
+            .create_note(Some(Path::new("Bulk")), "Travada", NoteType::Resumo)
+            .unwrap();
+        let mut perms = std::fs::metadata(&locked.path).unwrap().permissions();
+        perms.set_mode(0o444);
+        std::fs::set_permissions(&locked.path, perms).unwrap();
+
+        let res = v.set_folder_note_type(Path::new("Bulk"), NoteType::Codigo);
+        assert!(res.is_err(), "alvo read-only deve abortar o bulk inteiro");
+
+        // The writable sibling must NOT have been flipped — pre-flight ran first.
+        v.reload_notes();
+        let editavel = v.notes.iter().find(|n| n.title == "Editavel").unwrap();
+        assert_eq!(
+            editavel.frontmatter.note_type,
+            NoteType::Resumo,
+            "irmão gravável não pode mudar quando o bulk aborta"
+        );
+
+        // Restore perms so the TempDir cleanup succeeds.
+        let mut perms = std::fs::metadata(&locked.path).unwrap().permissions();
+        perms.set_mode(0o644);
+        std::fs::set_permissions(&locked.path, perms).unwrap();
+    }
+
     #[test]
     fn append_inbox_prepends_newest_first_under_heading() {
         let (vault, _dir) = temp_vault();
@@ -889,6 +942,125 @@ mod tests {
         assert!(
             !raw.contains("summary:"),
             "empty summary should NOT appear in YAML; got:\n{raw}"
+        );
+    }
+
+    #[test]
+    fn frontmatter_flatten_roundtrip_mixed_value_types() {
+        // Probe (CAD-25b Slice 4): serde(flatten) into BTreeMap<_, serde_yaml::Value>
+        // must round-trip mixed YAML value types — string, bool, integer, list —
+        // not just strings. Guards the known serde_yaml flatten-typing quirk where
+        // non-string scalars can mis-deserialize. If this fails, the flatten approach
+        // is unviable and the fix must switch to a raw serde_yaml::Mapping merge.
+        let yaml =
+            "id: x1\ntype: resumo\ncssclass: wide\npublish: true\nrating: 5\nareas:\n- a\n- b\n";
+        let fm: Frontmatter = serde_yaml::from_str(yaml).unwrap();
+        assert!(fm.extra.contains_key("cssclass"), "extra={:?}", fm.extra);
+        assert!(fm.extra.contains_key("publish"), "extra={:?}", fm.extra);
+        assert!(fm.extra.contains_key("rating"), "extra={:?}", fm.extra);
+        assert!(fm.extra.contains_key("areas"), "extra={:?}", fm.extra);
+        let out = serde_yaml::to_string(&fm).unwrap();
+        assert!(out.contains("publish: true"), "bool preserved:\n{out}");
+        assert!(out.contains("rating: 5"), "integer preserved:\n{out}");
+        assert!(out.contains("cssclass: wide"), "string preserved:\n{out}");
+        assert!(out.contains("areas:"), "list preserved:\n{out}");
+    }
+
+    #[test]
+    fn frontmatter_preserves_unknown_obsidian_fields() {
+        // CAD-25b Slice 4 (data-loss fix): custom Obsidian keys must survive a
+        // parse → reload → save round-trip instead of being silently dropped by
+        // the fixed serde struct.
+        let (mut v, _d) = temp_vault();
+        let path = v.root.join("custom.md");
+        std::fs::write(
+            &path,
+            "---\nid: x1\ntype: resumo\ncssclass: wide-page\npublish: true\n\
+             cover: img/banner.png\nrating: 5\n---\n\nCorpo.",
+        )
+        .unwrap();
+        v.reload_notes();
+        let note = v
+            .notes
+            .iter()
+            .find(|n| n.rel_path.to_string_lossy() == "custom.md")
+            .expect("nota carregada")
+            .clone();
+        for k in ["cssclass", "publish", "cover", "rating"] {
+            assert!(note.frontmatter.extra.contains_key(k), "extra perdeu '{k}'");
+        }
+        v.save_note(&note).unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("cssclass: wide-page"), "got:\n{raw}");
+        assert!(raw.contains("publish: true"), "got:\n{raw}");
+        assert!(raw.contains("cover: img/banner.png"), "got:\n{raw}");
+        assert!(raw.contains("rating: 5"), "got:\n{raw}");
+    }
+
+    #[test]
+    fn frontmatter_flatten_does_not_duplicate_known_keys() {
+        // serde(flatten) must route modeled keys to their named fields, never
+        // ALSO into `extra` — a duplicate would double-emit and corrupt the YAML.
+        let (mut v, _d) = temp_vault();
+        let path = v.root.join("known.md");
+        std::fs::write(
+            &path,
+            "---\nid: k1\ntype: codigo\ntags:\n- rust\nsource: Livro\n\
+             summary: uma frase\n---\n\nCorpo.",
+        )
+        .unwrap();
+        v.reload_notes();
+        let note = v
+            .notes
+            .iter()
+            .find(|n| n.rel_path.to_string_lossy() == "known.md")
+            .unwrap()
+            .clone();
+        for k in ["id", "type", "tags", "source", "summary"] {
+            assert!(
+                !note.frontmatter.extra.contains_key(k),
+                "chave conhecida '{k}' vazou para extra: {:?}",
+                note.frontmatter.extra
+            );
+        }
+        assert_eq!(note.frontmatter.source, "Livro");
+        assert_eq!(note.frontmatter.summary, "uma frase");
+        assert_eq!(note.frontmatter.tags, vec!["rust"]);
+    }
+
+    #[test]
+    fn frontmatter_empty_extra_omitted_from_yaml() {
+        // No custom fields → serialized YAML stays byte-clean (flatten of an empty
+        // map emits nothing), so OmniNote-native notes are unchanged.
+        let (mut v, _d) = temp_vault();
+        let note = v.create_note(None, "Limpa", NoteType::Resumo).unwrap();
+        v.save_note(&note).unwrap();
+        let raw = std::fs::read_to_string(&note.path).unwrap();
+        assert!(!raw.contains("extra:"), "no extra: key; got:\n{raw}");
+        assert!(!raw.contains("{}"), "no empty map literal; got:\n{raw}");
+    }
+
+    #[test]
+    fn set_folder_note_type_preserves_custom_fields() {
+        // The bulk type-flip must not strip Obsidian custom keys while it runs.
+        let (mut v, _d) = temp_vault();
+        let dir = v.root.join("Area");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("doc.md"),
+            "---\nid: a1\ntype: resumo\ncssclass: special\n---\n\nCorpo.",
+        )
+        .unwrap();
+        v.reload_notes();
+        let changed = v
+            .set_folder_note_type(Path::new("Area"), NoteType::Codigo)
+            .unwrap();
+        assert_eq!(changed, 1);
+        let raw = std::fs::read_to_string(dir.join("doc.md")).unwrap();
+        assert!(raw.contains("type: codigo"), "type flipped; got:\n{raw}");
+        assert!(
+            raw.contains("cssclass: special"),
+            "custom key kept; got:\n{raw}"
         );
     }
 
