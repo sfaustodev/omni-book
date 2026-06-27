@@ -4,6 +4,30 @@
 
 ---
 
+## 2026-06-27 — CAD-25b Slice 4 close-out + dep security bump
+
+**Tickets touched:** CAD-25 Fase B Slice 4
+
+**Done:**
+- **Slice 4 (overlays) fechado e mergeado main (PR #26).** Os 5 bugs do teste-humano (busy-loop 90% CPU, OpenDyslexic, drag-swallows-click, dotfolders, .txt/.env) já estavam corrigidos na branch; esta sessão fez o gate que faltava (triad-review ficou incompleto por infra Codex/Agy).
+- **4 triad findings corrigidos:** (a) YAML preservation — campo `extra` `#[serde(flatten)]` + `parse_frontmatter` tolerante via `serde_yaml::Mapping` (`frontmatter_from_yaml`); (b) atomicidade `set_folder_note_type` (pre-flight validate-all-then-write); (c) `apply_md_format` boundary (`i+1<b`); (d) `select_note` limpa `editor_sel`.
+- **2 rounds de review adversarial interno (Workflow, 5+3 lenses, verificação adversarial por-finding):**
+  - Round 1 (20 findings → 3 confirmados): achou o data-loss central — o fix do `extra` apagava o frontmatter INTEIRO de nota Obsidian estrangeira (`type: book` / sem `id:` / `tags:` escalar) via `unwrap_or_default`. Corrigido com parse tolerante.
+  - Round 2 (9 findings → 2 confirmados): duplicate-key wipe (serde_yaml rejeita chave duplicada → dedup keep-last retry, só no caminho de erro) + non-string-key drop (coage para string). Corrigidos.
+- **463 testes** (de 450), fmt/clippy `-D warnings`/build --release verdes.
+- **Dep security bump (PR #27):** `lopdf 0.34→0.42` (RUSTSEC-2026-0187 stack overflow PDF aninhado) + `quinn-proto →0.11.15` (RUSTSEC-2026-0185 memory exhaustion). Ambos pré-existentes (advisory DB de jun/2026 atualizou; main passava até 02/jun). `pdf.rs` API estável — zero mudança de código.
+
+**Blocked:**
+- Trio oficial (Codex+Agy) diferido — quota/OAuth. Substituído por review adversarial interno pré-merge.
+
+**Lição [data-loss-fix-que-causava-data-loss]:** um fix de preservação só vale se o teste exercita as formas que QUEBRAM o parse, não só o caminho feliz. O probe inicial (frontmatter válido) passou e me levou ao flatten; o adversarial multi-round achou que o flatten não bastava (`unwrap_or_default` engolia tudo a montante). Gate mecânico proposto: teste de round-trip de frontmatter SEMPRE inclui um caso estrangeiro inválido (type desconhecido / sem id / scalar onde espera seq / chave duplicada).
+
+**Files changed:** `crates/omninote-core/{types,vault}.rs`, `omninote-gui/{ui_editor,app}.rs`, `omninote-ai/{auto_tag,rag}.rs`, `omninote-core/{search,resolver}.rs`, `Cargo.toml`.
+
+**Next:** trio oficial sobre Slice 4 → ui-polish (rebase+PR) → Slices 5-6 (`ui_discipline`/`ui_timeline`/`ui_chat`/`ui_dictation`).
+
+---
+
 ## 2026-06-03 — [human-test-cascade] [busy-loop-90cpu] [front-back-parallel] [pr-split]
 
 Teste humano da Slice 4 (vault demo `~/omninote-demo`) destravou cascata de bugs + 3 features. Branch `feat/cad-25b-slice4-overlays` (bugs de teste humano = mesma branch, rule #13).

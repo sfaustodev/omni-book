@@ -45,11 +45,11 @@ CAD-23 foi fatiado em 4 subtasks shipáveis (per decisão AskUserQuestion 2026-0
 | 1 | Fundação: `Theme` struct + 4 presets + AppConfig UI-v2 fields + status bar | ✅ merged (#23) |
 | 2 | Shell 3-painéis + chrome (titlebar/breadcrumb/tabs/right-rail) | ✅ merged (#24) |
 | 3 | Renderer markdown custom (`md_render.rs`, hover-preview/embeds/imagens/seções/#tags) | ✅ merged (#25) |
-| 4 | Overlays (command palette Cmd+P, quick-capture, toasts, calendar pt-BR, onboarding) | 🔄 commitada `baa47a1`, aguarda gate+PR |
+| 4 | Overlays (command palette Cmd+P, quick-capture, toasts, calendar pt-BR, onboarding) | ✅ merged (#26) — close-out: 4 triad findings + 2 rounds review adversarial interno |
 | 5 | Views tipadas (`ui_discipline` sprint/diary/human/tickets + `ui_timeline` snapshot) | 🌱 não começou |
 | 6 | AI surfaces (`ui_chat` RAG real + `ui_dictation` escondido até CAD-23.3) + a11y polish | 🌱 não começou |
 
-> **Estado real (2026-06-02):** 4 de 6 slices feitas (1-3 mergeadas no main, 4 commitada). Falta Slice 5 (views tipadas) + Slice 6 (AI chat/dictation). Arquivos `ui_chat.rs`/`ui_dictation.rs`/`ui_discipline.rs`/`ui_timeline.rs` do §5.2 ainda não existem. ~67% do CAD-25 Fase B.
+> **Estado real (2026-06-27):** 4 de 6 slices mergeadas no main (1-3 via #23/#24/#25, Slice 4 via #26 close-out). Falta Slice 5 (views tipadas) + Slice 6 (AI chat/dictation), e ui-polish (rebase+PR pendente). Arquivos `ui_chat.rs`/`ui_dictation.rs`/`ui_discipline.rs`/`ui_timeline.rs` do §5.2 ainda não existem. ~67% do CAD-25 Fase B. **Sec:** lopdf 0.34→0.42 + quinn-proto 0.11.15 (RUSTSEC-2026-0187/0185, advisories de jun/26) via #27.
 
 ### Dependency graph
 

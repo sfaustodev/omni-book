@@ -57,7 +57,7 @@
 | ID | Title | Status | Prio | Size | Est | Depende | Notion URL |
 |------|-------|--------|------|------|-----|---------|------------|
 | CAD-22 | Phase 3 — Daily notes + templates + discipline CLI/MCP | 👀 Revisão | ⚡ | 🐎 L | 18h | CAD-21 | [36673ac79ddb81719384cbc41c959717](https://www.notion.so/36673ac79ddb81719384cbc41c959717) |
-| CAD-25 (Fase B) | UI Design v2 — implementação egui | 🌱 Backlog | ⚡ | 🐘 XL | 22h | CAD-20 + análise A | mesmo do v1.1 |
+| CAD-25 (Fase B) | UI Design v2 — implementação egui | 🔄 In progress | ⚡ | 🐘 XL | 22h | CAD-20 + análise A | slices 1-4 merged (#23-#26); falta 5-6 + ui-polish |
 
 ### Sprint v1.3 (2026-06-17 → 2026-07-01) · AI + Power
 
@@ -65,10 +65,10 @@
 |------|-------|--------|------|------|-----|---------|------------|
 | CAD-23 | Phase 4 — AI-native vault (umbrella: RAG + auto-tag + dictation + OCR) | 🔄 In progress | ⚡ | 🐘 XL | 40h | CAD-21 | [36673ac79ddb81d9b1a9f1df14a8fc9d](https://www.notion.so/36673ac79ddb81d9b1a9f1df14a8fc9d) |
 | CAD-23.1 | RAG search (omninote-ai crate + ask CLI/MCP) | 👀 Revisão | ⚡ | 🐎 L | 12h | CAD-21 | mergeado PR #17 + hotfix #18 |
-| CAD-23.2 | Auto-tag + summary | 👀 Revisão | ⚡ | 🐂 M | 6h | CAD-23.1 done | branch feat/cad-23-2-auto-tag — PR pending |
+| CAD-23.2 | Auto-tag + summary | 👀 Revisão | ⚡ | 🐂 M | 6h | CAD-23.1 done | mergeado PR #19 (aguarda confirmação humana p/ ✅) |
 | CAD-23.3 | Dictation Whisper | 🌱 Backlog | ⚡ | 🐎 L | 10h | CAD-23.1 done | — |
 | CAD-23.4 | OCR PDF (leptess/tesseract) | 🌱 Backlog | 📌 | 🐂 M | 8h | CAD-23.1 done | — |
-| CAD-24 | Phase 5 — Power automation (quick-capture + multi-vault + diff + JSON) | 🌱 Backlog | 📌 | 🐎 L | 20h | CAD-23 done | [36673ac79ddb813784afe6f9920adedc](https://www.notion.so/36673ac79ddb813784afe6f9920adedc) |
+| CAD-24 | Phase 5 — Power automation (quick-capture + multi-vault + diff + JSON) | 🔄 Parcial | 📌 | 🐎 L | 20h | CAD-23 done | multi-vault+diff+JSON portados main; falta daemon omninote-capture |
 
 ### Parallel work map
 
