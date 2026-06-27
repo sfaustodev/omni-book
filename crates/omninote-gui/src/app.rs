@@ -7,6 +7,16 @@ use omninote_core::types::{ConfirmAction, Note, NoteType};
 use omninote_core::vault::Vault;
 use std::path::PathBuf;
 
+/// Cached Timeline outcome, keyed by the vault root and window token it was
+/// computed for. `result` holds the whole outcome — `Ok(report)` (git or non-git)
+/// or `Err(message)` — so a failing `git` is remembered instead of re-spawned
+/// every frame, and a vault switch is detected by the `root` mismatch.
+pub struct TimelineCache {
+    pub root: PathBuf,
+    pub token: String,
+    pub result: Result<SnapshotReport, String>,
+}
+
 /// Which full-panel overlay replaces the editor in the central area (Slice 5).
 /// Transient (not persisted), mirroring `palette_open`. `None` = the editor.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -129,9 +139,13 @@ pub struct OmniNoteApp {
     pub tickets_filter: TicketFilter,
     pub tickets_query: String,
     /// Timeline panel: window token (`1d`/`7d`/`30d`) + a git-diff result cached
-    /// by that token so the panel never spawns `git` per frame.
+    /// by `(vault root, token)`. The whole outcome is stored — including `Err`
+    /// and the non-git case — so a failing `git` never re-spawns every frame
+    /// (the busy-loop lesson) and a vault switch can't serve the old vault's
+    /// rows. The cache is keyed (not just token-checked) to invalidate on either
+    /// axis. (triad-agy/codex Slice 5.)
     pub timeline_since: String,
-    pub timeline_cache: Option<(String, SnapshotReport)>,
+    pub timeline_cache: Option<TimelineCache>,
     /// Typed↔Raw toggle for discipline files: `true` renders the structured view,
     /// `false` falls back to the generic editor. Defaults to typed.
     pub discipline_typed: bool,
@@ -262,6 +276,10 @@ impl OmniNoteApp {
                     let theme = theme_for_config(&v.config);
                     self.vault = Some(v);
                     self.active_note = None;
+                    // Drop the Timeline cache — it belongs to the old vault root.
+                    // (The cache is also root-keyed, but clearing here frees it
+                    // promptly and matches the watcher/reload pattern.)
+                    self.timeline_cache = None;
                     self.save_last_vault();
                     // Re-apply style + full theme (preset-aware) from the new vault's
                     // config so font and theme take effect immediately, not next toggle.
@@ -377,6 +395,12 @@ impl OmniNoteApp {
                 self.active_note = Some(note.clone());
                 self.editing = false;
                 self.dirty = false;
+                // A successful selection must surface the editor: clear any
+                // full-panel overlay (Tickets/Timeline) so the chosen note isn't
+                // hidden behind it. Covers every entry point — sidebar, palette,
+                // discipline section, timeline row — and select_note_by_target,
+                // which delegates here. (triad-agy/codex Slice 5.)
+                self.central_overlay = CentralOverlay::None;
                 // Drop any selection carried from the previous note — a stale
                 // byte range must never act on a different buffer. The consumer
                 // also clamps, but resetting at the switch is the real cure.
@@ -692,18 +716,19 @@ mod tests {
 
     #[test]
     fn opening_timeline_clears_stale_cache() {
-        let (mut app, _dir) = test_app();
+        let (mut app, dir) = test_app();
         // Seed a stale cache, then open Timeline — it must drop so the next show
         // refreshes (avoids serving a window's results under a different token).
-        app.timeline_cache = Some((
-            "1d".to_string(),
-            omninote_core::snapshot::SnapshotReport {
+        app.timeline_cache = Some(TimelineCache {
+            root: dir.path().to_path_buf(),
+            token: "1d".to_string(),
+            result: Ok(omninote_core::snapshot::SnapshotReport {
                 since: "1 days ago".into(),
                 is_git: false,
                 commits: 0,
                 changed: Vec::new(),
-            },
-        ));
+            }),
+        });
         app.toggle_central_overlay(CentralOverlay::Timeline);
         assert!(app.timeline_cache.is_none(), "cache cleared on open");
     }
@@ -721,18 +746,19 @@ mod tests {
             });
         });
         let cache = app.timeline_cache.as_ref().expect("cache populated");
-        assert_eq!(cache.0, "7d", "keyed on the active window token");
-        assert!(!cache.1.is_git, "tempdir vault is not a git work tree");
+        assert_eq!(cache.token, "7d", "keyed on the active window token");
+        let report = cache.result.as_ref().expect("non-git vault is Ok, not Err");
+        assert!(!report.is_git, "tempdir vault is not a git work tree");
 
         // A second frame with the same token must not replace the cache instance.
-        let before = cache.1.clone();
+        let before = cache.result.clone();
         let _ = ctx.run(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 app.show_timeline_view(ui);
             });
         });
         assert_eq!(
-            app.timeline_cache.as_ref().unwrap().1,
+            app.timeline_cache.as_ref().unwrap().result,
             before,
             "same-token frame reuses the cached report"
         );
@@ -757,6 +783,72 @@ mod tests {
             });
         });
         assert!(app.error_msg.is_none());
+    }
+
+    #[test]
+    fn select_note_clears_central_overlay() {
+        // Selecting a note while Tickets/Timeline is open must surface the editor
+        // (clear the overlay) so the chosen note isn't hidden. (triad Slice 5.)
+        let (mut app, _dir) = test_app();
+        let id_a = app
+            .vault
+            .as_ref()
+            .unwrap()
+            .notes
+            .iter()
+            .find(|n| n.title == "A")
+            .unwrap()
+            .frontmatter
+            .id
+            .clone();
+        app.central_overlay = CentralOverlay::Tickets;
+        app.select_note(&id_a);
+        assert_eq!(
+            app.central_overlay,
+            CentralOverlay::None,
+            "a successful select must drop the overlay"
+        );
+
+        // A no-op select (unknown id) leaves the overlay untouched.
+        app.central_overlay = CentralOverlay::Timeline;
+        app.select_note("does-not-exist");
+        assert_eq!(app.central_overlay, CentralOverlay::Timeline);
+    }
+
+    #[test]
+    fn timeline_cache_keyed_by_root_and_token_survives_frames() {
+        // Regression for the busy-loop: a populated cache for the active
+        // (root, token) must be reused — not re-spawned — on subsequent frames,
+        // even when the underlying result was a non-git Ok (and, by the same
+        // keying, an Err would be remembered too). (triad Slice 5.)
+        let (mut app, _dir) = test_app();
+        app.central_overlay = CentralOverlay::Timeline;
+        let ctx = egui::Context::default();
+        let run = |app: &mut OmniNoteApp| {
+            let _ = ctx.run(Default::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| app.show_timeline_view(ui));
+            });
+        };
+        run(&mut app);
+        let first = app.timeline_cache.as_ref().expect("cache populated");
+        let root = first.root.clone();
+        assert_eq!(first.token, "7d");
+        // Mutating the cached result in place lets us detect a spurious refresh:
+        // if the panel re-ran diff_since it would overwrite this sentinel.
+        app.timeline_cache.as_mut().unwrap().result = Ok(SnapshotReport {
+            since: "sentinel".into(),
+            is_git: false,
+            commits: 42,
+            changed: Vec::new(),
+        });
+        run(&mut app);
+        let again = app.timeline_cache.as_ref().unwrap();
+        assert_eq!(again.root, root);
+        assert_eq!(
+            again.result.as_ref().unwrap().commits,
+            42,
+            "same (root, token) frame must not re-spawn git"
+        );
     }
 
     #[test]

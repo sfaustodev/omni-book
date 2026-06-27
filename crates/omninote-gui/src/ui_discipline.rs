@@ -172,16 +172,42 @@ fn is_separator_row(cells: &[String]) -> bool {
             .all(|c| !c.is_empty() && c.chars().all(|ch| ch == '-' || ch == ':' || ch == ' '))
 }
 
-/// Split a markdown table row `| a | b | c |` into trimmed cell strings.
-/// Returns `None` for lines that aren't table rows.
+/// Split a markdown table row `| a | b | c |` into trimmed cell strings,
+/// honouring GFM's escaped pipe (`\|` is a literal `|` inside a cell, not a
+/// column boundary). Returns `None` for lines that aren't table rows.
+/// (triad-codex Slice 5.)
 fn split_row(line: &str) -> Option<Vec<String>> {
     let t = line.trim();
     if !t.starts_with('|') {
         return None;
     }
-    // Strip the leading and (optional) trailing pipe, then split on '|'.
+    // Strip the leading and (optional) trailing pipe, then split on unescaped '|'.
     let inner = t.trim_start_matches('|').trim_end_matches('|');
-    Some(inner.split('|').map(|c| c.trim().to_string()).collect())
+    Some(split_escaped_pipes(inner))
+}
+
+/// Split on `|` while treating `\|` as an escaped literal pipe (the `\` is
+/// dropped, the `|` kept in the cell). Other backslashes pass through verbatim.
+/// Cells are trimmed.
+fn split_escaped_pipes(s: &str) -> Vec<String> {
+    let mut cells = Vec::new();
+    let mut cur = String::new();
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if chars.peek() == Some(&'|') => {
+                cur.push('|');
+                chars.next();
+            }
+            '|' => {
+                cells.push(cur.trim().to_string());
+                cur = String::new();
+            }
+            other => cur.push(other),
+        }
+    }
+    cells.push(cur.trim().to_string());
+    cells
 }
 
 /// Locate, in a header row's cells, the column indices for ID / Title / Status.
@@ -514,11 +540,24 @@ fn is_status_cell(cell: &str) -> bool {
 
 // ──────────────────────── dispatch helper ────────────────────────
 
-/// Which discipline file a note's relative path maps to (by filename), or
-/// `None` for an ordinary note. Pure and testable — the load-bearing fork that
-/// turns a sacred file into a typed view.
+/// Which discipline file a note's relative path maps to, or `None` for an
+/// ordinary note. The match is anchored to the sacred *location*: the file must
+/// sit at the vault root (`DIARY.md`) or directly under `discipline/`
+/// (`discipline/DIARY.md`) — the only two places `DisciplineFile::resolve_path`
+/// looks. A stray `Projetos/DIARY.md` is therefore a normal note, not a typed
+/// (read-only) view that could append to the wrong file. Pure and testable.
+/// (triad-codex Slice 5.)
 pub fn discipline_file_of(rel_path: &Path) -> Option<DisciplineFile> {
     let name = rel_path.file_name()?.to_str()?;
+    // Parent must be empty (root) or exactly `discipline`.
+    let parent_ok = match rel_path.parent() {
+        None => true,
+        Some(p) if p.as_os_str().is_empty() => true,
+        Some(p) => p == Path::new("discipline"),
+    };
+    if !parent_ok {
+        return None;
+    }
     [
         DisciplineFile::Diary,
         DisciplineFile::Sprint,
@@ -569,8 +608,8 @@ impl OmniNoteApp {
         let tasks = sprint_tasks(&note.content);
 
         ui.horizontal(|ui| {
-            ui.label(RichText::new("◈").color(theme.accent).size(18.0));
-            ui.label(RichText::new(&note.title).strong().size(18.0));
+            ui.label(crate::ui_a11y::scaled_text(ui, "◈", 18.0).color(theme.accent));
+            ui.label(crate::ui_a11y::scaled_text(ui, &note.title, 18.0).strong());
             let active = tasks
                 .iter()
                 .any(|t| matches!(t.status, TaskStatus::Doing | TaskStatus::Todo));
@@ -580,7 +619,11 @@ impl OmniNoteApp {
                 ("CLOSED", theme.dim)
             };
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(RichText::new(txt).color(col).size(11.0).strong());
+                ui.label(
+                    crate::ui_a11y::scaled_text(ui, txt, 11.0)
+                        .color(col)
+                        .strong(),
+                );
             });
         });
         ui.separator();
@@ -610,9 +653,8 @@ impl OmniNoteApp {
                     }
                     ui.add_space(4.0);
                     ui.label(
-                        RichText::new(status.label())
+                        crate::ui_a11y::scaled_text(ui, status.label(), 12.0)
                             .color(status_color(&theme, status))
-                            .size(12.0)
                             .strong(),
                     );
                     for t in section {
@@ -667,52 +709,46 @@ impl OmniNoteApp {
                 ("todo", todo, TaskStatus::Todo),
             ] {
                 ui.label(
-                    RichText::new("●")
-                        .color(status_color(theme, status))
-                        .size(10.0),
+                    crate::ui_a11y::scaled_text(ui, "●", 10.0).color(status_color(theme, status)),
                 );
-                ui.label(RichText::new(format!("{label} {n}")).size(10.0).weak());
+                ui.label(crate::ui_a11y::scaled_text(ui, format!("{label} {n}"), 10.0).weak());
             }
         });
     }
 
-    /// One task row; returns true when clicked (caller routes to the spec).
+    /// One task row. When it carries an id the whole row is a focusable,
+    /// keyboard-activatable target (Enter/Space) that routes to the spec; an
+    /// id-less row is static. Returns true when activated. (triad a11y Slice 5.)
     fn draw_task_row(
         &self,
         ui: &mut egui::Ui,
         theme: &crate::theme::Theme,
         t: &SprintTask,
     ) -> bool {
-        let mut clicked = false;
-        ui.horizontal(|ui| {
+        let body = |ui: &mut egui::Ui| {
             ui.label(
-                RichText::new("▣")
-                    .color(status_color(theme, t.status))
-                    .size(13.0),
+                crate::ui_a11y::scaled_text(ui, "▣", 13.0).color(status_color(theme, t.status)),
             );
             if !t.id.is_empty() {
-                let resp = ui.add(
-                    egui::Label::new(
-                        RichText::new(&t.id)
-                            .monospace()
-                            .color(theme.accent)
-                            .size(12.0),
-                    )
-                    .sense(egui::Sense::click()),
+                ui.label(
+                    crate::ui_a11y::scaled_text(ui, &t.id, 12.0)
+                        .monospace()
+                        .color(theme.accent),
                 );
-                if resp
-                    .on_hover_cursor(egui::CursorIcon::PointingHand)
-                    .clicked()
-                {
-                    clicked = true;
-                }
             }
-            ui.label(RichText::new(&t.title).color(theme.text).size(13.0));
+            ui.label(crate::ui_a11y::scaled_text(ui, &t.title, 13.0).color(theme.text));
             if let Some(pts) = t.points {
-                ui.label(RichText::new(format!("{pts}pt")).size(10.0).weak());
+                ui.label(crate::ui_a11y::scaled_text(ui, format!("{pts}pt"), 10.0).weak());
             }
-        });
-        clicked
+        };
+        if t.id.is_empty() {
+            ui.horizontal(body);
+            false
+        } else {
+            let label = format!("{} {}", t.id, t.title);
+            let (_, activated) = crate::ui_a11y::clickable_row(ui, theme, &label, body);
+            activated
+        }
     }
 
     pub fn show_diary_view(&mut self, ui: &mut egui::Ui, note: &Note) {
@@ -726,12 +762,8 @@ impl OmniNoteApp {
             .unwrap_or_default();
 
         ui.horizontal(|ui| {
-            ui.label(RichText::new("✎").color(theme.accent).size(16.0));
-            ui.label(
-                RichText::new(format!("DIARY · {project}"))
-                    .strong()
-                    .size(16.0),
-            );
+            ui.label(crate::ui_a11y::scaled_text(ui, "✎", 16.0).color(theme.accent));
+            ui.label(crate::ui_a11y::scaled_text(ui, format!("DIARY · {project}"), 16.0).strong());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("+ Append entry").clicked() {
                     self.capture_open = false; // ensure single dialog
@@ -740,9 +772,12 @@ impl OmniNoteApp {
                 }
                 let last = days.first().map(|d| d.date.as_str()).unwrap_or("—");
                 ui.label(
-                    RichText::new(format!("{} entradas · {}", days.len(), last))
-                        .size(11.0)
-                        .weak(),
+                    crate::ui_a11y::scaled_text(
+                        ui,
+                        format!("{} entradas · {}", days.len(), last),
+                        11.0,
+                    )
+                    .weak(),
                 );
             });
         });
@@ -764,7 +799,10 @@ impl OmniNoteApp {
                                         }
                                     });
                                 }
-                                ui.label(RichText::new(&entry.snippet).color(theme.dim).size(12.0));
+                                ui.label(
+                                    crate::ui_a11y::scaled_text(ui, &entry.snippet, 12.0)
+                                        .color(theme.dim),
+                                );
                             }
                         });
                 }
@@ -778,8 +816,8 @@ impl OmniNoteApp {
         let resolved: Vec<&HumanQ> = questions.iter().filter(|q| q.resolved).collect();
 
         ui.horizontal(|ui| {
-            ui.label(RichText::new("☻").color(theme.accent).size(16.0));
-            ui.label(RichText::new(&note.title).strong().size(16.0));
+            ui.label(crate::ui_a11y::scaled_text(ui, "☻", 16.0).color(theme.accent));
+            ui.label(crate::ui_a11y::scaled_text(ui, &note.title, 16.0).strong());
         });
         ui.separator();
 
@@ -787,14 +825,19 @@ impl OmniNoteApp {
             .id_salt("human_view_scroll")
             .show(ui, |ui| {
                 ui.label(
-                    RichText::new(format!("Open questions ({})", open.len()))
-                        .strong()
-                        .size(13.0),
+                    crate::ui_a11y::scaled_text(
+                        ui,
+                        format!("Open questions ({})", open.len()),
+                        13.0,
+                    )
+                    .strong(),
                 );
                 for q in &open {
                     ui.horizontal(|ui| {
                         chip(ui, &theme, &q.id);
-                        ui.label(RichText::new(&q.question).color(theme.text).size(13.0));
+                        ui.label(
+                            crate::ui_a11y::scaled_text(ui, &q.question, 13.0).color(theme.text),
+                        );
                     });
                 }
                 ui.add_space(8.0);
@@ -806,8 +849,14 @@ impl OmniNoteApp {
                 .show(ui, |ui| {
                     for q in &resolved {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new(&q.id).monospace().color(theme.dim).size(11.0));
-                            ui.label(RichText::new(&q.question).color(theme.dim).size(12.0));
+                            ui.label(
+                                crate::ui_a11y::scaled_text(ui, &q.id, 11.0)
+                                    .monospace()
+                                    .color(theme.dim),
+                            );
+                            ui.label(
+                                crate::ui_a11y::scaled_text(ui, &q.question, 12.0).color(theme.dim),
+                            );
                         });
                     }
                 });
@@ -817,8 +866,8 @@ impl OmniNoteApp {
     pub fn show_plan_view(&mut self, ui: &mut egui::Ui, note: &Note) {
         let theme = self.discipline_theme();
         ui.horizontal(|ui| {
-            ui.label(RichText::new("◇").color(theme.accent).size(16.0));
-            ui.label(RichText::new(&note.title).strong().size(16.0));
+            ui.label(crate::ui_a11y::scaled_text(ui, "◇", 16.0).color(theme.accent));
+            ui.label(crate::ui_a11y::scaled_text(ui, &note.title, 16.0).strong());
         });
         ui.separator();
         egui::ScrollArea::vertical()
@@ -837,7 +886,9 @@ impl OmniNoteApp {
                         .id_salt(format!("plan_entry_{i}"))
                         .default_open(i == 0)
                         .show(ui, |ui| {
-                            ui.label(RichText::new(&entry.body).color(theme.dim).size(12.0));
+                            ui.label(
+                                crate::ui_a11y::scaled_text(ui, &entry.body, 12.0).color(theme.dim),
+                            );
                         });
                 }
             });
@@ -849,18 +900,23 @@ impl OmniNoteApp {
     /// `SPECS/<id>` mirror if present, else opens nothing (URL plumbing deferred).
     pub fn show_tickets_panel(&mut self, ui: &mut egui::Ui) {
         let theme = self.discipline_theme();
+        // Read the tracker files from the already-loaded `v.notes` (in memory)
+        // rather than `std::fs` — immediate mode repaints this panel every frame,
+        // and per-frame disk I/O + reparse is the busy-loop pattern. `reload_notes`
+        // keeps the in-memory copy fresh, so cache invalidation is free. If a file
+        // somehow isn't in `notes`, fall back to a one-off disk read.
         let (notion_raw, jira_raw) = match &self.vault {
             Some(v) => (
-                discipline::read_raw(&v.root, DisciplineFile::Notion).unwrap_or_default(),
-                discipline::read_raw(&v.root, DisciplineFile::Jira).unwrap_or_default(),
+                discipline_content(v, DisciplineFile::Notion),
+                discipline_content(v, DisciplineFile::Jira),
             ),
             None => (String::new(), String::new()),
         };
         let tickets = tickets_merged(&notion_raw, &jira_raw);
 
         ui.horizontal(|ui| {
-            ui.label(RichText::new("◧").color(theme.accent).size(18.0));
-            ui.label(RichText::new("Tickets").strong().size(18.0));
+            ui.label(crate::ui_a11y::scaled_text(ui, "◧", 18.0).color(theme.accent));
+            ui.label(crate::ui_a11y::scaled_text(ui, "Tickets", 18.0).strong());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // Sync controls are visible-but-disabled stubs (titlebar precedent).
                 ui.add_enabled(false, egui::Button::new("⤴"))
@@ -908,33 +964,43 @@ impl OmniNoteApp {
                         Provider::Notion => ("N", theme.accent),
                         Provider::Jira => ("J", theme.provider_jira()),
                     };
-                    let resp = ui.horizontal(|ui| {
-                        ui.label(RichText::new(tag).color(tag_col).monospace().size(11.0));
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(&t.id)
-                                    .monospace()
-                                    .color(theme.accent)
-                                    .size(12.0),
-                            )
-                            .sense(egui::Sense::click()),
-                        );
-                        ui.label(RichText::new(&t.title).color(theme.text).size(13.0));
-                        if !t.status.is_empty() {
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    ui.label(RichText::new(&t.status).color(theme.dim).size(11.0));
-                                },
+                    let row_label = format!("{} {} {}", tag, t.id, t.title);
+                    let (_, activated) =
+                        crate::ui_a11y::clickable_row(ui, &theme, &row_label, |ui| {
+                            ui.label(
+                                crate::ui_a11y::scaled_text(ui, tag, 11.0)
+                                    .color(tag_col)
+                                    .monospace(),
                             );
-                        }
-                    });
-                    if resp.response.interact(egui::Sense::click()).clicked() {
+                            ui.label(
+                                crate::ui_a11y::scaled_text(ui, &t.id, 12.0)
+                                    .monospace()
+                                    .color(theme.accent),
+                            );
+                            ui.label(
+                                crate::ui_a11y::scaled_text(ui, &t.title, 13.0).color(theme.text),
+                            );
+                            if !t.status.is_empty() {
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(
+                                            crate::ui_a11y::scaled_text(ui, &t.status, 11.0)
+                                                .color(theme.dim),
+                                        );
+                                    },
+                                );
+                            }
+                        });
+                    if activated {
                         pending = Some(t.id.clone());
                     }
                 }
                 if shown == 0 {
-                    ui.label(RichText::new("Nenhum ticket nesse filtro.").color(theme.dim));
+                    ui.label(
+                        crate::ui_a11y::scaled_text(ui, "Nenhum ticket nesse filtro.", 13.0)
+                            .color(theme.dim),
+                    );
                 }
             });
 
@@ -946,7 +1012,9 @@ impl OmniNoteApp {
     }
 
     /// DIARY `+ Append entry` modal — the one mutating affordance, reusing
-    /// `discipline::diary_quick`. Enter writes; Esc cancels.
+    /// `discipline::diary_quick`. The body is multiline, so plain Enter must
+    /// insert a newline; submission requires Cmd/Ctrl+Enter (a footer button is
+    /// also offered). Esc cancels. (triad-agy/codex Slice 5.)
     pub fn show_diary_append(&mut self, ctx: &egui::Context) {
         if !self.diary_append_open {
             return;
@@ -955,7 +1023,11 @@ impl OmniNoteApp {
             self.diary_append_open = false;
             return;
         }
-        let submit = ctx.input(|i| i.key_pressed(egui::Key::Enter));
+        // Cmd/Ctrl+Enter submits; a bare Enter falls through to the TextEdit as a
+        // newline. `command` maps to Cmd on macOS and Ctrl elsewhere.
+        let mut submit = ctx.input(|i| {
+            i.key_pressed(egui::Key::Enter) && (i.modifiers.command || i.modifiers.ctrl)
+        });
         egui::Window::new("diary_append")
             .title_bar(false)
             .resizable(false)
@@ -970,17 +1042,47 @@ impl OmniNoteApp {
                         .desired_rows(3),
                 );
                 edit.request_focus();
+                ui.horizontal(|ui| {
+                    if ui.button("Adicionar").clicked() {
+                        submit = true;
+                    }
+                    ui.label(
+                        RichText::new("⌘/Ctrl+Enter envia · Esc cancela")
+                            .weak()
+                            .size(10.0),
+                    );
+                });
             });
         if submit && !self.diary_append_text.trim().is_empty() {
             let text = self.diary_append_text.trim().to_string();
+            // The active note (likely DIARY.md itself) so we can re-sync it after
+            // diary_quick prepends to disk — otherwise the stale buffer gets
+            // autosaved back over the new entry.
+            let active_id = self.active_note.as_ref().map(|n| n.frontmatter.id.clone());
             let res = self
                 .vault
                 .as_ref()
                 .map(|v| discipline::diary_quick(&v.root, &text, None));
             match res {
                 Some(Ok(_)) => {
+                    // Our own write — don't let the watcher read it back as an
+                    // external change and pop the conflict modal.
+                    self.self_write_until =
+                        std::time::Instant::now() + std::time::Duration::from_millis(400);
                     if let Some(v) = &mut self.vault {
                         v.reload_notes();
+                    }
+                    // Refresh active_note from the reloaded vault so the typed view
+                    // shows the new entry and a later autosave can't clobber it.
+                    if let Some(id) = active_id {
+                        let fresh = self
+                            .vault
+                            .as_ref()
+                            .and_then(|v| v.notes.iter().find(|n| n.frontmatter.id == id).cloned());
+                        if let Some(fresh) = fresh {
+                            self.active_note = Some(fresh);
+                            self.dirty = false;
+                        }
                     }
                     self.toast_success("Entrada adicionada ao DIARY");
                 }
@@ -1029,14 +1131,11 @@ impl OmniNoteApp {
                             .find(|n| n.path == path)
                             .map(|n| n.frontmatter.id.clone())
                     });
-                    if ui
-                        .add(
-                            egui::Label::new(RichText::new(format!("◈ {name}")).color(theme.text))
-                                .sense(egui::Sense::click()),
-                        )
-                        .on_hover_cursor(egui::CursorIcon::PointingHand)
-                        .clicked()
-                    {
+                    let label = format!("◈ {name}");
+                    let (_, activated) = crate::ui_a11y::clickable_row(ui, &theme, &label, |ui| {
+                        ui.label(RichText::new(&label).color(theme.text));
+                    });
+                    if activated {
                         if let Some(id) = id {
                             pending = Some(id);
                         }
@@ -1044,9 +1143,27 @@ impl OmniNoteApp {
                 }
             });
         if let Some(id) = pending {
-            self.central_overlay = crate::app::CentralOverlay::None;
+            // select_note clears central_overlay on success, so the chosen sacred
+            // file surfaces in the editor even if Tickets/Timeline was open.
             self.select_note(&id);
         }
+    }
+}
+
+/// Body of a discipline file taken from the in-memory `vault.notes` (no per-frame
+/// disk I/O). Falls back to a one-off `read_raw` if the file resolves on disk but
+/// isn't in `notes`. Empty string when the file is absent. The ticket parsers
+/// only read table rows / `SCRUM-` lines, which live in the body, so the
+/// frontmatter that `read_raw` would also include is irrelevant here.
+fn discipline_content(v: &omninote_core::vault::Vault, file: DisciplineFile) -> String {
+    match file.resolve_path(&v.root) {
+        Some(path) => v
+            .notes
+            .iter()
+            .find(|n| n.path == path)
+            .map(|n| n.content.clone())
+            .unwrap_or_else(|| discipline::read_raw(&v.root, file).unwrap_or_default()),
+        None => String::new(),
     }
 }
 
@@ -1064,12 +1181,13 @@ fn ticket_matches_filter(t: &Ticket, filter: crate::app::TicketFilter) -> bool {
 
 /// A theme-tokened pill (accent wash). Used for DIARY labels and HUMAN Q-ids.
 fn chip(ui: &mut egui::Ui, theme: &crate::theme::Theme, text: &str) {
+    let size = crate::ui_a11y::scaled(ui, 11.0);
     egui::Frame::none()
         .fill(theme.row_selected())
         .rounding(egui::Rounding::same(8.0))
         .inner_margin(egui::Margin::symmetric(6.0, 1.0))
         .show(ui, |ui| {
-            ui.label(RichText::new(text).color(theme.accent).size(11.0));
+            ui.label(RichText::new(text).color(theme.accent).size(size));
         });
 }
 
@@ -1343,6 +1461,68 @@ corpo
         assert_eq!(discipline_file_of(&PathBuf::from("sprint.md")), None);
     }
 
+    #[test]
+    fn discipline_file_of_rejects_non_sacred_location() {
+        // A sacred *filename* in a non-sacred location is an ordinary note, not a
+        // typed (read-only) view — guards against a stray Projetos/DIARY.md
+        // hijacking the fork or the `+ Append entry` write. (triad-codex Slice 5.)
+        assert_eq!(
+            discipline_file_of(&PathBuf::from("Projetos/DIARY.md")),
+            None
+        );
+        assert_eq!(
+            discipline_file_of(&PathBuf::from("Archive/SPRINT.md")),
+            None
+        );
+        assert_eq!(
+            discipline_file_of(&PathBuf::from("discipline/sub/DIARY.md")),
+            None
+        );
+        // The two sacred locations still resolve.
+        assert_eq!(
+            discipline_file_of(&PathBuf::from("DIARY.md")),
+            Some(DisciplineFile::Diary)
+        );
+        assert_eq!(
+            discipline_file_of(&PathBuf::from("discipline/DIARY.md")),
+            Some(DisciplineFile::Diary)
+        );
+    }
+
+    // ─── split_row / escaped pipes ───
+
+    #[test]
+    fn split_row_respects_escaped_pipe() {
+        // A `\|` inside a cell is a literal pipe, not a column boundary, so the
+        // Status column doesn't shift and the title keeps its pipe. (triad-codex.)
+        let cells = split_row(r"| CAD-1 | Foo \| Bar | ✅ Done |").unwrap();
+        assert_eq!(cells, vec!["CAD-1", "Foo | Bar", "✅ Done"]);
+    }
+
+    #[test]
+    fn sprint_tasks_escaped_pipe_keeps_columns_aligned() {
+        let raw = "\
+| ID | Tarefa | Status |
+|----|--------|--------|
+| CAD-9 | Pipe \\| in title | ✅ Done |
+";
+        let tasks = sprint_tasks(raw);
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].id, "CAD-9");
+        assert_eq!(tasks[0].title, "Pipe | in title");
+        // Crucially the status column wasn't shifted by the escaped pipe.
+        assert_eq!(tasks[0].status, TaskStatus::Done);
+    }
+
+    #[test]
+    fn split_escaped_pipes_plain_and_trailing() {
+        assert_eq!(split_escaped_pipes("a | b | c"), vec!["a", "b", "c"]);
+        // A trailing escaped pipe produces a cell ending in '|'.
+        assert_eq!(split_escaped_pipes(r"a \| "), vec!["a |"]);
+        // A lone backslash (not before '|') is preserved.
+        assert_eq!(split_escaped_pipes(r"a\b | c"), vec![r"a\b", "c"]);
+    }
+
     proptest::proptest! {
         #![proptest_config(proptest::test_runner::Config { cases: 128, ..proptest::test_runner::Config::default() })]
 
@@ -1364,6 +1544,16 @@ corpo
         #[test]
         fn tickets_merged_never_panics(a in proptest::prelude::any::<String>(), b in proptest::prelude::any::<String>()) {
             let _ = tickets_merged(&a, &b);
+        }
+
+        #[test]
+        fn diary_days_never_panics(raw in proptest::prelude::any::<String>()) {
+            let _ = diary_days(&raw);
+        }
+
+        #[test]
+        fn split_escaped_pipes_never_panics(raw in proptest::prelude::any::<String>()) {
+            let _ = split_escaped_pipes(&raw);
         }
     }
 }

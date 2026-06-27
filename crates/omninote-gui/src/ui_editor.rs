@@ -167,11 +167,11 @@ impl OmniNoteApp {
             // Typed-view fork (Slice 5): a discipline file renders structured
             // unless the Typed↔Raw toggle forced Raw. Clone the note to satisfy the
             // borrow checker — the renderers read it while borrowing `&mut self`.
+            // Respect show_discipline_typed's bool: JIRA/NOTION return false (their
+            // structured view is the Tickets panel, not a per-note fork), so they
+            // fall through to the generic markdown body instead of a blank editor.
             if let Some(note) = self.active_note.clone() {
-                if crate::ui_discipline::discipline_file_of(&note.rel_path).is_some()
-                    && self.discipline_typed
-                {
-                    self.show_discipline_typed(ui, &note);
+                if self.discipline_typed && self.show_discipline_typed(ui, &note) {
                     return;
                 }
             }

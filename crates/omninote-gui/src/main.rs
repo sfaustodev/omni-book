@@ -2,6 +2,7 @@
 mod app;
 mod md_render;
 mod theme;
+mod ui_a11y;
 mod ui_breadcrumb;
 mod ui_calendar;
 mod ui_discipline;

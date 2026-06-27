@@ -36,22 +36,29 @@ pub fn window_label(token: &str) -> String {
 // ──────────────────────── render ────────────────────────
 
 impl OmniNoteApp {
-    /// Refresh the cached snapshot if the window token changed (or nothing is
-    /// cached). Called on panel open and on filter change — never per frame.
+    /// Refresh the cached snapshot when the vault root or window token changed
+    /// (or nothing is cached). The whole outcome — `Ok` *or* `Err` — is cached,
+    /// so a failing `git` (corrupt repo, missing binary, permission error) is
+    /// remembered instead of re-spawned every frame at 60fps. The key includes
+    /// the vault root, so switching vaults invalidates a previous vault's rows.
+    /// (triad-agy/codex Slice 5 — the busy-loop lesson.)
     fn refresh_timeline_cache(&mut self) {
         let token = self.timeline_since.clone();
-        let stale = self
-            .timeline_cache
-            .as_ref()
-            .map(|(since, _)| since != &token)
-            .unwrap_or(true);
-        if !stale {
-            return;
-        }
         if let Some(v) = &self.vault {
-            if let Ok(report) = snapshot::diff_since(&v.root, &token) {
-                self.timeline_cache = Some((token, report));
+            let fresh = self
+                .timeline_cache
+                .as_ref()
+                .map(|c| c.root != v.root || c.token != token)
+                .unwrap_or(true);
+            if !fresh {
+                return;
             }
+            let result = snapshot::diff_since(&v.root, &token);
+            self.timeline_cache = Some(crate::app::TimelineCache {
+                root: v.root.clone(),
+                token,
+                result,
+            });
         }
     }
 
@@ -63,8 +70,8 @@ impl OmniNoteApp {
             .unwrap_or_else(crate::theme::Theme::obsidian_dark);
 
         ui.horizontal(|ui| {
-            ui.label(RichText::new("◷").color(theme.accent).size(18.0));
-            ui.label(RichText::new("Timeline").strong().size(18.0));
+            ui.label(crate::ui_a11y::scaled_text(ui, "◷", 18.0).color(theme.accent));
+            ui.label(crate::ui_a11y::scaled_text(ui, "Timeline", 18.0).strong());
         });
 
         // Window filter chips — selecting one mutates the token; the cache picks
@@ -85,33 +92,53 @@ impl OmniNoteApp {
 
         self.refresh_timeline_cache();
 
-        let report = self.timeline_cache.as_ref().map(|(_, r)| r.clone());
-        let Some(report) = report else {
-            ui.label(RichText::new("Sem dados.").weak());
-            return;
+        // The cache holds the whole outcome; surface Err so a git failure is shown
+        // once (not re-spawned every frame). Clone out to drop the &self borrow.
+        let outcome = self.timeline_cache.as_ref().map(|c| c.result.clone());
+        let report = match outcome {
+            Some(Ok(r)) => r,
+            Some(Err(e)) => {
+                ui.label(crate::ui_a11y::scaled_text(ui, "Timeline indisponível.", 13.0).strong());
+                ui.label(crate::ui_a11y::scaled_text(ui, e, 11.0).color(theme.dim));
+                return;
+            }
+            None => {
+                ui.label(RichText::new("Sem dados.").weak());
+                return;
+            }
         };
 
         if !report.is_git {
             ui.label(
-                RichText::new("Inicialize git no vault para habilitar a timeline.")
-                    .color(theme.dim),
+                crate::ui_a11y::scaled_text(
+                    ui,
+                    "Inicialize git no vault para habilitar a timeline.",
+                    13.0,
+                )
+                .color(theme.dim),
             );
             return;
         }
 
         ui.label(
-            RichText::new(format!(
-                "{} · {} commit(s)",
-                window_label(&self.timeline_since),
-                report.commits
-            ))
-            .size(11.0)
+            crate::ui_a11y::scaled_text(
+                ui,
+                format!(
+                    "{} · {} commit(s)",
+                    window_label(&self.timeline_since),
+                    report.commits
+                ),
+                11.0,
+            )
             .weak(),
         );
         ui.add_space(4.0);
 
         if report.changed.is_empty() {
-            ui.label(RichText::new("Sem mudanças na janela — tente expandir.").color(theme.dim));
+            ui.label(
+                crate::ui_a11y::scaled_text(ui, "Sem mudanças na janela — tente expandir.", 13.0)
+                    .color(theme.dim),
+            );
             return;
         }
 
@@ -120,24 +147,17 @@ impl OmniNoteApp {
             .id_salt("timeline_scroll")
             .show(ui, |ui| {
                 for change in &report.changed {
-                    let resp = ui.horizontal(|ui| {
+                    let label = format!("{} {}", change_glyph(&change.status), change.path);
+                    let (_, activated) = crate::ui_a11y::clickable_row(ui, &theme, &label, |ui| {
                         ui.label(
-                            RichText::new(change_glyph(&change.status))
-                                .color(theme.accent)
-                                .size(13.0),
+                            crate::ui_a11y::scaled_text(ui, change_glyph(&change.status), 13.0)
+                                .color(theme.accent),
                         );
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(&change.path).color(theme.text).size(12.0),
-                            )
-                            .sense(egui::Sense::click()),
-                        )
+                        ui.label(
+                            crate::ui_a11y::scaled_text(ui, &change.path, 12.0).color(theme.text),
+                        );
                     });
-                    if resp
-                        .inner
-                        .on_hover_cursor(egui::CursorIcon::PointingHand)
-                        .clicked()
-                    {
+                    if activated {
                         pending = Some(change.path.clone());
                     }
                 }
