@@ -294,13 +294,17 @@ fn format_anchor(a: &Option<omninote_core::wikilinks::Anchor>) -> Option<String>
 /// Resolve or bail with the standard "no vault" error. Delegates the
 /// precedence ladder (`--vault`/env → registry active → legacy `last_vault`)
 /// to [`omninote_core::vaults::resolve_active`] — the single source of truth so
-/// other consumers (the future capture daemon) share one tested resolver.
+/// other consumers (the future capture daemon) share one tested resolver. A
+/// corrupt registry surfaces as an explicit error (fail-closed) rather than a
+/// silent fallback to the wrong vault.
 fn require_vault(arg: Option<PathBuf>) -> anyhow::Result<PathBuf> {
-    omninote_core::vaults::resolve_active(arg).ok_or_else(|| {
-        anyhow::anyhow!(
+    match omninote_core::vaults::resolve_active(arg) {
+        Ok(Some(p)) => Ok(p),
+        Ok(None) => Err(anyhow::anyhow!(
             "no vault: pass --vault, set OMNINOTE_VAULT, run `vault add`, or open the GUI once"
-        )
-    })
+        )),
+        Err(e) => Err(anyhow::anyhow!("vault resolution failed: {e}")),
+    }
 }
 
 fn parse_naive_date(s: &str) -> anyhow::Result<chrono::NaiveDate> {
@@ -579,8 +583,8 @@ async fn main() -> anyhow::Result<()> {
             // must surface as an error envelope (not a propagated anyhow exit),
             // so resolve explicitly rather than via the `?` helper.
             let vault_root = match omninote_core::vaults::resolve_active(vault_arg) {
-                Some(p) => p,
-                None => {
+                Ok(Some(p)) => p,
+                Ok(None) => {
                     let msg = "no vault: pass --vault, set OMNINOTE_VAULT, run `vault add`, or open the GUI once";
                     if json {
                         Envelope::<serde_json::Value>::error(msg).print()?;
@@ -589,9 +593,30 @@ async fn main() -> anyhow::Result<()> {
                     }
                     std::process::exit(1);
                 }
+                Err(e) => {
+                    let msg = format!("vault resolution failed: {e}");
+                    if json {
+                        Envelope::<serde_json::Value>::error(msg).print()?;
+                    } else {
+                        eprintln!("{msg}");
+                    }
+                    std::process::exit(1);
+                }
             };
-            let vault = omninote_core::vault::Vault::open(vault_root)
-                .map_err(|e| anyhow::anyhow!("vault open failed: {e}"))?;
+            // An open failure must also honor the --json envelope contract rather
+            // than propagating an anyhow error straight to stderr.
+            let vault = match omninote_core::vault::Vault::open(vault_root) {
+                Ok(v) => v,
+                Err(e) => {
+                    let msg = format!("vault open failed: {e}");
+                    if json {
+                        Envelope::<serde_json::Value>::error(msg).print()?;
+                    } else {
+                        eprintln!("{msg}");
+                    }
+                    std::process::exit(1);
+                }
+            };
             match vault.capture_line(&text) {
                 Ok(out) => {
                     if json {
