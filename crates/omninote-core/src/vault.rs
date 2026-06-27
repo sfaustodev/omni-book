@@ -532,7 +532,14 @@ fn frontmatter_from_yaml(yaml: &str) -> Frontmatter {
     // preserve — fall back to default, same as an empty frontmatter.
     let mut map: serde_yaml::Mapping = match serde_yaml::from_str(yaml) {
         Ok(m) => m,
-        Err(_) => return Frontmatter::default(),
+        // serde_yaml rejects DUPLICATE keys outright. Rather than wipe the whole
+        // note (the round-1 total-loss class), retry once on a de-duplicated copy
+        // (keep-last, YAML-lenient). This only runs after a strict parse already
+        // failed, so a well-formed note never reaches it — downside-protected.
+        Err(_) => match serde_yaml::from_str(&dedup_top_level_keys(yaml)) {
+            Ok(m) => m,
+            Err(_) => return Frontmatter::default(),
+        },
     };
 
     fn take(m: &mut serde_yaml::Mapping, k: &str) -> Option<Value> {
@@ -591,12 +598,20 @@ fn frontmatter_from_yaml(yaml: &str) -> Frontmatter {
         .and_then(as_string)
         .unwrap_or_default();
 
-    // Everything left is an unmodeled key — preserve it verbatim.
+    // Everything left is an unmodeled key — preserve it verbatim. A non-string key
+    // (`2024:`, `true:`) is coerced to its string form rather than dropped, matching
+    // the pre-fix serde-flatten behavior (`extra` is keyed by String, so it must be
+    // a String either way).
     let extra = map
         .into_iter()
-        .filter_map(|(k, v)| match k {
-            Value::String(s) => Some((s, v)),
-            _ => None,
+        .map(|(k, v)| match k {
+            Value::String(s) => (s, v),
+            other => (
+                serde_yaml::to_string(&other)
+                    .map(|s| s.trim().to_string())
+                    .unwrap_or_default(),
+                v,
+            ),
         })
         .collect();
 
@@ -613,6 +628,49 @@ fn frontmatter_from_yaml(yaml: &str) -> Frontmatter {
         summary,
         extra,
     }
+}
+
+/// Drop earlier duplicates of a top-level YAML key (keep-last, YAML-lenient), so a
+/// hand-edited note with two `tags:`/`cssclass:` lines parses instead of being
+/// rejected by serde_yaml (and then wiped). Only a column-0 `key:` line counts as
+/// top-level; indented continuation lines (block scalars, list items) ride with
+/// their parent block. Best-effort text pass used SOLELY on the strict-parse error
+/// path — a well-formed note never reaches it, so it can only recover, never harm.
+fn dedup_top_level_keys(yaml: &str) -> String {
+    // Group lines into blocks: a column-0 `key:` line plus its indented body.
+    let mut blocks: Vec<(Option<String>, Vec<&str>)> = Vec::new();
+    for line in yaml.lines() {
+        let starts_top_key = line
+            .chars()
+            .next()
+            .is_some_and(|c| c != ' ' && c != '\t' && c != '-' && c != '#')
+            && line.contains(':');
+        if starts_top_key {
+            let key = line.split(':').next().unwrap_or("").trim().to_string();
+            blocks.push((Some(key), vec![line]));
+        } else if let Some(last) = blocks.last_mut() {
+            last.1.push(line);
+        } else {
+            blocks.push((None, vec![line]));
+        }
+    }
+    // Index of the LAST block for each key; earlier blocks of a recurring key drop.
+    let mut last_idx: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for (i, (k, _)) in blocks.iter().enumerate() {
+        if let Some(k) = k {
+            last_idx.insert(k.clone(), i);
+        }
+    }
+    let mut out: Vec<&str> = Vec::new();
+    for (i, (k, lines)) in blocks.iter().enumerate() {
+        if let Some(k) = k {
+            if last_idx.get(k).copied() != Some(i) {
+                continue;
+            }
+        }
+        out.extend(lines.iter().copied());
+    }
+    out.join("\n")
 }
 
 #[cfg(test)]
@@ -1199,6 +1257,73 @@ mod tests {
         assert!(
             note.frontmatter.extra.contains_key("cssclass"),
             "cssclass perdido"
+        );
+    }
+
+    #[test]
+    fn foreign_note_duplicate_key_keeps_last_and_preserves_others() {
+        // Round-2 finding (major): serde_yaml rejects duplicate keys, which used to
+        // wipe the WHOLE note. The dedup retry (keep-last) recovers it — modeled and
+        // custom keys survive; the duplicated key takes its last value.
+        let (mut v, _d) = temp_vault();
+        let path = v.root.join("dup.md");
+        std::fs::write(
+            &path,
+            "---\nid: keepme\ntype: resumo\ncssclass: a\ncssclass: b\nauthor: Tolkien\n---\n\nCorpo.",
+        )
+        .unwrap();
+        v.reload_notes();
+        let note = v
+            .notes
+            .iter()
+            .find(|n| n.rel_path.to_string_lossy() == "dup.md")
+            .expect("nota carregada")
+            .clone();
+        assert_eq!(note.frontmatter.id, "keepme", "id explícito não pode sumir");
+        assert!(
+            note.frontmatter.extra.contains_key("author"),
+            "author perdido"
+        );
+        assert_eq!(
+            note.frontmatter
+                .extra
+                .get("cssclass")
+                .and_then(|x| x.as_str()),
+            Some("b"),
+            "duplicata fica com o último valor (keep-last)"
+        );
+        v.save_note(&note).unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("author: Tolkien"), "got:\n{raw}");
+    }
+
+    #[test]
+    fn foreign_note_non_string_key_preserved_as_string() {
+        // Round-2 finding (regression): a non-string YAML key (`2024:`, `true:`) was
+        // dropped by the new parse though the old code coerced+kept it. Now it is
+        // coerced to its string form and survives in `extra`.
+        let (mut v, _d) = temp_vault();
+        let path = v.root.join("numkey.md");
+        std::fs::write(
+            &path,
+            "---\nid: n1\ntype: resumo\n2024: retro\ntrue: yes\n---\n\nCorpo.",
+        )
+        .unwrap();
+        v.reload_notes();
+        let note = v
+            .notes
+            .iter()
+            .find(|n| n.rel_path.to_string_lossy() == "numkey.md")
+            .expect("nota carregada")
+            .clone();
+        assert!(
+            note.frontmatter.extra.contains_key("2024"),
+            "chave numérica perdida: {:?}",
+            note.frontmatter.extra
+        );
+        assert!(
+            note.frontmatter.extra.contains_key("true"),
+            "chave bool perdida"
         );
     }
 
