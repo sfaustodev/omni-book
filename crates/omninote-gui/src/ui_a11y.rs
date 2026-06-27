@@ -53,9 +53,47 @@ pub fn clickable_row(
     // `Label::new(..).sense(click())` lacks.
     let inner = ui.horizontal(|ui| content(ui));
     let id = inner.response.id;
+
+    // Expand the rect to cover the full available width of the panel.
+    let mut rect = inner.response.rect;
+    let available_w = ui.available_width();
+    rect.max.x = (rect.min.x + available_w).max(rect.max.x);
+
     let resp = ui
-        .interact(inner.response.rect, id, egui::Sense::click())
+        .interact(rect, id, egui::Sense::click())
         .on_hover_cursor(egui::CursorIcon::PointingHand);
+
+    let hc = theme.is_high_contrast();
+    if selected {
+        if hc {
+            ui.painter().rect_stroke(
+                resp.rect,
+                egui::Rounding::same(4.0),
+                egui::Stroke::new(2.0, theme.accent),
+            );
+        } else {
+            ui.painter()
+                .rect_filled(resp.rect, egui::Rounding::same(4.0), theme.row_selected());
+        }
+        let bar = egui::Rect::from_min_max(
+            resp.rect.min,
+            egui::pos2(resp.rect.min.x + 3.0, resp.rect.max.y),
+        );
+        ui.painter()
+            .rect_filled(bar, egui::Rounding::same(1.5), theme.accent);
+    } else if resp.hovered() {
+        if hc {
+            ui.painter().rect_stroke(
+                resp.rect,
+                egui::Rounding::same(4.0),
+                egui::Stroke::new(1.0, theme.accent),
+            );
+        } else {
+            ui.painter()
+                .rect_filled(resp.rect, egui::Rounding::same(4.0), theme.row_hover());
+        }
+    }
+
     if resp.has_focus() {
         ui.painter().rect_stroke(
             resp.rect.expand(1.0),
