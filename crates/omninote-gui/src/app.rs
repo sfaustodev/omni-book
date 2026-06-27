@@ -91,6 +91,29 @@ fn register_custom_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
+/// Consume a command-only `\` key press (the right-rail toggle shortcut),
+/// returning whether one fired this frame. Matched command-ONLY instead of via
+/// `InputState::consume_shortcut`, whose logical match ignores extra Alt/Shift:
+/// on layouts where `\` is typed with AltGr (delivered as Ctrl+Alt) that would
+/// trip the toggle and swallow the character in a focused editor.
+fn consume_rail_shortcut(i: &mut egui::InputState) -> bool {
+    let mut hit = false;
+    i.events.retain(|e| {
+        let is_rail = matches!(
+            e,
+            egui::Event::Key {
+                key: egui::Key::Backslash,
+                pressed: true,
+                modifiers,
+                ..
+            } if modifiers.command_only()
+        );
+        hit |= is_rail;
+        !is_rail
+    });
+    hit
+}
+
 pub struct OmniNoteApp {
     pub vault: Option<Vault>,
     pub active_note: Option<Note>,
@@ -518,33 +541,25 @@ impl eframe::App for OmniNoteApp {
             egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
             egui::Key::H,
         );
-        let rail_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Backslash);
-
-        let (
-            new,
-            toggle_edit,
-            settings,
-            close,
-            palette,
-            capture,
-            toggle_dark,
-            tickets,
-            timeline,
-            rail,
-        ) = ctx.input_mut(|i| {
-            (
-                i.consume_shortcut(&new_sc),
-                i.consume_shortcut(&edit_sc),
-                i.consume_shortcut(&settings_sc),
-                i.consume_shortcut(&close_sc),
-                i.consume_shortcut(&palette_sc),
-                i.consume_shortcut(&capture_sc),
-                i.consume_shortcut(&dark_sc),
-                i.consume_shortcut(&tickets_sc),
-                i.consume_shortcut(&timeline_sc),
-                i.consume_shortcut(&rail_sc),
-            )
-        });
+        let (new, toggle_edit, settings, close, palette, capture, toggle_dark, tickets, timeline) =
+            ctx.input_mut(|i| {
+                (
+                    i.consume_shortcut(&new_sc),
+                    i.consume_shortcut(&edit_sc),
+                    i.consume_shortcut(&settings_sc),
+                    i.consume_shortcut(&close_sc),
+                    i.consume_shortcut(&palette_sc),
+                    i.consume_shortcut(&capture_sc),
+                    i.consume_shortcut(&dark_sc),
+                    i.consume_shortcut(&tickets_sc),
+                    i.consume_shortcut(&timeline_sc),
+                )
+            });
+        // Cmd/Ctrl+\ toggles the right rail, matched command-ONLY (see
+        // `consume_rail_shortcut`) rather than via `consume_shortcut`, whose
+        // logical match ignores extra Alt/Shift — that would let AltGr (Ctrl+Alt)
+        // typing of `\` on international layouts trip the toggle and eat the char.
+        let rail = ctx.input_mut(consume_rail_shortcut);
         if tickets {
             self.toggle_central_overlay(CentralOverlay::Tickets);
         }
@@ -830,6 +845,60 @@ mod tests {
             app.vault.as_ref().unwrap().config.right_rail_open,
             open0,
             "inert while an overlay is active"
+        );
+    }
+
+    #[test]
+    fn backslash_rail_shortcut_is_command_only() {
+        // Regression for the AltGr trap (triad round 2, codex + empirical probe):
+        // the rail toggle must fire on plain Cmd/Ctrl+\ but NOT when Alt or Shift
+        // is also held — otherwise AltGr (delivered as Ctrl+Alt) typing of `\` on
+        // international layouts would toggle the rail and swallow the character.
+        // Drives the real consume_rail_shortcut path, so a revert to the logical
+        // consume_shortcut (which ignores extra modifiers) makes this go red.
+        use egui::{Event, Key, Modifiers};
+        let fires = |mods: Modifiers| -> bool {
+            let ctx = egui::Context::default();
+            let mut input = egui::RawInput::default();
+            input.events.push(Event::Key {
+                key: Key::Backslash,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: mods,
+            });
+            let mut hit = false;
+            let _ = ctx.run(input, |ctx| {
+                hit = ctx.input_mut(consume_rail_shortcut);
+            });
+            hit
+        };
+        assert!(
+            fires(Modifiers::COMMAND),
+            "plain Cmd/Ctrl+\\ toggles the rail"
+        );
+        assert!(
+            !fires(Modifiers {
+                alt: true,
+                ..Modifiers::COMMAND
+            }),
+            "Cmd+Alt+\\ must not fire"
+        );
+        assert!(
+            !fires(Modifiers {
+                shift: true,
+                ..Modifiers::COMMAND
+            }),
+            "Cmd+Shift+\\ must not fire"
+        );
+        assert!(
+            !fires(Modifiers {
+                ctrl: true,
+                alt: true,
+                command: true,
+                ..Default::default()
+            }),
+            "AltGr (Ctrl+Alt) typing of backslash must not fire"
         );
     }
 
