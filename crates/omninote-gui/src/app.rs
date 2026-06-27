@@ -2,9 +2,40 @@ use crate::theme;
 use crate::watcher::VaultWatcher;
 use eframe::egui;
 use egui::RichText;
+use omninote_core::snapshot::SnapshotReport;
 use omninote_core::types::{ConfirmAction, Note, NoteType};
 use omninote_core::vault::Vault;
 use std::path::PathBuf;
+
+/// Cached Timeline outcome, keyed by the vault root and window token it was
+/// computed for. `result` holds the whole outcome — `Ok(report)` (git or non-git)
+/// or `Err(message)` — so a failing `git` is remembered instead of re-spawned
+/// every frame, and a vault switch is detected by the `root` mismatch.
+pub struct TimelineCache {
+    pub root: PathBuf,
+    pub token: String,
+    pub result: Result<SnapshotReport, String>,
+}
+
+/// Which full-panel overlay replaces the editor in the central area (Slice 5).
+/// Transient (not persisted), mirroring `palette_open`. `None` = the editor.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CentralOverlay {
+    #[default]
+    None,
+    Tickets,
+    Timeline,
+}
+
+/// Status filter for the Tickets panel chip row.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TicketFilter {
+    #[default]
+    All,
+    Doing,
+    Todo,
+    Done,
+}
 
 /// OpenDyslexic, bundled in the binary (OFL). Selectable via the a11y font setting.
 const OPEN_DYSLEXIC_OTF: &[u8] = include_bytes!("../assets/fonts/OpenDyslexic-Regular.otf");
@@ -102,6 +133,26 @@ pub struct OmniNoteApp {
     /// while the editor has it so the right-click format menu can act on it even
     /// after the menu steals focus.
     pub editor_sel: Option<(usize, usize)>,
+    /// CAD-25 Slice 5 — full-panel overlay (Tickets / Timeline) over the editor.
+    pub central_overlay: CentralOverlay,
+    /// Tickets panel: status filter + free-text query (transient).
+    pub tickets_filter: TicketFilter,
+    pub tickets_query: String,
+    /// Timeline panel: window token (`1d`/`7d`/`30d`) + a git-diff result cached
+    /// by `(vault root, token)`. The whole outcome is stored — including `Err`
+    /// and the non-git case — so a failing `git` never re-spawns every frame
+    /// (the busy-loop lesson) and a vault switch can't serve the old vault's
+    /// rows. The cache is keyed (not just token-checked) to invalidate on either
+    /// axis. (triad-agy/codex Slice 5.)
+    pub timeline_since: String,
+    pub timeline_cache: Option<TimelineCache>,
+    /// Typed↔Raw toggle for discipline files: `true` renders the structured view,
+    /// `false` falls back to the generic editor. Defaults to typed.
+    pub discipline_typed: bool,
+    /// DIARY `+ Append entry` dialog state (the one mutating affordance — reuses
+    /// `discipline::diary_quick`).
+    pub diary_append_open: bool,
+    pub diary_append_text: String,
 }
 
 impl OmniNoteApp {
@@ -153,6 +204,14 @@ impl OmniNoteApp {
             calendar_open: false,
             calendar_ym: None,
             editor_sel: None,
+            central_overlay: CentralOverlay::None,
+            tickets_filter: TicketFilter::All,
+            tickets_query: String::new(),
+            timeline_since: "7d".to_string(),
+            timeline_cache: None,
+            discipline_typed: true,
+            diary_append_open: false,
+            diary_append_text: String::new(),
         };
         app.apply_style(&cc.egui_ctx);
         app
@@ -217,6 +276,10 @@ impl OmniNoteApp {
                     let theme = theme_for_config(&v.config);
                     self.vault = Some(v);
                     self.active_note = None;
+                    // Drop the Timeline cache — it belongs to the old vault root.
+                    // (The cache is also root-keyed, but clearing here frees it
+                    // promptly and matches the watcher/reload pattern.)
+                    self.timeline_cache = None;
                     self.save_last_vault();
                     // Re-apply style + full theme (preset-aware) from the new vault's
                     // config so font and theme take effect immediately, not next toggle.
@@ -312,6 +375,19 @@ impl OmniNoteApp {
         true
     }
 
+    /// Toggle a full-panel overlay: a second press of the same target returns to
+    /// the editor. Opening Timeline drops the cache so it refreshes on next show.
+    pub fn toggle_central_overlay(&mut self, target: CentralOverlay) {
+        self.central_overlay = if self.central_overlay == target {
+            CentralOverlay::None
+        } else {
+            target
+        };
+        if self.central_overlay == CentralOverlay::Timeline {
+            self.timeline_cache = None;
+        }
+    }
+
     pub fn select_note(&mut self, id: &str) {
         self.flush_active();
         if let Some(v) = &self.vault {
@@ -319,6 +395,12 @@ impl OmniNoteApp {
                 self.active_note = Some(note.clone());
                 self.editing = false;
                 self.dirty = false;
+                // A successful selection must surface the editor: clear any
+                // full-panel overlay (Tickets/Timeline) so the chosen note isn't
+                // hidden behind it. Covers every entry point — sidebar, palette,
+                // discipline section, timeline row — and select_note_by_target,
+                // which delegates here. (triad-agy/codex Slice 5.)
+                self.central_overlay = CentralOverlay::None;
                 // Drop any selection carried from the previous note — a stale
                 // byte range must never act on a different buffer. The consumer
                 // also clamps, but resetting at the switch is the real cure.
@@ -365,6 +447,9 @@ impl OmniNoteApp {
         if std::time::Instant::now() < self.self_write_until {
             return;
         }
+        // An external .md change can shift the git diff the Timeline view caches;
+        // drop it so the next Timeline render recomputes over fresh state.
+        self.timeline_cache = None;
         // Did the active note's file change?
         let active_path = self.active_note.as_ref().map(|n| n.path.clone());
         let active_changed = match &active_path {
@@ -425,8 +510,16 @@ impl eframe::App for OmniNoteApp {
             egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
             egui::Key::D,
         );
+        let tickets_sc = egui::KeyboardShortcut::new(
+            egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+            egui::Key::J,
+        );
+        let timeline_sc = egui::KeyboardShortcut::new(
+            egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+            egui::Key::H,
+        );
 
-        let (new, toggle_edit, settings, close, palette, capture, toggle_dark) =
+        let (new, toggle_edit, settings, close, palette, capture, toggle_dark, tickets, timeline) =
             ctx.input_mut(|i| {
                 (
                     i.consume_shortcut(&new_sc),
@@ -436,8 +529,16 @@ impl eframe::App for OmniNoteApp {
                     i.consume_shortcut(&palette_sc),
                     i.consume_shortcut(&capture_sc),
                     i.consume_shortcut(&dark_sc),
+                    i.consume_shortcut(&tickets_sc),
+                    i.consume_shortcut(&timeline_sc),
                 )
             });
+        if tickets {
+            self.toggle_central_overlay(CentralOverlay::Tickets);
+        }
+        if timeline {
+            self.toggle_central_overlay(CentralOverlay::Timeline);
+        }
         if palette {
             self.palette_open = !self.palette_open;
             self.palette_query.clear();
@@ -511,13 +612,23 @@ impl eframe::App for OmniNoteApp {
         self.show_statusbar(ctx);
         self.show_sidebar(ctx);
         self.show_right_rail(ctx);
-        self.show_editor(ctx);
+        // Central area: an overlay (Tickets/Timeline) replaces the editor when active.
+        match self.central_overlay {
+            CentralOverlay::None => self.show_editor(ctx),
+            CentralOverlay::Tickets => {
+                egui::CentralPanel::default().show(ctx, |ui| self.show_tickets_panel(ui));
+            }
+            CentralOverlay::Timeline => {
+                egui::CentralPanel::default().show(ctx, |ui| self.show_timeline_view(ui));
+            }
+        }
         self.show_modals(ctx);
         // Overlays (Slice 4) render on top of the panels.
         self.show_command_palette(ctx);
         self.show_quick_capture(ctx);
         self.show_calendar(ctx);
         self.show_onboarding(ctx);
+        self.show_diary_append(ctx);
         self.show_toasts(ctx);
     }
 
@@ -569,8 +680,203 @@ mod tests {
             calendar_open: false,
             calendar_ym: None,
             editor_sel: None,
+            central_overlay: CentralOverlay::None,
+            tickets_filter: TicketFilter::All,
+            tickets_query: String::new(),
+            timeline_since: "7d".to_string(),
+            timeline_cache: None,
+            discipline_typed: true,
+            diary_append_open: false,
+            diary_append_text: String::new(),
         };
         (app, dir)
+    }
+
+    #[test]
+    fn central_overlay_defaults_to_none() {
+        let (app, _dir) = test_app();
+        assert_eq!(app.central_overlay, CentralOverlay::None);
+        assert!(app.discipline_typed, "typed view on by default");
+        assert_eq!(app.timeline_since, "7d");
+    }
+
+    #[test]
+    fn diary_append_flushes_unsaved_active_edits() {
+        // Regression: appending a DIARY entry while the active note has unsaved
+        // edits must flush them first — otherwise the reload that re-reads notes
+        // from disk replaces the dirty buffer with stale content and the edits are
+        // silently lost.
+        let (mut app, _dir) = test_app();
+        let (id, path) = {
+            let n = &app.vault.as_ref().unwrap().notes[0];
+            (n.frontmatter.id.clone(), n.path.clone())
+        };
+        app.select_note(&id);
+        app.active_note.as_mut().unwrap().content = "EDITADO EM MEMORIA".into();
+        app.dirty = true;
+
+        app.append_diary_entry("nova entrada do diario").unwrap();
+
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            on_disk.contains("EDITADO EM MEMORIA"),
+            "unsaved active-note edit must be flushed before the diary reload"
+        );
+        assert!(!app.dirty, "active note is clean after a successful append");
+    }
+
+    #[test]
+    fn toggle_central_overlay_flips_tickets_and_timeline() {
+        // Mirrors what Cmd+Shift+J / Cmd+Shift+H call: a press opens, a second
+        // press of the same target returns to None (the editor).
+        let (mut app, _dir) = test_app();
+        app.toggle_central_overlay(CentralOverlay::Tickets);
+        assert_eq!(app.central_overlay, CentralOverlay::Tickets);
+        app.toggle_central_overlay(CentralOverlay::Tickets);
+        assert_eq!(app.central_overlay, CentralOverlay::None);
+
+        app.toggle_central_overlay(CentralOverlay::Timeline);
+        assert_eq!(app.central_overlay, CentralOverlay::Timeline);
+        // Switching directly to the other overlay (not toggling off) works too.
+        app.toggle_central_overlay(CentralOverlay::Tickets);
+        assert_eq!(app.central_overlay, CentralOverlay::Tickets);
+    }
+
+    #[test]
+    fn opening_timeline_clears_stale_cache() {
+        let (mut app, dir) = test_app();
+        // Seed a stale cache, then open Timeline — it must drop so the next show
+        // refreshes (avoids serving a window's results under a different token).
+        app.timeline_cache = Some(TimelineCache {
+            root: dir.path().to_path_buf(),
+            token: "1d".to_string(),
+            result: Ok(omninote_core::snapshot::SnapshotReport {
+                since: "1 days ago".into(),
+                is_git: false,
+                commits: 0,
+                changed: Vec::new(),
+            }),
+        });
+        app.toggle_central_overlay(CentralOverlay::Timeline);
+        assert!(app.timeline_cache.is_none(), "cache cleared on open");
+    }
+
+    #[test]
+    fn timeline_view_over_non_git_vault_populates_cache_once() {
+        // A non-git tempdir vault: snapshot degrades to is_git=false; the panel
+        // must cache that result once and not re-spawn git every frame.
+        let (mut app, _dir) = test_app();
+        app.central_overlay = CentralOverlay::Timeline;
+        let ctx = egui::Context::default();
+        let _ = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                app.show_timeline_view(ui);
+            });
+        });
+        let cache = app.timeline_cache.as_ref().expect("cache populated");
+        assert_eq!(cache.token, "7d", "keyed on the active window token");
+        let report = cache.result.as_ref().expect("non-git vault is Ok, not Err");
+        assert!(!report.is_git, "tempdir vault is not a git work tree");
+
+        // A second frame with the same token must not replace the cache instance.
+        let before = cache.result.clone();
+        let _ = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                app.show_timeline_view(ui);
+            });
+        });
+        assert_eq!(
+            app.timeline_cache.as_ref().unwrap().result,
+            before,
+            "same-token frame reuses the cached report"
+        );
+    }
+
+    #[test]
+    fn tickets_panel_tolerates_missing_jira() {
+        // A Notion-only vault (no JIRA.md) must render the panel without error.
+        let (mut app, dir) = test_app();
+        std::fs::create_dir_all(dir.path().join("discipline")).unwrap();
+        std::fs::write(
+            dir.path().join("discipline/NOTION.md"),
+            "# NOTION\n\n| ID | Title | Status |\n|--|--|--|\n| CAD-1 | x | 🌱 Backlog |\n",
+        )
+        .unwrap();
+        app.central_overlay = CentralOverlay::Tickets;
+        let ctx = egui::Context::default();
+        // No panic / no error despite JIRA.md being absent.
+        let _ = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                app.show_tickets_panel(ui);
+            });
+        });
+        assert!(app.error_msg.is_none());
+    }
+
+    #[test]
+    fn select_note_clears_central_overlay() {
+        // Selecting a note while Tickets/Timeline is open must surface the editor
+        // (clear the overlay) so the chosen note isn't hidden. (triad Slice 5.)
+        let (mut app, _dir) = test_app();
+        let id_a = app
+            .vault
+            .as_ref()
+            .unwrap()
+            .notes
+            .iter()
+            .find(|n| n.title == "A")
+            .unwrap()
+            .frontmatter
+            .id
+            .clone();
+        app.central_overlay = CentralOverlay::Tickets;
+        app.select_note(&id_a);
+        assert_eq!(
+            app.central_overlay,
+            CentralOverlay::None,
+            "a successful select must drop the overlay"
+        );
+
+        // A no-op select (unknown id) leaves the overlay untouched.
+        app.central_overlay = CentralOverlay::Timeline;
+        app.select_note("does-not-exist");
+        assert_eq!(app.central_overlay, CentralOverlay::Timeline);
+    }
+
+    #[test]
+    fn timeline_cache_keyed_by_root_and_token_survives_frames() {
+        // Regression for the busy-loop: a populated cache for the active
+        // (root, token) must be reused — not re-spawned — on subsequent frames,
+        // even when the underlying result was a non-git Ok (and, by the same
+        // keying, an Err would be remembered too). (triad Slice 5.)
+        let (mut app, _dir) = test_app();
+        app.central_overlay = CentralOverlay::Timeline;
+        let ctx = egui::Context::default();
+        let run = |app: &mut OmniNoteApp| {
+            let _ = ctx.run(Default::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| app.show_timeline_view(ui));
+            });
+        };
+        run(&mut app);
+        let first = app.timeline_cache.as_ref().expect("cache populated");
+        let root = first.root.clone();
+        assert_eq!(first.token, "7d");
+        // Mutating the cached result in place lets us detect a spurious refresh:
+        // if the panel re-ran diff_since it would overwrite this sentinel.
+        app.timeline_cache.as_mut().unwrap().result = Ok(SnapshotReport {
+            since: "sentinel".into(),
+            is_git: false,
+            commits: 42,
+            changed: Vec::new(),
+        });
+        run(&mut app);
+        let again = app.timeline_cache.as_ref().unwrap();
+        assert_eq!(again.root, root);
+        assert_eq!(
+            again.result.as_ref().unwrap().commits,
+            42,
+            "same (root, token) frame must not re-spawn git"
+        );
     }
 
     #[test]

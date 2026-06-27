@@ -164,6 +164,18 @@ impl OmniNoteApp {
             self.show_tab_strip(ui);
             self.show_breadcrumb(ui);
 
+            // Typed-view fork (Slice 5): a discipline file renders structured
+            // unless the Typed↔Raw toggle forced Raw. Clone the note to satisfy the
+            // borrow checker — the renderers read it while borrowing `&mut self`.
+            // Respect show_discipline_typed's bool: JIRA/NOTION return false (their
+            // structured view is the Tickets panel, not a per-note fork), so they
+            // fall through to the generic markdown body instead of a blank editor.
+            if let Some(note) = self.active_note.clone() {
+                if self.discipline_typed && self.show_discipline_typed(ui, &note) {
+                    return;
+                }
+            }
+
             egui::ScrollArea::vertical()
                 .id_salt("editor_scroll")
                 .show(ui, |ui| {

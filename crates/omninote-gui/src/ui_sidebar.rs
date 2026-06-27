@@ -94,6 +94,7 @@ impl OmniNoteApp {
                 egui::ScrollArea::vertical()
                     .id_salt("sidebar_scroll")
                     .show(ui, |ui| {
+                        self.show_discipline_section(ui);
                         self.show_folder_tree(ui, PathBuf::new());
                         self.show_notes_in_folder(ui, &PathBuf::new());
                     });
@@ -111,6 +112,13 @@ impl OmniNoteApp {
                     }
                     if ui.button("📥 Importar").clicked() {
                         self.show_import = true;
+                    }
+                    if ui
+                        .button("◷ Timeline")
+                        .on_hover_text("Mudanças do vault (Cmd+Shift+H)")
+                        .clicked()
+                    {
+                        self.toggle_central_overlay(crate::app::CentralOverlay::Timeline);
                     }
                 });
             });

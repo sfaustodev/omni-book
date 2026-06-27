@@ -37,6 +37,7 @@ impl OmniNoteApp {
         let crumb = breadcrumb_path(&note.rel_path);
         let words = word_count(&note.content);
         let note_id = note.frontmatter.id.clone();
+        let is_discipline = crate::ui_discipline::discipline_file_of(&note.rel_path).is_some();
 
         ui.horizontal(|ui| {
             if !crumb.is_empty() {
@@ -56,6 +57,22 @@ impl OmniNoteApp {
                 };
                 if ui.button(glyph).on_hover_text(hint).clicked() {
                     self.editing = !self.editing;
+                }
+                // Typed↔Raw toggle — only for discipline files, which have a
+                // structured view to switch away from.
+                if is_discipline {
+                    let label = if self.discipline_typed {
+                        "≣ Raw"
+                    } else {
+                        "◈ Typed"
+                    };
+                    if ui
+                        .button(label)
+                        .on_hover_text("Alternar vista tipada / markdown cru")
+                        .clicked()
+                    {
+                        self.discipline_typed = !self.discipline_typed;
+                    }
                 }
             });
         });

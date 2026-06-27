@@ -2,8 +2,10 @@
 mod app;
 mod md_render;
 mod theme;
+mod ui_a11y;
 mod ui_breadcrumb;
 mod ui_calendar;
+mod ui_discipline;
 mod ui_editor;
 mod ui_modals;
 mod ui_palette;
@@ -11,6 +13,7 @@ mod ui_right_rail;
 mod ui_sidebar;
 mod ui_statusbar;
 mod ui_tabs;
+mod ui_timeline;
 mod ui_titlebar;
 mod ui_toasts;
 mod watcher;
