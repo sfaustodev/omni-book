@@ -147,9 +147,12 @@ impl Theme {
         visuals.menu_rounding = egui::Rounding::same(8.0);
 
         ctx.set_visuals(visuals);
-        // Breathing room: a touch more space between rows and inside buttons.
+        // Breathing room inside buttons/menus. Only set the HORIZONTAL item gap —
+        // `item_spacing.y` is the accessibility line-height owned by `apply_style()`.
+        // Overwriting the whole vec2 here wiped the user's line spacing on every
+        // theme/vault switch that re-runs apply() without apply_style() after it.
         ctx.style_mut(|style| {
-            style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+            style.spacing.item_spacing.x = 8.0;
             style.spacing.button_padding = egui::vec2(9.0, 5.0);
             style.spacing.menu_margin = egui::Margin::symmetric(6.0, 6.0);
         });

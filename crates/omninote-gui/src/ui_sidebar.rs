@@ -277,6 +277,16 @@ impl OmniNoteApp {
                 theme.text,
             );
             let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+            // Re-announce to AccessKit — the hand-painted row replaced
+            // selectable_label, which would otherwise drop screen-reader semantics.
+            resp.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::SelectableLabel,
+                    true,
+                    is_active,
+                    &label,
+                )
+            });
             if resp.clicked() {
                 pending_select = Some(id.clone());
             }
