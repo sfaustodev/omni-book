@@ -145,6 +145,59 @@ pub fn save(path: &Path, registry: &VaultRegistry) -> Result<(), String> {
     std::fs::write(path, text).map_err(|e| format!("write {}: {e}", path.display()))
 }
 
+/// Path to the legacy single-vault pointer `~/.config/omninote/last_vault`.
+/// `None` if the platform has no config dir.
+pub fn last_vault_path() -> Option<PathBuf> {
+    Some(dirs::config_dir()?.join("omninote").join("last_vault"))
+}
+
+/// Resolve the active vault root, single source of truth for every consumer
+/// (CLI today, the capture daemon tomorrow). Precedence:
+/// `arg` → `OMNINOTE_VAULT` env → active entry in the registry → legacy
+/// `last_vault` file.
+///
+/// An explicitly-set active entry wins outright — even if its path is missing,
+/// we surface *that* vault (so the open fails loudly on the intended target)
+/// rather than silently falling through to a different legacy vault. Legacy is
+/// consulted only when the registry names no active entry.
+pub fn resolve_active(arg: Option<PathBuf>) -> Option<PathBuf> {
+    let registry = registry_path().and_then(|rp| load(&rp).ok());
+    let last_vault = last_vault_path();
+    resolve_with(arg, env_vault(), registry.as_ref(), last_vault.as_deref())
+}
+
+/// Read the `OMNINOTE_VAULT` env override (empty/unset → `None`).
+fn env_vault() -> Option<PathBuf> {
+    std::env::var_os("OMNINOTE_VAULT")
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+}
+
+/// Pure resolution core: every external source is injected so the precedence
+/// ladder is unit-testable without touching the real config dir or env. The
+/// `last_vault` path is read here (its *contents* are the source) and the file
+/// must point at an existing directory to count.
+fn resolve_with(
+    arg: Option<PathBuf>,
+    env: Option<PathBuf>,
+    registry: Option<&VaultRegistry>,
+    last_vault: Option<&Path>,
+) -> Option<PathBuf> {
+    if let Some(p) = arg.or(env) {
+        return Some(p);
+    }
+    if let Some(reg) = registry {
+        if let Some(active) = reg.active.as_deref() {
+            return reg.get(active).map(|e| e.path.clone());
+        }
+    }
+    let last = last_vault?;
+    std::fs::read_to_string(last)
+        .ok()
+        .map(|s| PathBuf::from(s.trim()))
+        .filter(|p| p.exists())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,5 +381,128 @@ path = "/n/home"
         let path = tmp.path().join("vaults.toml");
         std::fs::write(&path, "this = is = broken").unwrap();
         assert!(load(&path).is_err());
+    }
+
+    fn registry_with_active(name: &str, path: &str) -> VaultRegistry {
+        let mut reg = VaultRegistry::default();
+        reg.add(name, path).unwrap();
+        reg
+    }
+
+    #[test]
+    fn resolve_active_precedence_arg_over_env_over_registry_over_last_vault() {
+        let tmp = tempfile::tempdir().unwrap();
+        // last_vault file points at an existing dir so it could win if reached.
+        let last_dir = tmp.path().join("from_last");
+        std::fs::create_dir_all(&last_dir).unwrap();
+        let last_file = tmp.path().join("last_vault");
+        std::fs::write(&last_file, last_dir.to_string_lossy().as_bytes()).unwrap();
+        let reg = registry_with_active("work", "/from/registry");
+
+        // arg beats everything.
+        assert_eq!(
+            resolve_with(
+                Some(PathBuf::from("/from/arg")),
+                Some(PathBuf::from("/from/env")),
+                Some(&reg),
+                Some(&last_file),
+            ),
+            Some(PathBuf::from("/from/arg"))
+        );
+
+        // env beats registry + last when arg absent.
+        assert_eq!(
+            resolve_with(
+                None,
+                Some(PathBuf::from("/from/env")),
+                Some(&reg),
+                Some(&last_file),
+            ),
+            Some(PathBuf::from("/from/env"))
+        );
+
+        // registry beats last when arg + env absent.
+        assert_eq!(
+            resolve_with(None, None, Some(&reg), Some(&last_file)),
+            Some(PathBuf::from("/from/registry"))
+        );
+
+        // last_vault is the final fallback.
+        assert_eq!(
+            resolve_with(None, None, None, Some(&last_file)),
+            Some(last_dir)
+        );
+    }
+
+    #[test]
+    fn resolve_active_registry_active_wins_even_when_path_missing() {
+        // A named active entry surfaces its (possibly missing) path rather than
+        // silently falling through to last_vault — so the open fails loudly on
+        // the intended target.
+        let tmp = tempfile::tempdir().unwrap();
+        let last_dir = tmp.path().join("legacy");
+        std::fs::create_dir_all(&last_dir).unwrap();
+        let last_file = tmp.path().join("last_vault");
+        std::fs::write(&last_file, last_dir.to_string_lossy().as_bytes()).unwrap();
+        let reg = registry_with_active("ghost", "/does/not/exist");
+
+        assert_eq!(
+            resolve_with(None, None, Some(&reg), Some(&last_file)),
+            Some(PathBuf::from("/does/not/exist"))
+        );
+    }
+
+    #[test]
+    fn resolve_active_dangling_active_does_not_fall_through_to_last() {
+        // The registry names an active entry → that intent is honored even when
+        // the entry is missing from the list: resolution yields None rather than
+        // silently selecting the legacy last_vault. Same contract as the prior
+        // CLI-local resolver this promoted.
+        let tmp = tempfile::tempdir().unwrap();
+        let last_dir = tmp.path().join("fallback");
+        std::fs::create_dir_all(&last_dir).unwrap();
+        let last_file = tmp.path().join("last_vault");
+        std::fs::write(&last_file, last_dir.to_string_lossy().as_bytes()).unwrap();
+        let reg = VaultRegistry {
+            active: Some("ghost".into()),
+            vaults: vec![VaultEntry {
+                name: "a".into(),
+                path: "/a".into(),
+            }],
+        };
+
+        assert_eq!(resolve_with(None, None, Some(&reg), Some(&last_file)), None);
+    }
+
+    #[test]
+    fn resolve_active_last_vault_ignored_when_path_absent() {
+        // last_vault file names a directory that no longer exists → None, not a
+        // phantom path.
+        let tmp = tempfile::tempdir().unwrap();
+        let last_file = tmp.path().join("last_vault");
+        std::fs::write(&last_file, b"/vanished/vault").unwrap();
+        assert_eq!(resolve_with(None, None, None, Some(&last_file)), None);
+    }
+
+    #[test]
+    fn resolve_active_none_when_no_source_yields_anything() {
+        assert_eq!(resolve_with(None, None, None, None), None);
+        // An empty registry with no active entry contributes nothing.
+        let reg = VaultRegistry::default();
+        assert_eq!(resolve_with(None, None, Some(&reg), None), None);
+    }
+
+    #[test]
+    fn resolve_active_trims_last_vault_contents() {
+        // The legacy file may carry a trailing newline; the path must still match.
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("trimmed");
+        std::fs::create_dir_all(&target).unwrap();
+        let last_file = tmp.path().join("last_vault");
+        std::fs::write(&last_file, format!("{}\n", target.display())).unwrap();
+        assert_eq!(
+            resolve_with(None, None, None, Some(&last_file)),
+            Some(target)
+        );
     }
 }
