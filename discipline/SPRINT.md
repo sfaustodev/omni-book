@@ -49,7 +49,7 @@ CAD-23 foi fatiado em 4 subtasks shipáveis (per decisão AskUserQuestion 2026-0
 | 5 | Views tipadas (`ui_discipline` sprint/diary/human/tickets + `ui_timeline` snapshot) | 🌱 não começou |
 | 6 | AI surfaces (`ui_chat` RAG real + `ui_dictation` escondido até CAD-23.3) + a11y polish | 🌱 não começou |
 
-> **Estado real (2026-06-27):** 4 de 6 slices mergeadas no main (1-3 via #23/#24/#25, Slice 4 via #26 close-out). Falta Slice 5 (views tipadas) + Slice 6 (AI chat/dictation), e ui-polish (rebase+PR pendente). Arquivos `ui_chat.rs`/`ui_dictation.rs`/`ui_discipline.rs`/`ui_timeline.rs` do §5.2 ainda não existem. ~67% do CAD-25 Fase B. **Sec:** lopdf 0.34→0.42 + quinn-proto 0.11.15 (RUSTSEC-2026-0187/0185, advisories de jun/26) via #27.
+> **Estado real (2026-06-27):** 4 de 6 slices mergeadas no main (1-3 via #23/#24/#25, Slice 4 via #26 close-out) **+ ui-polish merged (#28)** com 4 fixes de a11y do trio COMPLETO (Claude+Codex+agy): fonte-grande (altura/clip proporcional), foco-teclado, alto-contraste. Falta Slice 5 (views tipadas) + Slice 6 (AI chat/dictation). Arquivos `ui_chat.rs`/`ui_dictation.rs`/`ui_discipline.rs`/`ui_timeline.rs` do §5.2 ainda não existem. ~67% do CAD-25 Fase B. **Sec:** lopdf 0.34→0.42 + quinn-proto 0.11.15 (RUSTSEC-2026-0187/0185, advisories de jun/26) via #27.
 
 ### Dependency graph
 

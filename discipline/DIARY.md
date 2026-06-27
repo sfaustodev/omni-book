@@ -16,11 +16,14 @@
   - Round 2 (9 findings → 2 confirmados): duplicate-key wipe (serde_yaml rejeita chave duplicada → dedup keep-last retry, só no caminho de erro) + non-string-key drop (coage para string). Corrigidos.
 - **463 testes** (de 450), fmt/clippy `-D warnings`/build --release verdes.
 - **Dep security bump (PR #27):** `lopdf 0.34→0.42` (RUSTSEC-2026-0187 stack overflow PDF aninhado) + `quinn-proto →0.11.15` (RUSTSEC-2026-0185 memory exhaustion). Ambos pré-existentes (advisory DB de jun/2026 atualizou; main passava até 02/jun). `pdf.rs` API estável — zero mudança de código.
+- **ui-polish (PR #28, merged):** cards de nota + chrome arredondado. **Trio COMPLETO** (Claude+Codex+agy autorizado). Duo Claude+Codex achou 2 Alertas (theme.apply apagava line-height a11y; perda de screen-reader). O agy (3º olho, whole-repo) achou **+4 Alertas de a11y** que o duo subestimou como Info: altura fixa encavalava com fonte 24pt, char-width fixo vazava texto sob editor, `Sense::click` perdia foco de teclado (Tab pulava a lista), washes translúcidos invisíveis no alto contraste. Todos corrigidos (altura/clip proporcional, focus ring + Enter/Space, borda sólida no HC); agy round 3 APROVOU. CI verde → merge.
 
-**Blocked:**
-- Trio oficial (Codex+Agy) diferido — quota/OAuth. Substituído por review adversarial interno pré-merge.
+**Resolved (era Blocked):**
+- Trio oficial rodou (no ui-polish): Codex via `codex exec`, agy via `agy --dangerously-skip-permissions` (Fausto autorizou). O **Codex escreveu no DIARY/PLAN sozinho** (revertido) — lição: passar "não toque em `discipline/`" no prompt do Codex também, não só do agy.
 
 **Lição [data-loss-fix-que-causava-data-loss]:** um fix de preservação só vale se o teste exercita as formas que QUEBRAM o parse, não só o caminho feliz. O probe inicial (frontmatter válido) passou e me levou ao flatten; o adversarial multi-round achou que o flatten não bastava (`unwrap_or_default` engolia tudo a montante). Gate mecânico proposto: teste de round-trip de frontmatter SEMPRE inclui um caso estrangeiro inválido (type desconhecido / sem id / scalar onde espera seq / chave duplicada).
+
+**Lição [terceiro-olho-do-trio]:** num diff de 73 linhas "só visual" (ui-polish), o duo Claude+Codex normalizou 4 regressões de a11y como Info ou não-viu; o agy (whole-repo + foco a11y) elevou-as a Alerta com cenário concreto (fonte 24pt encavalando, Tab pulando a lista, alto-contraste invisível). O 3º agente não é redundância — cobre um eixo (a11y / repo-inteiro) que os outros dois não pisam. Vale o custo mesmo em PR pequeno. Cada eixo que escapa → linha em `triad-coverage/scripts/blind-spots.md`.
 
 **Files changed:** `crates/omninote-core/{types,vault}.rs`, `omninote-gui/{ui_editor,app}.rs`, `omninote-ai/{auto_tag,rag}.rs`, `omninote-core/{search,resolver}.rs`, `Cargo.toml`.
 
