@@ -4,6 +4,30 @@
 
 ---
 
+## 2026-06-02 — triad-codex-section — wikilinks adversarial tests
+
+### Contexto
+
+Prompt Fausto: escrever somente testes Rust adversariais para `omninote_core::wikilinks::{section_under_heading, extract_spans}`. Não tocar código de produção. Salvar classes cobertas em `reports_fausto/triad-cov-codex-slice3.md`.
+
+### Escopo
+
+- Novo integration test `crates/omninote-core/tests/triad_codex_section.rs` com `use omninote_core::wikilinks::*;`.
+- Cobrir `section_under_heading`: fence não-fechada, fence aninhada com marcador trocado, ATX inválido `#######`, heading sem espaço, heading EOF sem corpo, duplicado primeiro, CJK/multibyte, input vazio, input gigante linear.
+- Cobrir `extract_spans`: links colados, inline code, embed sem fechamento, spans byte-exatos com multibyte.
+
+### Verificação
+
+```bash
+PATH="/opt/homebrew/opt/rustup/bin:$PATH" cargo test -p omninote-core
+```
+
+### Next single-step
+
+Criar testes + relatório, rodar suite crate completa.
+
+---
+
 ## 2026-05-13 — feat/cad-12-test-coverage — qa+security hardening
 
 ### Contexto

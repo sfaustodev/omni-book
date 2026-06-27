@@ -2,6 +2,126 @@ use crate::app::OmniNoteApp;
 use egui::RichText;
 use omninote_core::types::NoteType;
 
+#[derive(Clone, Copy)]
+pub enum MdFormat {
+    Bold,
+    Italic,
+    Strike,
+    InlineCode,
+    H1,
+    H2,
+    H3,
+    Bullet,
+    Numbered,
+    Todo,
+    Quote,
+    Link,
+    CodeBlock,
+}
+
+impl MdFormat {
+    fn label(self) -> &'static str {
+        match self {
+            MdFormat::Bold => "𝐁  Negrito",
+            MdFormat::Italic => "𝐼  Itálico",
+            MdFormat::Strike => "S̶  Tachado",
+            MdFormat::InlineCode => "‹›  Código",
+            MdFormat::Link => "🔗  Link",
+            MdFormat::CodeBlock => "▦  Bloco de código",
+            MdFormat::H1 => "H1  Título",
+            MdFormat::H2 => "H2  Subtítulo",
+            MdFormat::H3 => "H3  Seção",
+            MdFormat::Bullet => "•  Lista",
+            MdFormat::Numbered => "1.  Lista numerada",
+            MdFormat::Todo => "☐  Tarefa",
+            MdFormat::Quote => "❝  Citação",
+        }
+    }
+    fn is_line_prefix(self) -> bool {
+        matches!(
+            self,
+            MdFormat::H1
+                | MdFormat::H2
+                | MdFormat::H3
+                | MdFormat::Bullet
+                | MdFormat::Numbered
+                | MdFormat::Todo
+                | MdFormat::Quote
+        )
+    }
+}
+
+/// Apply a markdown format over the byte range `sel` (start,end; may be empty
+/// for a bare cursor) and return the new content. Wrapping formats surround the
+/// selection; line-prefix formats insert at the start of every line the range
+/// touches. Byte offsets are snapped to char boundaries so multibyte text is
+/// never split. Pure → unit-testable.
+pub fn apply_md_format(content: &str, sel: (usize, usize), fmt: MdFormat) -> String {
+    // snap + order + clamp
+    let mut a = sel.0.min(content.len());
+    let mut b = sel.1.min(content.len());
+    if a > b {
+        std::mem::swap(&mut a, &mut b);
+    }
+    while a < content.len() && !content.is_char_boundary(a) {
+        a += 1;
+    }
+    while b < content.len() && !content.is_char_boundary(b) {
+        b += 1;
+    }
+
+    if fmt.is_line_prefix() {
+        let prefix = match fmt {
+            MdFormat::H1 => "# ",
+            MdFormat::H2 => "## ",
+            MdFormat::H3 => "### ",
+            MdFormat::Bullet => "- ",
+            MdFormat::Numbered => "1. ",
+            MdFormat::Todo => "- [ ] ",
+            MdFormat::Quote => "> ",
+            _ => unreachable!(),
+        };
+        // First line start = byte after the last '\n' before `a` (or 0).
+        let first = content[..a].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        // Collect every line-start offset within [first, b]: `first`, plus each
+        // index after a '\n' that falls before `b`.
+        let mut starts = vec![first];
+        for (i, ch) in content.char_indices() {
+            // `i + 1 < b` (not `i < b`): a selection ending right after a '\n'
+            // must not prefix the empty line that newline opens. CAD-25b Slice 4.
+            if ch == '\n' && i + 1 > first && i + 1 < b {
+                starts.push(i + 1);
+            }
+        }
+        starts.sort_unstable();
+        starts.dedup();
+        // Insert from last to first so earlier offsets stay valid.
+        let mut out = content.to_string();
+        for &s in starts.iter().rev() {
+            out.insert_str(s, prefix);
+        }
+        return out;
+    }
+
+    let (pre, post): (&str, String) = match fmt {
+        MdFormat::Bold => ("**", "**".into()),
+        MdFormat::Italic => ("_", "_".into()),
+        MdFormat::Strike => ("~~", "~~".into()),
+        MdFormat::InlineCode => ("`", "`".into()),
+        MdFormat::CodeBlock => ("```\n", "\n```".into()),
+        MdFormat::Link => ("[", "](url)".into()),
+        _ => unreachable!(),
+    };
+    format!(
+        "{}{}{}{}{}",
+        &content[..a],
+        pre,
+        &content[a..b],
+        post,
+        &content[b..]
+    )
+}
+
 /// v0.8 — items shown in the slash menu when user types `/` at start of a line.
 /// Returns (label, snippet). Snippet replaces the `/` character.
 fn slash_menu_items() -> &'static [(&'static str, &'static str)] {
@@ -170,7 +290,47 @@ impl OmniNoteApp {
                 .unwrap_or(note.content.len())
         });
         let has_focus = output.response.has_focus();
+        // Selection (byte range) for the format menu. cursor_range carries CHAR
+        // indices; convert to bytes like the math/slash code does below.
+        let char_to_byte = |ci: usize| {
+            note.content
+                .char_indices()
+                .nth(ci)
+                .map(|(b, _)| b)
+                .unwrap_or(note.content.len())
+        };
+        let sel = output.cursor_range.map(|r| {
+            let a = char_to_byte(r.primary.ccursor.index);
+            let b = char_to_byte(r.secondary.ccursor.index);
+            (a.min(b), a.max(b))
+        });
+        let mut pending_format: Option<MdFormat> = None;
+        output.response.context_menu(|ui| {
+            ui.label(egui::RichText::new("Formatar").size(10.0).weak());
+            ui.separator();
+            use MdFormat::*;
+            for fmt in [Bold, Italic, Strike, InlineCode, Link] {
+                if ui.button(fmt.label()).clicked() {
+                    pending_format = Some(fmt);
+                    ui.close_menu();
+                }
+            }
+            ui.separator();
+            for fmt in [H1, H2, H3, Bullet, Numbered, Todo, Quote, CodeBlock] {
+                if ui.button(fmt.label()).clicked() {
+                    pending_format = Some(fmt);
+                    ui.close_menu();
+                }
+            }
+        });
         drop(output);
+
+        // Persist the selection only while the editor actually reported one — when
+        // the context menu opens it steals focus and cursor_range goes None, so
+        // keeping the last value lets the chosen format act on the prior selection.
+        if let Some(s) = sel {
+            self.editor_sel = Some(s);
+        }
 
         let math_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Equals);
         if has_focus && ui.input_mut(|i| i.consume_shortcut(&math_sc)) {
@@ -256,6 +416,16 @@ impl OmniNoteApp {
                 }
             }
         });
+
+        if let Some(fmt) = pending_format {
+            let note = self.active_note.as_mut().unwrap();
+            let range = self
+                .editor_sel
+                .map(|(a, b)| (a.min(note.content.len()), b.min(note.content.len())))
+                .unwrap_or((note.content.len(), note.content.len()));
+            note.content = apply_md_format(&note.content, range, fmt);
+            self.dirty = true;
+        }
     }
 
     fn show_view_panel(&mut self, ui: &mut egui::Ui) {
@@ -331,5 +501,63 @@ impl OmniNoteApp {
 
         // Backlinks moved to the right rail (ui_right_rail.rs), which resolves
         // them target-side via the core index instead of a substring match.
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bold_wraps_selection() {
+        assert_eq!(
+            apply_md_format("hello world", (0, 5), MdFormat::Bold),
+            "**hello** world"
+        );
+    }
+    #[test]
+    fn italic_empty_inserts_markers_at_cursor() {
+        assert_eq!(apply_md_format("ab", (1, 1), MdFormat::Italic), "a__b");
+    }
+    #[test]
+    fn link_wraps_selection() {
+        assert_eq!(
+            apply_md_format("site", (0, 4), MdFormat::Link),
+            "[site](url)"
+        );
+    }
+    #[test]
+    fn heading_prefixes_current_line() {
+        assert_eq!(
+            apply_md_format("foo\nbar", (4, 7), MdFormat::H2),
+            "foo\n## bar"
+        );
+    }
+    #[test]
+    fn bullet_prefixes_each_line_in_selection() {
+        assert_eq!(
+            apply_md_format("a\nb", (0, 3), MdFormat::Bullet),
+            "- a\n- b"
+        );
+    }
+    #[test]
+    fn multibyte_selection_not_split() {
+        // "café" is 5 bytes; wrapping the whole word must not panic or split 'é'.
+        assert_eq!(apply_md_format("café", (0, 5), MdFormat::Bold), "**café**");
+    }
+    #[test]
+    fn range_past_end_is_clamped() {
+        assert_eq!(apply_md_format("hi", (0, 99), MdFormat::InlineCode), "`hi`");
+    }
+    #[test]
+    fn line_prefix_selection_ending_in_newline_skips_empty_line() {
+        // CAD-25b Slice 4: a selection ending right after a '\n' must NOT prefix
+        // the empty trailing line that newline opens.
+        assert_eq!(
+            apply_md_format("a\nb\n", (0, 4), MdFormat::Bullet),
+            "- a\n- b\n"
+        );
+        // Single line selected through its trailing newline → only that line.
+        assert_eq!(apply_md_format("foo\n", (0, 4), MdFormat::H2), "## foo\n");
     }
 }

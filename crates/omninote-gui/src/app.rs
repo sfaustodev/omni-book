@@ -45,11 +45,18 @@ fn register_custom_fonts(ctx: &egui::Context) {
         theme::OPEN_DYSLEXIC_NAME.to_owned(),
         egui::FontData::from_static(OPEN_DYSLEXIC_OTF),
     );
-    fonts
-        .families
-        .entry(egui::FontFamily::Name(theme::OPEN_DYSLEXIC_NAME.into()))
-        .or_default()
-        .insert(0, theme::OPEN_DYSLEXIC_NAME.to_owned());
+    // OpenDyslexic ships no emoji/symbol glyphs. Register it as the primary face
+    // but append egui's default proportional chain (which carries the emoji
+    // fonts) as fallback — otherwise every icon renders as tofu when the
+    // dyslexic family is active.
+    let mut chain = vec![theme::OPEN_DYSLEXIC_NAME.to_owned()];
+    if let Some(default_prop) = fonts.families.get(&egui::FontFamily::Proportional) {
+        chain.extend(default_prop.iter().cloned());
+    }
+    fonts.families.insert(
+        egui::FontFamily::Name(theme::OPEN_DYSLEXIC_NAME.into()),
+        chain,
+    );
     ctx.set_fonts(fonts);
 }
 
@@ -77,6 +84,24 @@ pub struct OmniNoteApp {
     /// v0.8 — index of the `/` that opened the slash menu, in note.content.
     /// None when menu is closed. Set when `/` is typed at start of line.
     pub slash_menu_pos: Option<usize>,
+    /// CAD-25 Slice 4 — command palette (Ctrl+P) open state + query + selection.
+    pub palette_open: bool,
+    pub palette_query: String,
+    pub palette_sel: usize,
+    /// In-app quick-capture popup (Ctrl+Shift+Space) — appends to Inbox.md.
+    pub capture_open: bool,
+    pub capture_text: String,
+    /// Bottom-right toast queue (action feedback).
+    pub toasts: Vec<crate::ui_toasts::Toast>,
+    /// One-shot onboarding shown on first run with an empty vault.
+    pub onboarding_done: bool,
+    /// Calendar popover (daily-note picker) open state + viewed (year, month).
+    pub calendar_open: bool,
+    pub calendar_ym: Option<(i32, u32)>,
+    /// Last known selection/cursor byte range in the content editor, captured
+    /// while the editor has it so the right-click format menu can act on it even
+    /// after the menu steals focus.
+    pub editor_sel: Option<(usize, usize)>,
 }
 
 impl OmniNoteApp {
@@ -118,6 +143,16 @@ impl OmniNoteApp {
             self_write_until: std::time::Instant::now(),
             external_change_pending: false,
             slash_menu_pos: None,
+            palette_open: false,
+            palette_query: String::new(),
+            palette_sel: 0,
+            capture_open: false,
+            capture_text: String::new(),
+            toasts: Vec::new(),
+            onboarding_done: false,
+            calendar_open: false,
+            calendar_ym: None,
+            editor_sel: None,
         };
         app.apply_style(&cc.egui_ctx);
         app
@@ -174,6 +209,11 @@ impl OmniNoteApp {
             match Vault::open(path) {
                 Ok(v) => {
                     let root = v.root.clone();
+                    let name = root
+                        .file_name()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    let count = v.notes.len();
                     let theme = theme_for_config(&v.config);
                     self.vault = Some(v);
                     self.active_note = None;
@@ -183,8 +223,12 @@ impl OmniNoteApp {
                     self.apply_style(ctx);
                     theme.apply(ctx);
                     self.watcher = VaultWatcher::new(&root).ok();
+                    self.toast_info(format!("Vault “{name}” · {count} notas"));
                 }
-                Err(e) => self.error_msg = Some(e),
+                Err(e) => {
+                    self.toast_error(format!("Falha ao abrir vault: {e}"));
+                    self.error_msg = Some(e);
+                }
             }
         }
     }
@@ -275,6 +319,11 @@ impl OmniNoteApp {
                 self.active_note = Some(note.clone());
                 self.editing = false;
                 self.dirty = false;
+                // Drop any selection carried from the previous note — a stale
+                // byte range must never act on a different buffer. The consumer
+                // also clamps, but resetting at the switch is the real cure.
+                // CAD-25b Slice 4. Covers select_note_by_target too (delegates here).
+                self.editor_sel = None;
             }
         }
     }
@@ -367,20 +416,37 @@ impl eframe::App for OmniNoteApp {
         let edit_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::E);
         let settings_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Comma);
         let close_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::W);
+        let palette_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::P);
+        let capture_sc = egui::KeyboardShortcut::new(
+            egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+            egui::Key::Space,
+        );
         let dark_sc = egui::KeyboardShortcut::new(
             egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
             egui::Key::D,
         );
 
-        let (new, toggle_edit, settings, close, toggle_dark) = ctx.input_mut(|i| {
-            (
-                i.consume_shortcut(&new_sc),
-                i.consume_shortcut(&edit_sc),
-                i.consume_shortcut(&settings_sc),
-                i.consume_shortcut(&close_sc),
-                i.consume_shortcut(&dark_sc),
-            )
-        });
+        let (new, toggle_edit, settings, close, palette, capture, toggle_dark) =
+            ctx.input_mut(|i| {
+                (
+                    i.consume_shortcut(&new_sc),
+                    i.consume_shortcut(&edit_sc),
+                    i.consume_shortcut(&settings_sc),
+                    i.consume_shortcut(&close_sc),
+                    i.consume_shortcut(&palette_sc),
+                    i.consume_shortcut(&capture_sc),
+                    i.consume_shortcut(&dark_sc),
+                )
+            });
+        if palette {
+            self.palette_open = !self.palette_open;
+            self.palette_query.clear();
+            self.palette_sel = 0;
+        }
+        if capture {
+            self.capture_open = true;
+            self.capture_text.clear();
+        }
         if close && self.active_note.is_some() {
             // Only drop the note if it actually persisted — otherwise keep it
             // open (flush_active sets error_msg) so edits aren't silently lost.
@@ -447,6 +513,12 @@ impl eframe::App for OmniNoteApp {
         self.show_right_rail(ctx);
         self.show_editor(ctx);
         self.show_modals(ctx);
+        // Overlays (Slice 4) render on top of the panels.
+        self.show_command_palette(ctx);
+        self.show_quick_capture(ctx);
+        self.show_calendar(ctx);
+        self.show_onboarding(ctx);
+        self.show_toasts(ctx);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -454,5 +526,75 @@ impl eframe::App for OmniNoteApp {
         if let Some(v) = &self.vault {
             let _ = v.save_config();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build an OmniNoteApp headless (no eframe::CreationContext) over a temp vault
+    /// with two notes "A" and "B". Mirrors `new()`'s struct init minus the egui-ctx
+    /// side effects (fonts/theme/image-loaders), which logic tests don't need.
+    fn test_app() -> (OmniNoteApp, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut vault = Vault::open(dir.path().to_path_buf()).unwrap();
+        vault.create_note(None, "A", NoteType::Resumo).unwrap();
+        vault.create_note(None, "B", NoteType::Resumo).unwrap();
+        let app = OmniNoteApp {
+            vault: Some(vault),
+            active_note: None,
+            editing: false,
+            query: String::new(),
+            type_filter: None,
+            show_settings: false,
+            show_new: false,
+            show_import: false,
+            confirm_action: None,
+            dirty: false,
+            last_save: std::time::Instant::now(),
+            error_msg: None,
+            md_cache: egui_commonmark::CommonMarkCache::default(),
+            watcher: None,
+            self_write_until: std::time::Instant::now(),
+            external_change_pending: false,
+            slash_menu_pos: None,
+            palette_open: false,
+            palette_query: String::new(),
+            palette_sel: 0,
+            capture_open: false,
+            capture_text: String::new(),
+            toasts: Vec::new(),
+            onboarding_done: false,
+            calendar_open: false,
+            calendar_ym: None,
+            editor_sel: None,
+        };
+        (app, dir)
+    }
+
+    #[test]
+    fn select_note_resets_stale_editor_selection() {
+        // CAD-25b Slice 4 (review finding): switching notes must clear editor_sel so
+        // a stale byte range from the previous note can't act on a different buffer.
+        let (mut app, _dir) = test_app();
+        let id_b = app
+            .vault
+            .as_ref()
+            .unwrap()
+            .notes
+            .iter()
+            .find(|n| n.title == "B")
+            .unwrap()
+            .frontmatter
+            .id
+            .clone();
+        app.editor_sel = Some((5, 10));
+        app.select_note(&id_b);
+        assert_eq!(
+            app.editor_sel, None,
+            "select_note deve limpar a seleção stale"
+        );
+        assert!(app.active_note.is_some(), "nota B deve ficar ativa");
     }
 }

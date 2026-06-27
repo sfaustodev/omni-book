@@ -44,11 +44,15 @@ impl OmniNoteApp {
                                 crate::app::theme_for_config(&v.config).apply(ctx);
                             }
                         }
-                        // Stubs — backend lands in a later slice.
+                        if ui.button("📅").on_hover_text("Calendário").clicked() {
+                            self.calendar_open = !self.calendar_open;
+                        }
+                        if ui.button("⌘P").on_hover_text("Paleta (Cmd+P)").clicked() {
+                            self.palette_open = !self.palette_open;
+                        }
+                        // Dictation stub — backend is CAD-23.3 (Slice 6 wires UI).
                         ui.add_enabled(false, egui::Button::new("🎙"))
                             .on_disabled_hover_text("Ditado (em breve)");
-                        ui.add_enabled(false, egui::Button::new("⌘P"))
-                            .on_disabled_hover_text("Paleta de comandos (em breve)");
                     });
                 });
             });

@@ -45,6 +45,7 @@ egui_commonmark = "0.18"
 egui_extras = { version = "0.29", features = ["all_loaders"] }
 rfd = "0.15"
 notify = "6"
+fuzzy-matcher = "0.3"
 
 # CLI deps
 clap = { version = "4", features = ["derive", "env"] }

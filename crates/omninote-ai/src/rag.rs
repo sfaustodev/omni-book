@@ -301,6 +301,7 @@ mod tests {
                 created: String::new(),
                 aliases: vec![],
                 summary: String::new(),
+                extra: Default::default(),
             },
             title: title.into(),
             content: body.into(),

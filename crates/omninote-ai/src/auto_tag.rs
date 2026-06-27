@@ -386,6 +386,7 @@ mod tests {
                 created: String::new(),
                 aliases: vec![],
                 summary: String::new(),
+                extra: Default::default(),
             },
             title: PathBuf::from(rel)
                 .file_stem()
