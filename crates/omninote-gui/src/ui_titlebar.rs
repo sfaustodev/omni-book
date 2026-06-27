@@ -50,6 +50,13 @@ impl OmniNoteApp {
                         if ui.button("⌘P").on_hover_text("Paleta (Cmd+P)").clicked() {
                             self.palette_open = !self.palette_open;
                         }
+                        if ui
+                            .button("◧ Tickets")
+                            .on_hover_text("Tickets (Cmd+Shift+J)")
+                            .clicked()
+                        {
+                            self.toggle_central_overlay(crate::app::CentralOverlay::Tickets);
+                        }
                         // Dictation stub — backend is CAD-23.3 (Slice 6 wires UI).
                         ui.add_enabled(false, egui::Button::new("🎙"))
                             .on_disabled_hover_text("Ditado (em breve)");
