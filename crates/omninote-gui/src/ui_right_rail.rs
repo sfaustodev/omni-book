@@ -77,6 +77,19 @@ impl OmniNoteApp {
                 .is_some_and(|v| v.config.right_rail_open)
     }
 
+    /// Flip the right-rail open/closed preference. No-op while a full-panel
+    /// overlay (Tickets/Timeline) is active: the rail isn't part of that view, so
+    /// every toggle affordance (sidebar, tabs, palette, `Cmd+\`) routes here and
+    /// is inert there. Mirrors the overlay gate in `right_rail_visible`.
+    pub(crate) fn toggle_right_rail(&mut self) {
+        if self.central_overlay != CentralOverlay::None {
+            return;
+        }
+        if let Some(v) = &mut self.vault {
+            v.config.right_rail_open = !v.config.right_rail_open;
+        }
+    }
+
     pub fn show_right_rail(&mut self, ctx: &egui::Context) {
         if !self.right_rail_visible() {
             return;

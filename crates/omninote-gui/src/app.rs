@@ -518,26 +518,41 @@ impl eframe::App for OmniNoteApp {
             egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
             egui::Key::H,
         );
+        let rail_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Backslash);
 
-        let (new, toggle_edit, settings, close, palette, capture, toggle_dark, tickets, timeline) =
-            ctx.input_mut(|i| {
-                (
-                    i.consume_shortcut(&new_sc),
-                    i.consume_shortcut(&edit_sc),
-                    i.consume_shortcut(&settings_sc),
-                    i.consume_shortcut(&close_sc),
-                    i.consume_shortcut(&palette_sc),
-                    i.consume_shortcut(&capture_sc),
-                    i.consume_shortcut(&dark_sc),
-                    i.consume_shortcut(&tickets_sc),
-                    i.consume_shortcut(&timeline_sc),
-                )
-            });
+        let (
+            new,
+            toggle_edit,
+            settings,
+            close,
+            palette,
+            capture,
+            toggle_dark,
+            tickets,
+            timeline,
+            rail,
+        ) = ctx.input_mut(|i| {
+            (
+                i.consume_shortcut(&new_sc),
+                i.consume_shortcut(&edit_sc),
+                i.consume_shortcut(&settings_sc),
+                i.consume_shortcut(&close_sc),
+                i.consume_shortcut(&palette_sc),
+                i.consume_shortcut(&capture_sc),
+                i.consume_shortcut(&dark_sc),
+                i.consume_shortcut(&tickets_sc),
+                i.consume_shortcut(&timeline_sc),
+                i.consume_shortcut(&rail_sc),
+            )
+        });
         if tickets {
             self.toggle_central_overlay(CentralOverlay::Tickets);
         }
         if timeline {
             self.toggle_central_overlay(CentralOverlay::Timeline);
+        }
+        if rail {
+            self.toggle_right_rail();
         }
         if palette {
             self.palette_open = !self.palette_open;
@@ -790,6 +805,32 @@ mod tests {
 
         app.central_overlay = CentralOverlay::None;
         let _ = ctx.run(Default::default(), |ctx| app.show_right_rail(ctx));
+    }
+
+    #[test]
+    fn toggle_right_rail_no_op_under_overlay() {
+        // Every rail-toggle affordance (sidebar/tabs/palette button, Cmd+\) routes
+        // through toggle_right_rail. Over the editor it flips the preference; under
+        // a full-panel overlay it is inert — the rail has nothing to toggle.
+        let (mut app, _dir) = test_app();
+        let open0 = app.vault.as_ref().unwrap().config.right_rail_open;
+
+        app.toggle_right_rail();
+        assert_eq!(
+            app.vault.as_ref().unwrap().config.right_rail_open,
+            !open0,
+            "toggles over the editor"
+        );
+        app.toggle_right_rail();
+        assert_eq!(app.vault.as_ref().unwrap().config.right_rail_open, open0);
+
+        app.central_overlay = CentralOverlay::Tickets;
+        app.toggle_right_rail();
+        assert_eq!(
+            app.vault.as_ref().unwrap().config.right_rail_open,
+            open0,
+            "inert while an overlay is active"
+        );
     }
 
     #[test]

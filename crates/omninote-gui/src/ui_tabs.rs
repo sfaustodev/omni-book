@@ -44,14 +44,14 @@ impl OmniNoteApp {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let rail_open = self.vault.as_ref().map(|v| v.config.right_rail_open);
                 if let Some(open) = rail_open {
+                    let rail_enabled = self.central_overlay == crate::app::CentralOverlay::None;
                     if ui
-                        .selectable_label(open, "⊞")
+                        .add_enabled(rail_enabled, egui::SelectableLabel::new(open, "⊞"))
                         .on_hover_text("Painel direito")
+                        .on_disabled_hover_text("Painel direito (indisponível em overlay)")
                         .clicked()
                     {
-                        if let Some(v) = &mut self.vault {
-                            v.config.right_rail_open = !v.config.right_rail_open;
-                        }
+                        self.toggle_right_rail();
                     }
                 }
                 // Undo/redo: no edit-history backend yet — visible but disabled.
