@@ -743,6 +743,38 @@ mod tests {
     }
 
     #[test]
+    fn right_rail_hidden_under_central_overlay() {
+        // The rail renders per-active-note metadata, so it must hide while a
+        // full-panel overlay (Tickets/Timeline) replaces the editor — otherwise
+        // it shows stale context for the last note next to a global view.
+        let (mut app, _dir) = test_app();
+        app.vault.as_mut().unwrap().config.right_rail_open = true;
+        assert!(app.right_rail_visible(), "visible over the editor");
+
+        app.toggle_central_overlay(CentralOverlay::Tickets);
+        assert!(
+            !app.right_rail_visible(),
+            "hidden under the Tickets overlay"
+        );
+
+        app.toggle_central_overlay(CentralOverlay::Timeline);
+        assert!(
+            !app.right_rail_visible(),
+            "hidden under the Timeline overlay"
+        );
+
+        app.toggle_central_overlay(CentralOverlay::Timeline);
+        assert!(app.right_rail_visible(), "returns with the editor");
+
+        // The overlay guard is independent of the user's open/closed toggle.
+        app.vault.as_mut().unwrap().config.right_rail_open = false;
+        assert!(
+            !app.right_rail_visible(),
+            "still hidden when toggled closed"
+        );
+    }
+
+    #[test]
     fn opening_timeline_clears_stale_cache() {
         let (mut app, dir) = test_app();
         // Seed a stale cache, then open Timeline — it must drop so the next show
