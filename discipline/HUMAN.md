@@ -13,6 +13,20 @@ _(nenhuma — Q-01 a Q-08 resolvidas em batch 2026-05-22)_
 
 ## Resolved
 
+### Q-09 · Adicionar tokio + omninote-ai ao crate GUI (Slice 6 chat) · raised 2026-06-27 · resolved 2026-06-27 · context: CAD-25b Slice 6
+**Por que eu perguntei:** quebra o invariante "GUI slim" (§0 #11) e muda o contrato de build — tokio (pin do workspace = `full`) + omninote-ai no binário GUI tem custo de tamanho.
+**Decisão (Fausto):** APROVADO. O chat RAG-real (ui_chat) precisa do async runtime + omninote-ai no GUI. Desbloqueia o Slice 6.
+**A aplicar:** ao implementar Slice 6 — `omninote-ai.workspace = true` + `tokio.workspace = true` em `crates/omninote-gui/Cargo.toml`. Reavaliar `full` vs `["rt","macros"]` (binary size) no momento.
+
+### Q-10 · CAD-24 hotkey global: daemon standalone vs fold no GUI · raised 2026-06-27 · resolved 2026-06-27 · context: CAD-24 Layer B
+**Por que eu perguntei:** contrato externo "o que é o OmniNote rodando" (tray/autostart) + `global-hotkey 0.8` NÃO roda headless (macOS exige event-loop na main thread; Linux X11-only; macOS pede Input-Monitoring).
+**Decisão (Fausto):** (b1) — fold o hotkey no event-loop do GUI existente (eframe/winit) com minimize-to-tray, em vez de daemon standalone. Reusa o winit já no Cargo.lock.
+**A aplicar:** Layer B fica spike-gated (provar registro do hotkey sob o winit do GUI + permissão macOS) APÓS Layer A (CLI) mergear. Resolver a colisão com `Cmd/Ctrl+Shift+Space` in-app no design do Layer B.
+
+### Q-11 · Views tipadas (Slice 5) podem mutar os sacred files pela UI? · raised 2026-06-27 · resolved 2026-06-27 · context: CAD-25b Slice 5
+**Por que eu perguntei:** mutar SPRINT/DIARY/HUMAN via UI toca dados que o protocolo discipline trata como append-only/humano (§0 #6, rule #7).
+**Decisão (Fausto):** READ-ONLY em v1.2. As views só renderizam; única exceção é o DIARY "+ append entry" (reusa `discipline::diary_quick`). Edição tipada (drag-reorder, status toggle, mutação) fica para v1.3 "se houver demanda".
+
 ### Q-01 · Renomear `.caderno/` → `.omninote/` quebra vaults antigos · raised 2026-05-01 · resolved 2026-05-22
 **Decisão (humano):** (a) — usar só `.omninote/` daqui pra frente, ignorar vaults pré-rename.
 **Razão:** humano é o único usuário e nada foi commitado em vault de produção. Blast radius zero, compat não se justifica.
