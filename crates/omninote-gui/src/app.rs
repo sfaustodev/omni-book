@@ -775,6 +775,24 @@ mod tests {
     }
 
     #[test]
+    fn show_right_rail_no_panic_under_overlay_and_editor() {
+        // Render smoke: the guard must hold inside a real egui frame, not only in
+        // the predicate. Under an overlay no SidePanel is registered (early-return);
+        // over the editor with the rail open it renders and exercises the post-guard
+        // vault unwrap. A future regression that drops the guard would panic or
+        // reserve width here, which the predicate-only test cannot catch.
+        let (mut app, _dir) = test_app();
+        app.vault.as_mut().unwrap().config.right_rail_open = true;
+        let ctx = egui::Context::default();
+
+        app.central_overlay = CentralOverlay::Tickets;
+        let _ = ctx.run(Default::default(), |ctx| app.show_right_rail(ctx));
+
+        app.central_overlay = CentralOverlay::None;
+        let _ = ctx.run(Default::default(), |ctx| app.show_right_rail(ctx));
+    }
+
+    #[test]
     fn opening_timeline_clears_stale_cache() {
         let (mut app, dir) = test_app();
         // Seed a stale cache, then open Timeline — it must drop so the next show
