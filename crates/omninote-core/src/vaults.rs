@@ -151,6 +151,39 @@ pub fn last_vault_path() -> Option<PathBuf> {
     Some(dirs::config_dir()?.join("omninote").join("last_vault"))
 }
 
+/// Failure surfaced by [`resolve_active`] when resolution cannot safely fall
+/// back. A corrupt registry must NOT fail open to the legacy `last_vault`: that
+/// could silently target a different vault and write to the wrong one. Resolution
+/// is therefore fail-closed on an unreadable/unparsable registry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolveError {
+    /// The registry file exists but could not be read or parsed. Resolution
+    /// stops here rather than consulting legacy fallbacks.
+    Registry(String),
+}
+
+impl std::fmt::Display for ResolveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ResolveError::Registry(msg) => write!(f, "vaults.toml unreadable: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for ResolveError {}
+
+/// Outcome of loading the registry, kept distinct so the pure resolver can tell
+/// "no registry on disk" (legacy fallback is allowed) from "registry present but
+/// invalid" (fail-closed — do NOT fall through to a stale `last_vault`).
+enum RegistryState<'a> {
+    /// No registry file on disk; legacy `last_vault` may be consulted.
+    Absent,
+    /// Registry loaded and parsed successfully.
+    Valid(&'a VaultRegistry),
+    /// Registry file exists but failed to read/parse.
+    Invalid(String),
+}
+
 /// Resolve the active vault root, single source of truth for every consumer
 /// (CLI today, the capture daemon tomorrow). Precedence:
 /// `arg` → `OMNINOTE_VAULT` env → active entry in the registry → legacy
@@ -159,11 +192,27 @@ pub fn last_vault_path() -> Option<PathBuf> {
 /// An explicitly-set active entry wins outright — even if its path is missing,
 /// we surface *that* vault (so the open fails loudly on the intended target)
 /// rather than silently falling through to a different legacy vault. Legacy is
-/// consulted only when the registry names no active entry.
-pub fn resolve_active(arg: Option<PathBuf>) -> Option<PathBuf> {
-    let registry = registry_path().and_then(|rp| load(&rp).ok());
+/// consulted only when the registry is absent, or present-and-valid without an
+/// active entry.
+///
+/// Fails closed: an explicit `arg`/env always wins, but if the registry file
+/// exists and cannot be read/parsed, returns [`ResolveError::Registry`] instead
+/// of falling through to `last_vault` (which could point at a different vault).
+pub fn resolve_active(arg: Option<PathBuf>) -> Result<Option<PathBuf>, ResolveError> {
+    let loaded = registry_path().map(|rp| (rp.exists(), load(&rp)));
+    let owned;
+    let state = match loaded {
+        // No config dir, or the file does not exist → legacy fallback allowed.
+        None => RegistryState::Absent,
+        Some((false, _)) => RegistryState::Absent,
+        Some((true, Ok(reg))) => {
+            owned = reg;
+            RegistryState::Valid(&owned)
+        }
+        Some((true, Err(e))) => RegistryState::Invalid(e),
+    };
     let last_vault = last_vault_path();
-    resolve_with(arg, env_vault(), registry.as_ref(), last_vault.as_deref())
+    resolve_with(arg, env_vault(), state, last_vault.as_deref())
 }
 
 /// Read the `OMNINOTE_VAULT` env override (empty/unset → `None`).
@@ -180,22 +229,33 @@ fn env_vault() -> Option<PathBuf> {
 fn resolve_with(
     arg: Option<PathBuf>,
     env: Option<PathBuf>,
-    registry: Option<&VaultRegistry>,
+    registry: RegistryState<'_>,
     last_vault: Option<&Path>,
-) -> Option<PathBuf> {
+) -> Result<Option<PathBuf>, ResolveError> {
+    // An explicit target always wins, even over a corrupt registry.
     if let Some(p) = arg.or(env) {
-        return Some(p);
+        return Ok(Some(p));
     }
-    if let Some(reg) = registry {
-        if let Some(active) = reg.active.as_deref() {
-            return reg.get(active).map(|e| e.path.clone());
+    match registry {
+        // Fail closed: a corrupt registry must not fall through to legacy.
+        RegistryState::Invalid(msg) => return Err(ResolveError::Registry(msg)),
+        RegistryState::Valid(reg) => {
+            if let Some(active) = reg.active.as_deref() {
+                // A named active entry honors that intent — even a missing path
+                // surfaces (open fails loudly on target) and a dangling active
+                // yields None rather than silently selecting legacy.
+                return Ok(reg.get(active).map(|e| e.path.clone()));
+            }
         }
+        RegistryState::Absent => {}
     }
-    let last = last_vault?;
-    std::fs::read_to_string(last)
+    let Some(last) = last_vault else {
+        return Ok(None);
+    };
+    Ok(std::fs::read_to_string(last)
         .ok()
         .map(|s| PathBuf::from(s.trim()))
-        .filter(|p| p.exists())
+        .filter(|p| p.exists()))
 }
 
 #[cfg(test)]
@@ -404,10 +464,10 @@ path = "/n/home"
             resolve_with(
                 Some(PathBuf::from("/from/arg")),
                 Some(PathBuf::from("/from/env")),
-                Some(&reg),
+                RegistryState::Valid(&reg),
                 Some(&last_file),
             ),
-            Some(PathBuf::from("/from/arg"))
+            Ok(Some(PathBuf::from("/from/arg")))
         );
 
         // env beats registry + last when arg absent.
@@ -415,22 +475,22 @@ path = "/n/home"
             resolve_with(
                 None,
                 Some(PathBuf::from("/from/env")),
-                Some(&reg),
+                RegistryState::Valid(&reg),
                 Some(&last_file),
             ),
-            Some(PathBuf::from("/from/env"))
+            Ok(Some(PathBuf::from("/from/env")))
         );
 
         // registry beats last when arg + env absent.
         assert_eq!(
-            resolve_with(None, None, Some(&reg), Some(&last_file)),
-            Some(PathBuf::from("/from/registry"))
+            resolve_with(None, None, RegistryState::Valid(&reg), Some(&last_file)),
+            Ok(Some(PathBuf::from("/from/registry")))
         );
 
         // last_vault is the final fallback.
         assert_eq!(
-            resolve_with(None, None, None, Some(&last_file)),
-            Some(last_dir)
+            resolve_with(None, None, RegistryState::Absent, Some(&last_file)),
+            Ok(Some(last_dir))
         );
     }
 
@@ -447,8 +507,8 @@ path = "/n/home"
         let reg = registry_with_active("ghost", "/does/not/exist");
 
         assert_eq!(
-            resolve_with(None, None, Some(&reg), Some(&last_file)),
-            Some(PathBuf::from("/does/not/exist"))
+            resolve_with(None, None, RegistryState::Valid(&reg), Some(&last_file)),
+            Ok(Some(PathBuf::from("/does/not/exist")))
         );
     }
 
@@ -471,7 +531,10 @@ path = "/n/home"
             }],
         };
 
-        assert_eq!(resolve_with(None, None, Some(&reg), Some(&last_file)), None);
+        assert_eq!(
+            resolve_with(None, None, RegistryState::Valid(&reg), Some(&last_file)),
+            Ok(None)
+        );
     }
 
     #[test]
@@ -481,15 +544,24 @@ path = "/n/home"
         let tmp = tempfile::tempdir().unwrap();
         let last_file = tmp.path().join("last_vault");
         std::fs::write(&last_file, b"/vanished/vault").unwrap();
-        assert_eq!(resolve_with(None, None, None, Some(&last_file)), None);
+        assert_eq!(
+            resolve_with(None, None, RegistryState::Absent, Some(&last_file)),
+            Ok(None)
+        );
     }
 
     #[test]
     fn resolve_active_none_when_no_source_yields_anything() {
-        assert_eq!(resolve_with(None, None, None, None), None);
+        assert_eq!(
+            resolve_with(None, None, RegistryState::Absent, None),
+            Ok(None)
+        );
         // An empty registry with no active entry contributes nothing.
         let reg = VaultRegistry::default();
-        assert_eq!(resolve_with(None, None, Some(&reg), None), None);
+        assert_eq!(
+            resolve_with(None, None, RegistryState::Valid(&reg), None),
+            Ok(None)
+        );
     }
 
     #[test]
@@ -501,8 +573,44 @@ path = "/n/home"
         let last_file = tmp.path().join("last_vault");
         std::fs::write(&last_file, format!("{}\n", target.display())).unwrap();
         assert_eq!(
-            resolve_with(None, None, None, Some(&last_file)),
-            Some(target)
+            resolve_with(None, None, RegistryState::Absent, Some(&last_file)),
+            Ok(Some(target))
+        );
+    }
+
+    #[test]
+    fn resolve_active_corrupt_registry_fails_closed_with_valid_last_vault() {
+        // A corrupt registry must NOT fall through to legacy last_vault, even when
+        // that legacy path is valid — writing to the wrong vault is worse than an
+        // explicit error.
+        let tmp = tempfile::tempdir().unwrap();
+        let last_dir = tmp.path().join("legacy");
+        std::fs::create_dir_all(&last_dir).unwrap();
+        let last_file = tmp.path().join("last_vault");
+        std::fs::write(&last_file, last_dir.to_string_lossy().as_bytes()).unwrap();
+
+        let err = resolve_with(
+            None,
+            None,
+            RegistryState::Invalid("parse vaults.toml: boom".into()),
+            Some(&last_file),
+        )
+        .unwrap_err();
+        assert!(matches!(err, ResolveError::Registry(_)));
+    }
+
+    #[test]
+    fn resolve_active_explicit_arg_overrides_corrupt_registry() {
+        // Fail-closed applies only to implicit resolution: an explicit target
+        // still wins, even when the registry is corrupt.
+        assert_eq!(
+            resolve_with(
+                Some(PathBuf::from("/from/arg")),
+                None,
+                RegistryState::Invalid("boom".into()),
+                None,
+            ),
+            Ok(Some(PathBuf::from("/from/arg")))
         );
     }
 }

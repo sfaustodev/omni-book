@@ -369,6 +369,18 @@ impl Vault {
     /// Quick-capture: prepend a timestamped bullet to `Inbox.md` (Q-06 — plain
     /// bullets at the top of the file, newest first, append-friendly). Creates
     /// the file with an `# Inbox` heading on first capture.
+    ///
+    /// Newest-first means inserting at the TOP after the heading, so a plain
+    /// O_APPEND write can't be used: it's read-modify-write. The write is made
+    /// crash-safe by staging the new content in a sibling temp file, fsyncing it,
+    /// then atomically renaming over `Inbox.md` — so a crash mid-write can never
+    /// leave a truncated or empty inbox; a reader sees either the old or the new
+    /// file, never a torn one.
+    ///
+    /// A cross-process advisory lock for concurrent WRITERS (two simultaneous
+    /// captures racing the read-modify-write) is intentionally deferred to the
+    /// future hotkey daemon, where concurrent capture becomes real. For the
+    /// single-user CLI today, atomic-rename is the right level.
     pub fn append_inbox_line(&self, text: &str) -> Result<(), String> {
         let line = text.trim();
         if line.is_empty() {
@@ -386,7 +398,7 @@ impl Vault {
         } else {
             format!("{bullet}{existing}")
         };
-        std::fs::write(&inbox, new).map_err(|e| e.to_string())
+        write_atomic(&inbox, new.as_bytes())
     }
 
     /// Quick-capture with a reportable outcome — the shared seam for the
@@ -535,6 +547,32 @@ fn insert_after_blank(rest: &str, bullet: &str) -> String {
     } else {
         format!("\n{bullet}{rest}")
     }
+}
+
+/// Write `bytes` to `dest` crash-safely: stage in a sibling temp file, fsync the
+/// data and the file, then atomically `rename` over `dest`. A crash at any point
+/// leaves either the prior file or the complete new one — never a torn/empty
+/// result. The temp file shares `dest`'s directory so the rename stays on one
+/// filesystem (cross-device rename would fail). A unique temp name avoids
+/// clobbering a concurrent writer's staging file.
+fn write_atomic(dest: &Path, bytes: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    let dir = dest.parent().unwrap_or_else(|| Path::new("."));
+    let stem = dest
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Inbox.md");
+    let tmp = dir.join(format!(".{stem}.{}.tmp", std::process::id()));
+    {
+        let mut f = fs::File::create(&tmp).map_err(|e| format!("create temp: {e}"))?;
+        f.write_all(bytes).map_err(|e| format!("write temp: {e}"))?;
+        f.sync_all().map_err(|e| format!("sync temp: {e}"))?;
+    }
+    fs::rename(&tmp, dest).map_err(|e| {
+        // Best-effort cleanup so a failed rename doesn't litter the vault.
+        let _ = fs::remove_file(&tmp);
+        format!("rename temp: {e}")
+    })
 }
 
 pub fn sanitize_filename_pub(name: &str) -> String {
@@ -1066,6 +1104,33 @@ mod tests {
             .count();
         // Only the heading line is a non-bullet, non-empty line.
         assert_eq!(non_bullet, 1);
+    }
+
+    #[test]
+    fn append_inbox_never_leaves_partial_and_preserves_existing() {
+        let (vault, _dir) = temp_vault();
+        // Seed an existing inbox with a prior bullet.
+        vault.append_inbox_line("primeira").unwrap();
+        let before = std::fs::read_to_string(vault.root.join("Inbox.md")).unwrap();
+        assert!(before.contains("primeira"));
+
+        // A second capture: the atomic rewrite must keep the file whole.
+        vault.append_inbox_line("segunda").unwrap();
+        let inbox = vault.root.join("Inbox.md");
+        let after = std::fs::read_to_string(&inbox).unwrap();
+        // Never empty/truncated; the heading and the prior bullet survive.
+        assert!(!after.is_empty());
+        assert!(after.starts_with("# Inbox\n"));
+        assert!(after.contains("primeira"));
+        assert!(after.contains("segunda"));
+
+        // No staging temp file is left behind in the vault dir.
+        let leftover: Vec<_> = std::fs::read_dir(&vault.root)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(leftover.is_empty(), "stray temp file left in vault");
     }
 
     #[test]
