@@ -237,6 +237,15 @@ impl OmniNoteApp {
     /// to save). On a disk failure it returns `false`, keeps `dirty=true`, and
     /// sets `error_msg` — so callers (Cmd+W / tab close) don't drop unsaved work
     /// just because the write failed.
+    /// Whether the inactivity auto-save should fire this frame. Gated on
+    /// `!external_change_pending`: while a conflict modal is pending resolution,
+    /// auto-saving our in-memory buffer would silently overwrite the external
+    /// edit (e.g. a line captured by the CLI) before the user decides. The
+    /// caller must poll the watcher first so the flag reflects this frame.
+    fn should_autosave(&self, idle: std::time::Duration) -> bool {
+        self.dirty && !self.external_change_pending && self.last_save.elapsed() > idle
+    }
+
     pub fn flush_active(&mut self) -> bool {
         if !self.dirty {
             return true;
@@ -401,12 +410,16 @@ impl eframe::App for OmniNoteApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         use std::time::Duration;
 
-        if self.dirty && self.last_save.elapsed() > Duration::from_millis(600) {
+        // Order is load-bearing: poll the watcher BEFORE the auto-save decision so
+        // an external change detected this frame sets `external_change_pending`
+        // before `should_autosave` is consulted. Otherwise the inactivity auto-save
+        // could flush our in-memory buffer over a just-captured external line in the
+        // same frame the conflict is detected, destroying it before the conflict
+        // modal ever renders.
+        self.poll_watcher();
+        if self.should_autosave(Duration::from_millis(600)) {
             self.flush_active();
         }
-
-        // Watcher poll (v0.6 — CAD-9)
-        self.poll_watcher();
         // Request repaint regularly so watcher events are noticed even when idle
         ctx.request_repaint_after(Duration::from_millis(500));
 
@@ -596,5 +609,30 @@ mod tests {
             "select_note deve limpar a seleção stale"
         );
         assert!(app.active_note.is_some(), "nota B deve ficar ativa");
+    }
+
+    #[test]
+    fn autosave_suppressed_while_external_change_pending() {
+        // Data-loss guard: a pending external-change conflict must block the
+        // inactivity auto-save, or `flush_active` would overwrite an externally
+        // captured line (e.g. from `omninote capture`) before the user resolves
+        // the modal.
+        let (mut app, _dir) = test_app();
+        let idle = std::time::Duration::from_millis(600);
+        // Make the inactivity window elapse regardless of wall-clock timing.
+        app.last_save = std::time::Instant::now() - std::time::Duration::from_secs(5);
+
+        // Clean buffer never auto-saves.
+        app.dirty = false;
+        app.external_change_pending = false;
+        assert!(!app.should_autosave(idle));
+
+        // Dirty + idle elapsed + no conflict → auto-save fires.
+        app.dirty = true;
+        assert!(app.should_autosave(idle));
+
+        // Dirty + idle elapsed but a conflict is pending → suppressed.
+        app.external_change_pending = true;
+        assert!(!app.should_autosave(idle));
     }
 }

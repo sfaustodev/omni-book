@@ -218,6 +218,9 @@ impl OmniNoteApp {
         let v = self.vault.as_mut().ok_or("sem vault")?;
         v.append_inbox_line(line)?;
         v.reload_notes();
+        // Suppress the watcher's external-change modal for our own write — the
+        // same self-write window the GUI's save path opens.
+        self.self_write_until = std::time::Instant::now() + std::time::Duration::from_millis(400);
         Ok(())
     }
 }
