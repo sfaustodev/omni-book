@@ -10,6 +10,7 @@
 //! omninote-cli vault list
 //! omninote-cli vault add NAME PATH
 //! omninote-cli vault switch NAME
+//! omninote-cli capture TEXT
 //! omninote-cli note search QUERY [--case] [--limit N] [--titles-only]
 //! omninote-cli link unresolved
 //! omninote-cli link backlinks FILE
@@ -54,6 +55,14 @@ enum Command {
     Vault {
         #[command(subcommand)]
         action: VaultAction,
+    },
+    /// Quick-capture one line to `Inbox.md` (CAD-24). Prepends a timestamped
+    /// bullet, newest-first; creates the inbox on first capture.
+    Capture {
+        /// The line to capture — wrap in quotes for multi-word text.
+        text: String,
+        #[arg(long)]
+        json: bool,
     },
     /// Note operations.
     Note {
@@ -282,34 +291,12 @@ fn format_anchor(a: &Option<omninote_core::wikilinks::Anchor>) -> Option<String>
     })
 }
 
-/// Resolve the vault root: `--vault`/env first (handled by clap), then the
-/// active entry in `vaults.toml`, then the legacy `last_vault` file.
-///
-/// An explicitly-set active entry wins outright — even if its path is missing,
-/// we surface *that* vault (so the open fails loudly on the intended target)
-/// rather than silently falling through to a different legacy vault. Legacy is
-/// consulted only when the registry names no active entry.
-fn resolve_vault(arg: Option<PathBuf>) -> Option<PathBuf> {
-    if let Some(p) = arg {
-        return Some(p);
-    }
-    if let Some(reg) =
-        omninote_core::vaults::registry_path().and_then(|rp| omninote_core::vaults::load(&rp).ok())
-    {
-        if let Some(active) = reg.active.as_deref() {
-            return reg.get(active).map(|e| e.path.clone());
-        }
-    }
-    let last = dirs::config_dir()?.join("omninote").join("last_vault");
-    std::fs::read_to_string(last)
-        .ok()
-        .map(|s| PathBuf::from(s.trim()))
-        .filter(|p| p.exists())
-}
-
-/// Resolve or bail with the standard "no vault" error.
+/// Resolve or bail with the standard "no vault" error. Delegates the
+/// precedence ladder (`--vault`/env → registry active → legacy `last_vault`)
+/// to [`omninote_core::vaults::resolve_active`] — the single source of truth so
+/// other consumers (the future capture daemon) share one tested resolver.
 fn require_vault(arg: Option<PathBuf>) -> anyhow::Result<PathBuf> {
-    resolve_vault(arg).ok_or_else(|| {
+    omninote_core::vaults::resolve_active(arg).ok_or_else(|| {
         anyhow::anyhow!(
             "no vault: pass --vault, set OMNINOTE_VAULT, run `vault add`, or open the GUI once"
         )
@@ -583,6 +570,47 @@ async fn main() -> anyhow::Result<()> {
                         Some(old) => println!("  {} {} → {}", c.status, old, c.path),
                         None => println!("  {} {}", c.status, c.path),
                     }
+                }
+            }
+        }
+
+        Command::Capture { text, json } => {
+            // Vault resolution is itself a failure mode here: under `--json` it
+            // must surface as an error envelope (not a propagated anyhow exit),
+            // so resolve explicitly rather than via the `?` helper.
+            let vault_root = match omninote_core::vaults::resolve_active(vault_arg) {
+                Some(p) => p,
+                None => {
+                    let msg = "no vault: pass --vault, set OMNINOTE_VAULT, run `vault add`, or open the GUI once";
+                    if json {
+                        Envelope::<serde_json::Value>::error(msg).print()?;
+                    } else {
+                        eprintln!("{msg}");
+                    }
+                    std::process::exit(1);
+                }
+            };
+            let vault = omninote_core::vault::Vault::open(vault_root)
+                .map_err(|e| anyhow::anyhow!("vault open failed: {e}"))?;
+            match vault.capture_line(&text) {
+                Ok(out) => {
+                    if json {
+                        emit_meta(
+                            json!({ "path": out.path, "line_appended": out.bullet }),
+                            json!({ "total_lines": out.total_lines }),
+                        )?;
+                    } else {
+                        println!("✓ Inbox.md  (+1 line)");
+                        println!("{}", out.bullet);
+                    }
+                }
+                Err(e) => {
+                    if json {
+                        Envelope::<serde_json::Value>::error(e).print()?;
+                    } else {
+                        eprintln!("{e}");
+                    }
+                    std::process::exit(1);
                 }
             }
         }
