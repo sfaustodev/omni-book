@@ -528,3 +528,73 @@ impl eframe::App for OmniNoteApp {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build an OmniNoteApp headless (no eframe::CreationContext) over a temp vault
+    /// with two notes "A" and "B". Mirrors `new()`'s struct init minus the egui-ctx
+    /// side effects (fonts/theme/image-loaders), which logic tests don't need.
+    fn test_app() -> (OmniNoteApp, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut vault = Vault::open(dir.path().to_path_buf()).unwrap();
+        vault.create_note(None, "A", NoteType::Resumo).unwrap();
+        vault.create_note(None, "B", NoteType::Resumo).unwrap();
+        let app = OmniNoteApp {
+            vault: Some(vault),
+            active_note: None,
+            editing: false,
+            query: String::new(),
+            type_filter: None,
+            show_settings: false,
+            show_new: false,
+            show_import: false,
+            confirm_action: None,
+            dirty: false,
+            last_save: std::time::Instant::now(),
+            error_msg: None,
+            md_cache: egui_commonmark::CommonMarkCache::default(),
+            watcher: None,
+            self_write_until: std::time::Instant::now(),
+            external_change_pending: false,
+            slash_menu_pos: None,
+            palette_open: false,
+            palette_query: String::new(),
+            palette_sel: 0,
+            capture_open: false,
+            capture_text: String::new(),
+            toasts: Vec::new(),
+            onboarding_done: false,
+            calendar_open: false,
+            calendar_ym: None,
+            editor_sel: None,
+        };
+        (app, dir)
+    }
+
+    #[test]
+    fn select_note_resets_stale_editor_selection() {
+        // CAD-25b Slice 4 (review finding): switching notes must clear editor_sel so
+        // a stale byte range from the previous note can't act on a different buffer.
+        let (mut app, _dir) = test_app();
+        let id_b = app
+            .vault
+            .as_ref()
+            .unwrap()
+            .notes
+            .iter()
+            .find(|n| n.title == "B")
+            .unwrap()
+            .frontmatter
+            .id
+            .clone();
+        app.editor_sel = Some((5, 10));
+        app.select_note(&id_b);
+        assert_eq!(
+            app.editor_sel, None,
+            "select_note deve limpar a seleção stale"
+        );
+        assert!(app.active_note.is_some(), "nota B deve ficar ativa");
+    }
+}
