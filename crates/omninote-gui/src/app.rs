@@ -107,12 +107,22 @@ impl OmniNoteApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // Resolve the startup vault through the shared core resolver so a CLI
         // `omninote vault switch` is honored here too (the registry is the single
-        // source of truth). A corrupt registry resolves to no vault rather than a
-        // wrong one.
-        let vault = omninote_core::vaults::resolve_active(None)
-            .ok()
-            .flatten()
-            .and_then(|p| Vault::open(p).ok());
+        // source of truth).
+        //
+        // The resolver fails closed on a corrupt `vaults.toml` (the right call for
+        // the CLI, which writes). The GUI only opens a vault for viewing, so on a
+        // resolver error it falls back to the legacy `last_vault` pointer instead.
+        // Without this, a corrupt registry would trap the user in the welcome
+        // screen every startup: the picker writes `last_vault` (never repairs the
+        // registry), so the next `resolve_active` errors again.
+        let resolved = match omninote_core::vaults::resolve_active(None) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("omninote: vault registry unreadable ({e}); falling back to last_vault");
+                Self::legacy_last_vault()
+            }
+        };
+        let vault = resolved.and_then(|p| Vault::open(p).ok());
         register_custom_fonts(&cc.egui_ctx);
         // Required for `egui::Image::new("file://…")` to load attachments from
         // disk in the inline renderer (CAD-25 Slice 3 image embeds).
@@ -166,6 +176,17 @@ impl OmniNoteApp {
                 let _ = std::fs::write(dir.join("last_vault"), v.root.to_string_lossy().as_bytes());
             }
         }
+    }
+
+    /// Read the legacy `~/.config/omninote/last_vault` pointer directly, mirroring
+    /// the core resolver's legacy branch (trim + require the path to exist). Used
+    /// only as the lenient GUI fallback when the registry is corrupt.
+    fn legacy_last_vault() -> Option<std::path::PathBuf> {
+        let path = omninote_core::vaults::last_vault_path()?;
+        std::fs::read_to_string(path)
+            .ok()
+            .map(|s| std::path::PathBuf::from(s.trim()))
+            .filter(|p| p.exists())
     }
 
     /// Apply font/spacing settings from vault config to egui style.
@@ -330,7 +351,16 @@ impl OmniNoteApp {
     }
 
     pub fn select_note(&mut self, id: &str) {
-        self.flush_active();
+        // Abort the switch if the active buffer couldn't be flushed: a pending
+        // external-change conflict makes `flush_active` return false, and
+        // replacing `active_note` anyway would discard the unsaved edits the
+        // conflict modal exists to protect. Keep the current note + modal up so
+        // the user resolves it first. Every note-switch entry point (sidebar,
+        // palette, backlinks, calendar, right rail, select_note_by_target)
+        // routes through here, so this one guard covers them all.
+        if !self.flush_active() {
+            return;
+        }
         if let Some(v) = &self.vault {
             if let Some(note) = v.notes.iter().find(|n| n.frontmatter.id == id) {
                 self.active_note = Some(note.clone());
@@ -543,7 +573,12 @@ impl eframe::App for OmniNoteApp {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        self.flush_active();
+        // On a clean exit this persists the active buffer. If an external-change
+        // conflict is still pending, `flush_active` returns false and writes
+        // nothing — we deliberately let the on-disk external version win rather
+        // than clobber it on the way out (the in-memory edits were never
+        // confirmed against the conflict). Config still saves regardless.
+        let _ = self.flush_active();
         if let Some(v) = &self.vault {
             let _ = v.save_config();
         }
@@ -617,6 +652,49 @@ mod tests {
             "select_note deve limpar a seleção stale"
         );
         assert!(app.active_note.is_some(), "nota B deve ficar ativa");
+    }
+
+    #[test]
+    fn select_note_aborts_switch_while_external_change_pending() {
+        // The conflict gate is only useful if callers honor it. With a pending
+        // external-change conflict + unsaved edits on note A, switching to note B
+        // must keep A active (and dirty), not silently discard A's edits.
+        let (mut app, _dir) = test_app();
+        let id_a = app.vault.as_ref().unwrap().notes[0].frontmatter.id.clone();
+        let id_b = app
+            .vault
+            .as_ref()
+            .unwrap()
+            .notes
+            .iter()
+            .find(|n| n.title == "B")
+            .unwrap()
+            .frontmatter
+            .id
+            .clone();
+        assert_ne!(id_a, id_b);
+
+        app.select_note(&id_a);
+        app.active_note.as_mut().unwrap().content = "UNSAVED EDIT".into();
+        app.dirty = true;
+        app.external_change_pending = true;
+
+        app.select_note(&id_b);
+
+        let active = app.active_note.as_ref().expect("note A stays active");
+        assert_eq!(
+            active.frontmatter.id, id_a,
+            "switch must abort: note A stays active while the conflict is pending"
+        );
+        assert_eq!(
+            active.content, "UNSAVED EDIT",
+            "note A's unsaved edits must be preserved, not discarded"
+        );
+        assert!(app.dirty, "still dirty — nothing was saved or switched");
+        assert!(
+            app.external_change_pending,
+            "conflict stays pending until the user resolves the modal"
+        );
     }
 
     #[test]

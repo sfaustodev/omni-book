@@ -76,18 +76,24 @@ impl OmniNoteApp {
                                 )
                                 .clicked()
                             {
-                                self.flush_active();
-                                if let Some(v) = &mut self.vault {
-                                    match v.create_note(None, "", *t) {
-                                        Ok(note) => {
-                                            self.active_note = Some(note);
-                                            self.editing = true;
-                                            self.dirty = false;
+                                // Creating a note replaces active_note, so it must
+                                // first flush the current buffer. If a pending
+                                // external-change conflict blocks the flush, keep the
+                                // modal open and don't switch away — otherwise the
+                                // unsaved edits the conflict protects are lost.
+                                if self.flush_active() {
+                                    if let Some(v) = &mut self.vault {
+                                        match v.create_note(None, "", *t) {
+                                            Ok(note) => {
+                                                self.active_note = Some(note);
+                                                self.editing = true;
+                                                self.dirty = false;
+                                            }
+                                            Err(e) => self.error_msg = Some(e),
                                         }
-                                        Err(e) => self.error_msg = Some(e),
                                     }
+                                    self.show_new = false;
                                 }
-                                self.show_new = false;
                             }
                             if (i + 1) % 3 == 0 {
                                 ui.end_row();
@@ -334,6 +340,12 @@ impl OmniNoteApp {
     // Import helpers
 
     fn import_pdf(&mut self, path: &std::path::Path) {
+        // Importing replaces active_note. Refuse while an external-change
+        // conflict is unresolved so the pending edits (and the modal pointing at
+        // the current note) aren't silently dropped.
+        if self.external_change_pending {
+            return;
+        }
         let content = match omninote_core::pdf::extract_text(path) {
             Ok(t) => t,
             Err(e) => {
@@ -370,6 +382,9 @@ impl OmniNoteApp {
     }
 
     fn import_chat(&mut self, path: &std::path::Path) {
+        if self.external_change_pending {
+            return;
+        }
         let content = match omninote_core::import::import_claude_chat(path) {
             Ok(c) => c,
             Err(e) => {
@@ -403,6 +418,9 @@ impl OmniNoteApp {
     }
 
     fn import_artifact(&mut self, path: &std::path::Path) {
+        if self.external_change_pending {
+            return;
+        }
         let content = match omninote_core::import::import_claude_artifact(path) {
             Ok(c) => c,
             Err(e) => {
