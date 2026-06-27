@@ -746,7 +746,7 @@ impl OmniNoteApp {
             false
         } else {
             let label = format!("{} {}", t.id, t.title);
-            let (_, activated) = crate::ui_a11y::clickable_row(ui, theme, &label, body);
+            let (_, activated) = crate::ui_a11y::clickable_row(ui, theme, &label, false, body);
             activated
         }
     }
@@ -966,7 +966,7 @@ impl OmniNoteApp {
                     };
                     let row_label = format!("{} {} {}", tag, t.id, t.title);
                     let (_, activated) =
-                        crate::ui_a11y::clickable_row(ui, &theme, &row_label, |ui| {
+                        crate::ui_a11y::clickable_row(ui, &theme, &row_label, false, |ui| {
                             ui.label(
                                 crate::ui_a11y::scaled_text(ui, tag, 11.0)
                                     .color(tag_col)
@@ -1055,43 +1055,50 @@ impl OmniNoteApp {
             });
         if submit && !self.diary_append_text.trim().is_empty() {
             let text = self.diary_append_text.trim().to_string();
-            // The active note (likely DIARY.md itself) so we can re-sync it after
-            // diary_quick prepends to disk — otherwise the stale buffer gets
-            // autosaved back over the new entry.
-            let active_id = self.active_note.as_ref().map(|n| n.frontmatter.id.clone());
-            let res = self
-                .vault
-                .as_ref()
-                .map(|v| discipline::diary_quick(&v.root, &text, None));
-            match res {
-                Some(Ok(_)) => {
-                    // Our own write — don't let the watcher read it back as an
-                    // external change and pop the conflict modal.
-                    self.self_write_until =
-                        std::time::Instant::now() + std::time::Duration::from_millis(400);
-                    if let Some(v) = &mut self.vault {
-                        v.reload_notes();
-                    }
-                    // Refresh active_note from the reloaded vault so the typed view
-                    // shows the new entry and a later autosave can't clobber it.
-                    if let Some(id) = active_id {
-                        let fresh = self
-                            .vault
-                            .as_ref()
-                            .and_then(|v| v.notes.iter().find(|n| n.frontmatter.id == id).cloned());
-                        if let Some(fresh) = fresh {
-                            self.active_note = Some(fresh);
-                            self.dirty = false;
-                        }
-                    }
-                    self.toast_success("Entrada adicionada ao DIARY");
-                }
-                Some(Err(e)) => self.toast_error(format!("Falha no DIARY: {e}")),
-                None => {}
+            match self.append_diary_entry(&text) {
+                Ok(()) => self.toast_success("Entrada adicionada ao DIARY"),
+                Err(e) => self.toast_error(format!("Falha no DIARY: {e}")),
             }
             self.diary_append_open = false;
             self.diary_append_text.clear();
         }
+    }
+
+    /// Append `text` as a new DIARY entry, preserving any unsaved edits to the
+    /// active note. Flushes first so the reload below (re-reading notes from disk)
+    /// can't replace a dirty in-memory buffer with stale on-disk content; then
+    /// prepends via `diary_quick`, marks the write as ours for the watcher,
+    /// reloads, and re-syncs the active note so a later autosave can't clobber it.
+    pub(crate) fn append_diary_entry(&mut self, text: &str) -> Result<(), String> {
+        if self.dirty && !self.flush_active() {
+            return Err("não foi possível salvar edições pendentes".into());
+        }
+        let active_id = self.active_note.as_ref().map(|n| n.frontmatter.id.clone());
+        let root = self
+            .vault
+            .as_ref()
+            .map(|v| v.root.clone())
+            .ok_or("sem vault")?;
+        discipline::diary_quick(&root, text, None)?;
+        // Our own write — keep the watcher from reading it back as an external
+        // change and popping the conflict modal.
+        self.self_write_until = std::time::Instant::now() + std::time::Duration::from_millis(400);
+        if let Some(v) = &mut self.vault {
+            v.reload_notes();
+        }
+        // Re-sync the active note (likely DIARY.md) from the reloaded vault so the
+        // typed view shows the new entry and a later autosave can't clobber it.
+        if let Some(id) = active_id {
+            let fresh = self
+                .vault
+                .as_ref()
+                .and_then(|v| v.notes.iter().find(|n| n.frontmatter.id == id).cloned());
+            if let Some(fresh) = fresh {
+                self.active_note = Some(fresh);
+                self.dirty = false;
+            }
+        }
+        Ok(())
     }
 
     /// Sidebar 'DISCIPLINES' section — lists only sacred files that resolve on
@@ -1119,6 +1126,7 @@ impl OmniNoteApp {
 
         let theme = self.discipline_theme();
         let mut pending: Option<String> = None;
+        let active_id = self.active_note.as_ref().map(|n| n.frontmatter.id.clone());
         egui::CollapsingHeader::new(RichText::new("DISCIPLINES").size(11.0).strong())
             .id_salt("disciplines_section")
             .default_open(true)
@@ -1131,10 +1139,14 @@ impl OmniNoteApp {
                             .find(|n| n.path == path)
                             .map(|n| n.frontmatter.id.clone())
                     });
+                    // The active sacred file is announced as selected to screen
+                    // readers — the row is otherwise indistinguishable to AccessKit.
+                    let selected = id.is_some() && id == active_id;
                     let label = format!("◈ {name}");
-                    let (_, activated) = crate::ui_a11y::clickable_row(ui, &theme, &label, |ui| {
-                        ui.label(RichText::new(&label).color(theme.text));
-                    });
+                    let (_, activated) =
+                        crate::ui_a11y::clickable_row(ui, &theme, &label, selected, |ui| {
+                            ui.label(RichText::new(&label).color(theme.text));
+                        });
                     if activated {
                         if let Some(id) = id {
                             pending = Some(id);

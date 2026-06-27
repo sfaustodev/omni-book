@@ -148,15 +148,17 @@ impl OmniNoteApp {
             .show(ui, |ui| {
                 for change in &report.changed {
                     let label = format!("{} {}", change_glyph(&change.status), change.path);
-                    let (_, activated) = crate::ui_a11y::clickable_row(ui, &theme, &label, |ui| {
-                        ui.label(
-                            crate::ui_a11y::scaled_text(ui, change_glyph(&change.status), 13.0)
-                                .color(theme.accent),
-                        );
-                        ui.label(
-                            crate::ui_a11y::scaled_text(ui, &change.path, 12.0).color(theme.text),
-                        );
-                    });
+                    let (_, activated) =
+                        crate::ui_a11y::clickable_row(ui, &theme, &label, false, |ui| {
+                            ui.label(
+                                crate::ui_a11y::scaled_text(ui, change_glyph(&change.status), 13.0)
+                                    .color(theme.accent),
+                            );
+                            ui.label(
+                                crate::ui_a11y::scaled_text(ui, &change.path, 12.0)
+                                    .color(theme.text),
+                            );
+                        });
                     if activated {
                         pending = Some(change.path.clone());
                     }

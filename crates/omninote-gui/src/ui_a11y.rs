@@ -36,12 +36,15 @@ pub fn scaled_text(ui: &Ui, text: impl Into<String>, intended_px: f32) -> RichTe
 /// Returns `(response, activated)` where `activated` is true on a primary click
 /// or on Enter/Space while the row holds keyboard focus. The row paints an
 /// accent focus ring when focused and announces itself to screen readers as a
-/// selectable button labelled `label`. Mirrors the hand-painted sidebar row but
-/// keeps arbitrary inline content (glyphs, ids, titles) inside the closure.
+/// button labelled `label`, reporting `selected` as its selected state so the
+/// currently-active row is announced as selected rather than always unselected.
+/// Mirrors the hand-painted sidebar row but keeps arbitrary inline content
+/// (glyphs, ids, titles) inside the closure.
 pub fn clickable_row(
     ui: &mut Ui,
     theme: &Theme,
     label: &str,
+    selected: bool,
     content: impl FnOnce(&mut Ui),
 ) -> (Response, bool) {
     // Lay the content out first to learn its rect, then claim that rect as a
@@ -62,7 +65,9 @@ pub fn clickable_row(
     }
     // Re-announce to AccessKit — the manual interact replaced the implicit
     // semantics a SelectableLabel/Button would have carried.
-    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, false, label));
+    resp.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, label)
+    });
     let kbd = resp.has_focus()
         && ui.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Space));
     let activated = resp.clicked() || kbd;

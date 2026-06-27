@@ -447,6 +447,9 @@ impl OmniNoteApp {
         if std::time::Instant::now() < self.self_write_until {
             return;
         }
+        // An external .md change can shift the git diff the Timeline view caches;
+        // drop it so the next Timeline render recomputes over fresh state.
+        self.timeline_cache = None;
         // Did the active note's file change?
         let active_path = self.active_note.as_ref().map(|n| n.path.clone());
         let active_changed = match &active_path {
@@ -695,6 +698,31 @@ mod tests {
         assert_eq!(app.central_overlay, CentralOverlay::None);
         assert!(app.discipline_typed, "typed view on by default");
         assert_eq!(app.timeline_since, "7d");
+    }
+
+    #[test]
+    fn diary_append_flushes_unsaved_active_edits() {
+        // Regression: appending a DIARY entry while the active note has unsaved
+        // edits must flush them first — otherwise the reload that re-reads notes
+        // from disk replaces the dirty buffer with stale content and the edits are
+        // silently lost.
+        let (mut app, _dir) = test_app();
+        let (id, path) = {
+            let n = &app.vault.as_ref().unwrap().notes[0];
+            (n.frontmatter.id.clone(), n.path.clone())
+        };
+        app.select_note(&id);
+        app.active_note.as_mut().unwrap().content = "EDITADO EM MEMORIA".into();
+        app.dirty = true;
+
+        app.append_diary_entry("nova entrada do diario").unwrap();
+
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            on_disk.contains("EDITADO EM MEMORIA"),
+            "unsaved active-note edit must be flushed before the diary reload"
+        );
+        assert!(!app.dirty, "active note is clean after a successful append");
     }
 
     #[test]
