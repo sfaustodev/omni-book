@@ -4,7 +4,6 @@ use eframe::egui;
 use egui::RichText;
 use omninote_core::types::{ConfirmAction, Note, NoteType};
 use omninote_core::vault::Vault;
-use std::path::PathBuf;
 
 /// OpenDyslexic, bundled in the binary (OFL). Selectable via the a11y font setting.
 const OPEN_DYSLEXIC_OTF: &[u8] = include_bytes!("../assets/fonts/OpenDyslexic-Regular.otf");
@@ -106,13 +105,14 @@ pub struct OmniNoteApp {
 
 impl OmniNoteApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let last_vault = dirs::config_dir()
-            .map(|d| d.join("omninote").join("last_vault"))
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .map(PathBuf::from)
-            .filter(|p| p.exists());
-
-        let vault = last_vault.and_then(|p| Vault::open(p).ok());
+        // Resolve the startup vault through the shared core resolver so a CLI
+        // `omninote vault switch` is honored here too (the registry is the single
+        // source of truth). A corrupt registry resolves to no vault rather than a
+        // wrong one.
+        let vault = omninote_core::vaults::resolve_active(None)
+            .ok()
+            .flatten()
+            .and_then(|p| Vault::open(p).ok());
         register_custom_fonts(&cc.egui_ctx);
         // Required for `egui::Image::new("file://…")` to load attachments from
         // disk in the inline renderer (CAD-25 Slice 3 image embeds).
@@ -249,6 +249,14 @@ impl OmniNoteApp {
     pub fn flush_active(&mut self) -> bool {
         if !self.dirty {
             return true;
+        }
+        // A pending external-change conflict means the file on disk holds content
+        // we haven't reconciled (e.g. an `omninote capture` write). Refuse to flush
+        // over it from ANY caller — auto-save, note switch, or window close — until
+        // the user resolves the conflict modal; otherwise the in-memory buffer
+        // silently clobbers the external write.
+        if self.external_change_pending {
+            return false;
         }
         let note = match self.active_note.take() {
             Some(n) => n,
@@ -609,6 +617,24 @@ mod tests {
             "select_note deve limpar a seleção stale"
         );
         assert!(app.active_note.is_some(), "nota B deve ficar ativa");
+    }
+
+    #[test]
+    fn flush_active_refuses_while_external_change_pending() {
+        // A pending conflict must block flush from EVERY caller (not just
+        // auto-save): switching notes or closing the window must not overwrite the
+        // external write that raised the conflict modal.
+        let (mut app, _dir) = test_app();
+        let id = app.vault.as_ref().unwrap().notes[0].frontmatter.id.clone();
+        app.select_note(&id);
+        app.active_note.as_mut().unwrap().content = "UNSAVED".into();
+        app.dirty = true;
+        app.external_change_pending = true;
+        assert!(
+            !app.flush_active(),
+            "flush refused while a conflict is pending"
+        );
+        assert!(app.dirty, "nothing saved — still dirty");
     }
 
     #[test]

@@ -563,13 +563,19 @@ fn write_atomic(dest: &Path, bytes: &[u8]) -> Result<(), String> {
         .and_then(|s| s.to_str())
         .unwrap_or("Inbox.md");
     let tmp = dir.join(format!(".{stem}.{}.tmp", std::process::id()));
-    {
+    // Stage the write; on ANY failure (create/write/sync OR rename) remove the
+    // temp so a partial staging file never litters the vault.
+    let staged = (|| -> Result<(), String> {
         let mut f = fs::File::create(&tmp).map_err(|e| format!("create temp: {e}"))?;
         f.write_all(bytes).map_err(|e| format!("write temp: {e}"))?;
         f.sync_all().map_err(|e| format!("sync temp: {e}"))?;
+        Ok(())
+    })();
+    if let Err(e) = staged {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
     }
     fs::rename(&tmp, dest).map_err(|e| {
-        // Best-effort cleanup so a failed rename doesn't litter the vault.
         let _ = fs::remove_file(&tmp);
         format!("rename temp: {e}")
     })
