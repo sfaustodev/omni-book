@@ -91,32 +91,31 @@ fn register_custom_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
-/// Consume a keyboard shortcut with EXACT modifier matching, ignoring key
-/// repeats; returns whether it fired this frame. egui's own `consume_shortcut`
-/// matches *logically* — it ignores extra Alt/Shift — so on Windows/Linux, where
-/// AltGr arrives as Ctrl+Alt and maps to `command`, every COMMAND+key chord also
-/// fires while the user types an AltGr character (typing `€` = AltGr+E would trip
-/// Cmd+E; `\` would trip Cmd+\). `matches_exact` requires Alt/Shift to match
-/// exactly while still honoring the cross-platform command/ctrl mapping, so a
-/// chord fires only when truly intended.
-pub(crate) fn consume_shortcut_exact(
-    i: &mut egui::InputState,
-    sc: &egui::KeyboardShortcut,
-) -> bool {
+/// Consume an application keyboard shortcut, returning whether it fired this
+/// frame. AltGr-safe: rejects any event where Alt is held. No app shortcut uses
+/// Alt, and on Windows/Linux AltGr arrives as Ctrl+Alt and maps to `command`, so
+/// egui's own `consume_shortcut` (a logical match that ignores extra modifiers)
+/// fires every COMMAND chord while the user types an AltGr character — `€`
+/// (AltGr+E) would trip Cmd+E. Shift, by contrast, is matched logically: a
+/// pattern's Shift must be present, but extra Shift is tolerated, because some
+/// layouts need Shift to produce a shortcut's key (`=` is Shift+0 on German
+/// QWERTZ, so invoking Cmd+= sends Ctrl+Shift+Equals). Key repeats are consumed
+/// too — so a held chord doesn't leak to a focused editor — but only a fresh
+/// press fires the action.
+pub(crate) fn consume_app_shortcut(i: &mut egui::InputState, sc: &egui::KeyboardShortcut) -> bool {
     let mut hit = false;
     i.events.retain(|e| {
-        let is_match = matches!(
+        let matched = matches!(
             e,
-            egui::Event::Key {
-                key,
-                pressed: true,
-                repeat: false,
-                modifiers,
-                ..
-            } if *key == sc.logical_key && modifiers.matches_exact(sc.modifiers)
+            egui::Event::Key { key, pressed: true, modifiers, .. }
+            if *key == sc.logical_key
+                && !modifiers.alt
+                && modifiers.matches_logically(sc.modifiers)
         );
-        hit |= is_match;
-        !is_match
+        if matched && matches!(e, egui::Event::Key { repeat: false, .. }) {
+            hit = true;
+        }
+        !matched
     });
     hit
 }
@@ -525,11 +524,11 @@ impl eframe::App for OmniNoteApp {
         // Request repaint regularly so watcher events are noticed even when idle
         ctx.request_repaint_after(Duration::from_millis(500));
 
-        // All shortcuts go through `consume_shortcut_exact` (EXACT modifier match),
-        // not egui's logical `consume_shortcut`: the latter ignores extra Alt/Shift,
-        // so on Windows/Linux AltGr (= Ctrl+Alt) tripped every COMMAND chord (typing
-        // `€` = AltGr+E fired Cmd+E). COMMAND maps to Cmd on macOS / Ctrl elsewhere;
-        // the consume removes the event so a focused TextEdit doesn't also see it.
+        // All shortcuts go through `consume_app_shortcut` (AltGr-safe — rejects
+        // Alt) instead of egui's logical `consume_shortcut`, which fired every
+        // COMMAND chord while typing an AltGr char on Windows/Linux (`€` = AltGr+E
+        // tripped Cmd+E). COMMAND maps to Cmd on macOS / Ctrl elsewhere; the consume
+        // removes the event so a focused TextEdit doesn't also see it.
         let new_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::N);
         let edit_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::E);
         let settings_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Comma);
@@ -565,16 +564,16 @@ impl eframe::App for OmniNoteApp {
             rail,
         ) = ctx.input_mut(|i| {
             (
-                consume_shortcut_exact(i, &new_sc),
-                consume_shortcut_exact(i, &edit_sc),
-                consume_shortcut_exact(i, &settings_sc),
-                consume_shortcut_exact(i, &close_sc),
-                consume_shortcut_exact(i, &palette_sc),
-                consume_shortcut_exact(i, &capture_sc),
-                consume_shortcut_exact(i, &dark_sc),
-                consume_shortcut_exact(i, &tickets_sc),
-                consume_shortcut_exact(i, &timeline_sc),
-                consume_shortcut_exact(i, &rail_sc),
+                consume_app_shortcut(i, &new_sc),
+                consume_app_shortcut(i, &edit_sc),
+                consume_app_shortcut(i, &settings_sc),
+                consume_app_shortcut(i, &close_sc),
+                consume_app_shortcut(i, &palette_sc),
+                consume_app_shortcut(i, &capture_sc),
+                consume_app_shortcut(i, &dark_sc),
+                consume_app_shortcut(i, &tickets_sc),
+                consume_app_shortcut(i, &timeline_sc),
+                consume_app_shortcut(i, &rail_sc),
             )
         });
         if tickets {
@@ -866,14 +865,14 @@ mod tests {
     }
 
     #[test]
-    fn shortcuts_match_exact_modifiers_altgr_safe() {
-        // Regression (triad round 3, agy + empirical probe): egui's consume_shortcut
-        // matches logically and ignores extra Alt/Shift, so on Windows/Linux AltGr
+    fn shortcuts_reject_alt_but_tolerate_layout_shift() {
+        // Regression (triad rounds 3-4 + probes). egui's consume_shortcut matches
+        // logically and ignores extra Alt/Shift, so on Windows/Linux AltGr
         // (= Ctrl+Alt, mapped to command) tripped every COMMAND chord — typing `€`
-        // (AltGr+E) fired Cmd+E, `\` fired Cmd+\. consume_shortcut_exact requires
-        // Alt/Shift to match exactly (keeping the cross-platform command map) and
-        // ignores key repeats. Drives the real helper, so reverting any callsite to
-        // the logical consume_shortcut makes this go red.
+        // (AltGr+E) fired Cmd+E. consume_app_shortcut rejects Alt (the fix) but
+        // TOLERATES Shift, because some layouts need Shift to produce a key (`=` is
+        // Shift+0 on QWERTZ, so invoking Cmd+= sends Ctrl+Shift+Equals — a strict
+        // exact match would wrongly break it). Drives the real helper.
         use egui::{Event, Key, Modifiers};
         let fires =
             |sc: &egui::KeyboardShortcut, key: Key, mods: Modifiers, repeat: bool| -> bool {
@@ -888,7 +887,7 @@ mod tests {
                 });
                 let mut hit = false;
                 let _ = ctx.run(input, |ctx| {
-                    hit = ctx.input_mut(|i| consume_shortcut_exact(i, sc));
+                    hit = ctx.input_mut(|i| consume_app_shortcut(i, sc));
                 });
                 hit
             };
@@ -899,7 +898,7 @@ mod tests {
             ..Default::default()
         };
         let cmd_e = egui::KeyboardShortcut::new(Modifiers::COMMAND, Key::E);
-        let cmd_bs = egui::KeyboardShortcut::new(Modifiers::COMMAND, Key::Backslash);
+        let cmd_eq = egui::KeyboardShortcut::new(Modifiers::COMMAND, Key::Equals);
         let cmd_shift_j =
             egui::KeyboardShortcut::new(Modifiers::COMMAND.plus(Modifiers::SHIFT), Key::J);
 
@@ -907,10 +906,6 @@ mod tests {
         assert!(
             fires(&cmd_e, Key::E, Modifiers::COMMAND, false),
             "Cmd/Ctrl+E"
-        );
-        assert!(
-            fires(&cmd_bs, Key::Backslash, Modifiers::COMMAND, false),
-            "Cmd/Ctrl+\\"
         );
         assert!(
             fires(
@@ -921,15 +916,22 @@ mod tests {
             ),
             "Cmd/Ctrl+Shift+J"
         );
+        // Layout Shift tolerated: on QWERTZ `=` is Shift+0, so Cmd+= arrives as
+        // Ctrl+Shift+Equals and MUST still fire (the agy round-4 regression).
+        assert!(
+            fires(
+                &cmd_eq,
+                Key::Equals,
+                Modifiers::COMMAND.plus(Modifiers::SHIFT),
+                false
+            ),
+            "Cmd+= with layout Shift (QWERTZ) must fire"
+        );
 
-        // The € / Cmd+E bug and friends: AltGr and any extra Alt/Shift must not fire.
+        // Alt is rejected — the € / Cmd+E bug.
         assert!(
             !fires(&cmd_e, Key::E, altgr, false),
             "AltGr+E (€) must not fire Cmd+E"
-        );
-        assert!(
-            !fires(&cmd_bs, Key::Backslash, altgr, false),
-            "AltGr+\\ must not fire Cmd+\\"
         );
         assert!(
             !fires(
@@ -943,13 +945,14 @@ mod tests {
             ),
             "Cmd+Alt+E must not fire"
         );
+        // A Shift chord still requires its Shift.
         assert!(
             !fires(&cmd_shift_j, Key::J, Modifiers::COMMAND, false),
             "Cmd+J without Shift must not fire the Shift chord"
         );
-        // Key repeats are ignored, so holding a chord fires once, not per repeat.
-        // egui derives the `repeat` flag itself, so drive two presses without a
-        // release on one Context: egui marks the second a repeat.
+
+        // Held repeats fire once. egui derives the `repeat` flag, so drive two
+        // presses without a release on one Context: egui marks the second a repeat.
         let ctx = egui::Context::default();
         let press = || {
             let mut input = egui::RawInput::default();
@@ -962,12 +965,35 @@ mod tests {
             });
             let mut hit = false;
             let _ = ctx.run(input, |ctx| {
-                hit = ctx.input_mut(|i| consume_shortcut_exact(i, &cmd_e));
+                hit = ctx.input_mut(|i| consume_app_shortcut(i, &cmd_e));
             });
             hit
         };
         assert!(press(), "first press fires");
-        assert!(!press(), "held repeat must not fire");
+        assert!(!press(), "held repeat must not refire");
+    }
+
+    #[test]
+    fn gui_shortcuts_never_use_logical_consume_shortcut() {
+        // Mechanical gate (triad rounds 3-4): every shortcut must route through the
+        // AltGr-safe consume_app_shortcut. A bare egui consume-shortcut call matches
+        // logically and reintroduces the AltGr collision (typing `€` fires Cmd+E).
+        // Scan every GUI source; the needle is split so this test's own source is
+        // not a false positive.
+        let needle = ["consume", "_shortcut(&"].concat();
+        let src_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        for entry in std::fs::read_dir(&src_dir).expect("read src dir") {
+            let path = entry.expect("dir entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).expect("read source");
+            assert!(
+                !text.contains(&needle),
+                "{}: route shortcuts through consume_app_shortcut, not the logical egui call",
+                path.display()
+            );
+        }
     }
 
     #[test]
