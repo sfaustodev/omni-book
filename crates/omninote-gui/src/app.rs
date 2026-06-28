@@ -91,25 +91,32 @@ fn register_custom_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
-/// Consume a command-only `\` key press (the right-rail toggle shortcut),
-/// returning whether one fired this frame. Matched command-ONLY instead of via
-/// `InputState::consume_shortcut`, whose logical match ignores extra Alt/Shift:
-/// on layouts where `\` is typed with AltGr (delivered as Ctrl+Alt) that would
-/// trip the toggle and swallow the character in a focused editor.
-fn consume_rail_shortcut(i: &mut egui::InputState) -> bool {
+/// Consume a keyboard shortcut with EXACT modifier matching, ignoring key
+/// repeats; returns whether it fired this frame. egui's own `consume_shortcut`
+/// matches *logically* — it ignores extra Alt/Shift — so on Windows/Linux, where
+/// AltGr arrives as Ctrl+Alt and maps to `command`, every COMMAND+key chord also
+/// fires while the user types an AltGr character (typing `€` = AltGr+E would trip
+/// Cmd+E; `\` would trip Cmd+\). `matches_exact` requires Alt/Shift to match
+/// exactly while still honoring the cross-platform command/ctrl mapping, so a
+/// chord fires only when truly intended.
+pub(crate) fn consume_shortcut_exact(
+    i: &mut egui::InputState,
+    sc: &egui::KeyboardShortcut,
+) -> bool {
     let mut hit = false;
     i.events.retain(|e| {
-        let is_rail = matches!(
+        let is_match = matches!(
             e,
             egui::Event::Key {
-                key: egui::Key::Backslash,
+                key,
                 pressed: true,
+                repeat: false,
                 modifiers,
                 ..
-            } if modifiers.command_only()
+            } if *key == sc.logical_key && modifiers.matches_exact(sc.modifiers)
         );
-        hit |= is_rail;
-        !is_rail
+        hit |= is_match;
+        !is_match
     });
     hit
 }
@@ -518,8 +525,11 @@ impl eframe::App for OmniNoteApp {
         // Request repaint regularly so watcher events are noticed even when idle
         ctx.request_repaint_after(Duration::from_millis(500));
 
-        // `consume_shortcut` maps COMMAND to Cmd on macOS and Ctrl elsewhere, and
-        // consumes the event so a focused TextEdit doesn't also intercept it.
+        // All shortcuts go through `consume_shortcut_exact` (EXACT modifier match),
+        // not egui's logical `consume_shortcut`: the latter ignores extra Alt/Shift,
+        // so on Windows/Linux AltGr (= Ctrl+Alt) tripped every COMMAND chord (typing
+        // `€` = AltGr+E fired Cmd+E). COMMAND maps to Cmd on macOS / Ctrl elsewhere;
+        // the consume removes the event so a focused TextEdit doesn't also see it.
         let new_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::N);
         let edit_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::E);
         let settings_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Comma);
@@ -541,25 +551,32 @@ impl eframe::App for OmniNoteApp {
             egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
             egui::Key::H,
         );
-        let (new, toggle_edit, settings, close, palette, capture, toggle_dark, tickets, timeline) =
-            ctx.input_mut(|i| {
-                (
-                    i.consume_shortcut(&new_sc),
-                    i.consume_shortcut(&edit_sc),
-                    i.consume_shortcut(&settings_sc),
-                    i.consume_shortcut(&close_sc),
-                    i.consume_shortcut(&palette_sc),
-                    i.consume_shortcut(&capture_sc),
-                    i.consume_shortcut(&dark_sc),
-                    i.consume_shortcut(&tickets_sc),
-                    i.consume_shortcut(&timeline_sc),
-                )
-            });
-        // Cmd/Ctrl+\ toggles the right rail, matched command-ONLY (see
-        // `consume_rail_shortcut`) rather than via `consume_shortcut`, whose
-        // logical match ignores extra Alt/Shift — that would let AltGr (Ctrl+Alt)
-        // typing of `\` on international layouts trip the toggle and eat the char.
-        let rail = ctx.input_mut(consume_rail_shortcut);
+        let rail_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Backslash);
+        let (
+            new,
+            toggle_edit,
+            settings,
+            close,
+            palette,
+            capture,
+            toggle_dark,
+            tickets,
+            timeline,
+            rail,
+        ) = ctx.input_mut(|i| {
+            (
+                consume_shortcut_exact(i, &new_sc),
+                consume_shortcut_exact(i, &edit_sc),
+                consume_shortcut_exact(i, &settings_sc),
+                consume_shortcut_exact(i, &close_sc),
+                consume_shortcut_exact(i, &palette_sc),
+                consume_shortcut_exact(i, &capture_sc),
+                consume_shortcut_exact(i, &dark_sc),
+                consume_shortcut_exact(i, &tickets_sc),
+                consume_shortcut_exact(i, &timeline_sc),
+                consume_shortcut_exact(i, &rail_sc),
+            )
+        });
         if tickets {
             self.toggle_central_overlay(CentralOverlay::Tickets);
         }
@@ -849,57 +866,108 @@ mod tests {
     }
 
     #[test]
-    fn backslash_rail_shortcut_is_command_only() {
-        // Regression for the AltGr trap (triad round 2, codex + empirical probe):
-        // the rail toggle must fire on plain Cmd/Ctrl+\ but NOT when Alt or Shift
-        // is also held — otherwise AltGr (delivered as Ctrl+Alt) typing of `\` on
-        // international layouts would toggle the rail and swallow the character.
-        // Drives the real consume_rail_shortcut path, so a revert to the logical
-        // consume_shortcut (which ignores extra modifiers) makes this go red.
+    fn shortcuts_match_exact_modifiers_altgr_safe() {
+        // Regression (triad round 3, agy + empirical probe): egui's consume_shortcut
+        // matches logically and ignores extra Alt/Shift, so on Windows/Linux AltGr
+        // (= Ctrl+Alt, mapped to command) tripped every COMMAND chord — typing `€`
+        // (AltGr+E) fired Cmd+E, `\` fired Cmd+\. consume_shortcut_exact requires
+        // Alt/Shift to match exactly (keeping the cross-platform command map) and
+        // ignores key repeats. Drives the real helper, so reverting any callsite to
+        // the logical consume_shortcut makes this go red.
         use egui::{Event, Key, Modifiers};
-        let fires = |mods: Modifiers| -> bool {
-            let ctx = egui::Context::default();
+        let fires =
+            |sc: &egui::KeyboardShortcut, key: Key, mods: Modifiers, repeat: bool| -> bool {
+                let ctx = egui::Context::default();
+                let mut input = egui::RawInput::default();
+                input.events.push(Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat,
+                    modifiers: mods,
+                });
+                let mut hit = false;
+                let _ = ctx.run(input, |ctx| {
+                    hit = ctx.input_mut(|i| consume_shortcut_exact(i, sc));
+                });
+                hit
+            };
+        let altgr = Modifiers {
+            ctrl: true,
+            alt: true,
+            command: true,
+            ..Default::default()
+        };
+        let cmd_e = egui::KeyboardShortcut::new(Modifiers::COMMAND, Key::E);
+        let cmd_bs = egui::KeyboardShortcut::new(Modifiers::COMMAND, Key::Backslash);
+        let cmd_shift_j =
+            egui::KeyboardShortcut::new(Modifiers::COMMAND.plus(Modifiers::SHIFT), Key::J);
+
+        // Intended chords fire.
+        assert!(
+            fires(&cmd_e, Key::E, Modifiers::COMMAND, false),
+            "Cmd/Ctrl+E"
+        );
+        assert!(
+            fires(&cmd_bs, Key::Backslash, Modifiers::COMMAND, false),
+            "Cmd/Ctrl+\\"
+        );
+        assert!(
+            fires(
+                &cmd_shift_j,
+                Key::J,
+                Modifiers::COMMAND.plus(Modifiers::SHIFT),
+                false
+            ),
+            "Cmd/Ctrl+Shift+J"
+        );
+
+        // The € / Cmd+E bug and friends: AltGr and any extra Alt/Shift must not fire.
+        assert!(
+            !fires(&cmd_e, Key::E, altgr, false),
+            "AltGr+E (€) must not fire Cmd+E"
+        );
+        assert!(
+            !fires(&cmd_bs, Key::Backslash, altgr, false),
+            "AltGr+\\ must not fire Cmd+\\"
+        );
+        assert!(
+            !fires(
+                &cmd_e,
+                Key::E,
+                Modifiers {
+                    alt: true,
+                    ..Modifiers::COMMAND
+                },
+                false
+            ),
+            "Cmd+Alt+E must not fire"
+        );
+        assert!(
+            !fires(&cmd_shift_j, Key::J, Modifiers::COMMAND, false),
+            "Cmd+J without Shift must not fire the Shift chord"
+        );
+        // Key repeats are ignored, so holding a chord fires once, not per repeat.
+        // egui derives the `repeat` flag itself, so drive two presses without a
+        // release on one Context: egui marks the second a repeat.
+        let ctx = egui::Context::default();
+        let press = || {
             let mut input = egui::RawInput::default();
             input.events.push(Event::Key {
-                key: Key::Backslash,
+                key: Key::E,
                 physical_key: None,
                 pressed: true,
                 repeat: false,
-                modifiers: mods,
+                modifiers: Modifiers::COMMAND,
             });
             let mut hit = false;
             let _ = ctx.run(input, |ctx| {
-                hit = ctx.input_mut(consume_rail_shortcut);
+                hit = ctx.input_mut(|i| consume_shortcut_exact(i, &cmd_e));
             });
             hit
         };
-        assert!(
-            fires(Modifiers::COMMAND),
-            "plain Cmd/Ctrl+\\ toggles the rail"
-        );
-        assert!(
-            !fires(Modifiers {
-                alt: true,
-                ..Modifiers::COMMAND
-            }),
-            "Cmd+Alt+\\ must not fire"
-        );
-        assert!(
-            !fires(Modifiers {
-                shift: true,
-                ..Modifiers::COMMAND
-            }),
-            "Cmd+Shift+\\ must not fire"
-        );
-        assert!(
-            !fires(Modifiers {
-                ctrl: true,
-                alt: true,
-                command: true,
-                ..Default::default()
-            }),
-            "AltGr (Ctrl+Alt) typing of backslash must not fire"
-        );
+        assert!(press(), "first press fires");
+        assert!(!press(), "held repeat must not fire");
     }
 
     #[test]

@@ -65,7 +65,9 @@ impl OmniNoteApp {
                         .hint_text("🔍 Buscar... (Cmd+K)")
                         .desired_width(f32::INFINITY),
                 );
-                if ctx.input(|i| i.key_pressed(egui::Key::K) && i.modifiers.command) {
+                // `command_only()` (not `.command`) so AltGr (= Ctrl+Alt) typing of
+                // a `k`-keyed character on intl layouts doesn't steal editor focus.
+                if ctx.input(|i| i.key_pressed(egui::Key::K) && i.modifiers.command_only()) {
                     search.request_focus();
                 }
 
