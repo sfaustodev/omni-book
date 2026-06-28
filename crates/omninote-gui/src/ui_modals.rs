@@ -256,7 +256,14 @@ impl OmniNoteApp {
                                             .as_ref()
                                             .is_some_and(|n| &n.frontmatter.id == id)
                                         {
+                                            // Deleting the active note discards its
+                                            // buffer by design (no flush). Clear the
+                                            // dirty/conflict state too so a pending
+                                            // external-change modal isn't orphaned
+                                            // pointing at a note that no longer exists.
                                             self.active_note = None;
+                                            self.dirty = false;
+                                            self.external_change_pending = false;
                                         }
                                     }
                                 }
@@ -264,10 +271,17 @@ impl OmniNoteApp {
                             ConfirmAction::DeleteFolder(p) => {
                                 if let Some(v) = &mut self.vault {
                                     let _ = v.delete_folder(p);
-                                    if let Some(n) = &self.active_note {
-                                        if n.rel_path.starts_with(p) {
-                                            self.active_note = None;
-                                        }
+                                    if self
+                                        .active_note
+                                        .as_ref()
+                                        .is_some_and(|n| n.rel_path.starts_with(p))
+                                    {
+                                        // Same as DeleteNote: the active note is gone,
+                                        // so drop its dirty/conflict state to avoid an
+                                        // orphaned conflict modal.
+                                        self.active_note = None;
+                                        self.dirty = false;
+                                        self.external_change_pending = false;
                                     }
                                 }
                             }
@@ -340,10 +354,11 @@ impl OmniNoteApp {
     // Import helpers
 
     fn import_pdf(&mut self, path: &std::path::Path) {
-        // Importing replaces active_note. Refuse while an external-change
-        // conflict is unresolved so the pending edits (and the modal pointing at
-        // the current note) aren't silently dropped.
-        if self.external_change_pending {
+        // Importing replaces active_note, so flush the current buffer first. A
+        // pending external-change conflict blocks the flush — bail so the unsaved
+        // edits (and the modal pointing at the current note) aren't silently
+        // dropped. A clean-but-dirty buffer is saved here before we switch away.
+        if !self.flush_active() {
             return;
         }
         let content = match omninote_core::pdf::extract_text(path) {
@@ -382,7 +397,8 @@ impl OmniNoteApp {
     }
 
     fn import_chat(&mut self, path: &std::path::Path) {
-        if self.external_change_pending {
+        // Flush-first: see import_pdf — bail if a pending conflict blocks the flush.
+        if !self.flush_active() {
             return;
         }
         let content = match omninote_core::import::import_claude_chat(path) {
@@ -418,7 +434,8 @@ impl OmniNoteApp {
     }
 
     fn import_artifact(&mut self, path: &std::path::Path) {
-        if self.external_change_pending {
+        // Flush-first: see import_pdf — bail if a pending conflict blocks the flush.
+        if !self.flush_active() {
             return;
         }
         let content = match omninote_core::import::import_claude_artifact(path) {

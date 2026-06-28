@@ -227,6 +227,13 @@ impl OmniNoteApp {
             .set_title("Escolha (ou crie) uma pasta pra ser seu vault")
             .pick_folder()
         {
+            // Switching vaults abandons the active note (set to None below). Flush
+            // it into the CURRENT vault first; if a pending external-change
+            // conflict blocks the flush, bail so the user resolves the modal
+            // rather than silently discarding the unsaved buffer.
+            if !self.flush_active() {
+                return;
+            }
             match Vault::open(path) {
                 Ok(v) => {
                     let root = v.root.clone();
@@ -347,6 +354,22 @@ impl OmniNoteApp {
         }
         self.dirty = false;
         self.last_save = std::time::Instant::now();
+        true
+    }
+
+    /// Replace the active note after flushing the current one. Returns false (and
+    /// does NOT replace) when a pending external-change conflict blocks the flush
+    /// — the caller must bail so the user resolves the conflict modal first. Use
+    /// for EVERY user-initiated active-note change (open / create / import /
+    /// vault-switch / close / move); internal reloads (watcher refresh, post-save
+    /// resync) set `active_note` directly, since they don't drop unconfirmed edits.
+    #[must_use]
+    pub(crate) fn switch_active(&mut self, new: Option<Note>) -> bool {
+        if !self.flush_active() {
+            return false;
+        }
+        self.active_note = new;
+        self.dirty = false;
         true
     }
 
@@ -500,10 +523,9 @@ impl eframe::App for OmniNoteApp {
         }
         if close && self.active_note.is_some() {
             // Only drop the note if it actually persisted — otherwise keep it
-            // open (flush_active sets error_msg) so edits aren't silently lost.
-            if self.flush_active() {
-                self.active_note = None;
-            }
+            // open (flush_active sets error_msg / conflict modal) so edits aren't
+            // silently lost.
+            let _ = self.switch_active(None);
         }
         if new {
             self.show_new = true;
@@ -698,6 +720,75 @@ mod tests {
     }
 
     #[test]
+    fn switch_active_aborts_and_preserves_buffer_while_external_change_pending() {
+        // The shared chokepoint behind every user-initiated active-note change
+        // (vault switch, import, close, move, "Nova nota aqui"). A pending
+        // external-change conflict must make it return false WITHOUT replacing
+        // the active note, so the unsaved buffer + conflict modal survive.
+        let (mut app, _dir) = test_app();
+        let id_a = app.vault.as_ref().unwrap().notes[0].frontmatter.id.clone();
+        app.select_note(&id_a);
+        app.active_note.as_mut().unwrap().content = "UNSAVED EDIT".into();
+        app.dirty = true;
+        app.external_change_pending = true;
+
+        // Simulate a vault-switch / close attempt (new = None).
+        let switched = app.switch_active(None);
+
+        assert!(
+            !switched,
+            "switch must report failure while conflict pending"
+        );
+        let active = app.active_note.as_ref().expect("note A must stay active");
+        assert_eq!(active.frontmatter.id, id_a, "active note unchanged");
+        assert_eq!(
+            active.content, "UNSAVED EDIT",
+            "unsaved edits preserved, not dropped"
+        );
+        assert!(app.dirty, "still dirty — nothing flushed");
+        assert!(
+            app.external_change_pending,
+            "conflict stays pending for the user to resolve"
+        );
+    }
+
+    #[test]
+    fn switch_active_flushes_and_replaces_when_clean_path() {
+        // The success path: no conflict → flush the current buffer, then replace
+        // with the new note (here None, i.e. a close). The previous note's edits
+        // are persisted to disk by the flush, not lost.
+        let (mut app, _dir) = test_app();
+        let id_a = app.vault.as_ref().unwrap().notes[0].frontmatter.id.clone();
+        app.select_note(&id_a);
+        app.active_note.as_mut().unwrap().content = "edited body".into();
+        app.dirty = true;
+
+        let switched = app.switch_active(None);
+
+        assert!(switched, "clean switch succeeds");
+        assert!(
+            app.active_note.is_none(),
+            "active replaced with None (closed)"
+        );
+        assert!(!app.dirty, "dirty cleared after flush");
+        // The edit must have reached disk via the flush.
+        let on_disk = app
+            .vault
+            .as_ref()
+            .unwrap()
+            .notes
+            .iter()
+            .find(|n| n.frontmatter.id == id_a)
+            .expect("note A still in vault")
+            .content
+            .clone();
+        assert!(
+            on_disk.contains("edited body"),
+            "flush persisted the buffer before the switch; got: {on_disk}"
+        );
+    }
+
+    #[test]
     fn flush_active_refuses_while_external_change_pending() {
         // A pending conflict must block flush from EVERY caller (not just
         // auto-save): switching notes or closing the window must not overwrite the
@@ -713,6 +804,67 @@ mod tests {
             "flush refused while a conflict is pending"
         );
         assert!(app.dirty, "nothing saved — still dirty");
+    }
+
+    #[test]
+    fn quick_capture_does_not_lose_line_when_inbox_active_and_dirty() {
+        // FIX 2: with Inbox.md active AND the user's editor buffer dirty, a quick
+        // capture must lose neither side. Without flush-first+resync, the stale
+        // in-memory buffer would be auto-saved over the just-captured bullet.
+        // Flush-first persists the user's editor edits to disk, the append
+        // prepends the bullet on top, and the resync pulls the merged file back
+        // into the live buffer (clean) — so the next autosave can't undo it.
+        let (mut app, _dir) = test_app();
+
+        // First capture creates Inbox.md and loads it into the vault.
+        app.append_to_inbox("primeira captura").unwrap();
+        let inbox_id = app
+            .vault
+            .as_ref()
+            .unwrap()
+            .notes
+            .iter()
+            .find(|n| n.path.file_name().and_then(|s| s.to_str()) == Some("Inbox.md"))
+            .expect("Inbox.md created")
+            .frontmatter
+            .id
+            .clone();
+
+        // Make Inbox.md the active note, then simulate the user editing it in the
+        // main editor (unsaved buffer carrying a sentinel line).
+        app.select_note(&inbox_id);
+        let edited = format!(
+            "{}\nEDITOR EDIT LINE",
+            app.active_note.as_ref().unwrap().content
+        );
+        app.active_note.as_mut().unwrap().content = edited;
+        app.dirty = true;
+
+        // Capture a new line while Inbox is active+dirty.
+        app.append_to_inbox("segunda captura").unwrap();
+
+        // Disk must carry BOTH the captured bullet and the user's editor edit —
+        // neither is dropped.
+        let on_disk =
+            std::fs::read_to_string(app.vault.as_ref().unwrap().root.join("Inbox.md")).unwrap();
+        assert!(
+            on_disk.contains("segunda captura"),
+            "captured line must reach disk; got:\n{on_disk}"
+        );
+        assert!(
+            on_disk.contains("EDITOR EDIT LINE"),
+            "the user's unsaved editor edit must be flushed, not lost; got:\n{on_disk}"
+        );
+
+        // The live active buffer was resynced from disk, so it shows the captured
+        // line and is clean — the next autosave can't clobber the bullet.
+        let active = app.active_note.as_ref().expect("Inbox stays active");
+        assert!(
+            active.content.contains("segunda captura"),
+            "active buffer resynced with the captured line; got:\n{}",
+            active.content
+        );
+        assert!(!app.dirty, "resynced buffer is clean");
     }
 
     #[test]

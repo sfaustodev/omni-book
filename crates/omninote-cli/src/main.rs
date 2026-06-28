@@ -350,9 +350,63 @@ fn emit_meta(data: serde_json::Value, meta: serde_json::Value) -> anyhow::Result
     Ok(())
 }
 
+/// Whether the active subcommand was invoked with `--json`. Read once in
+/// `main()` so the top-level error chokepoint can pick the right failure shape
+/// (structured envelope vs plain stderr) for ANY error that escapes `run` via
+/// `?`, without each verb having to wrap its own operational errors.
+fn command_wants_json(cmd: &Command) -> bool {
+    match cmd {
+        Command::Vault { action } => match action {
+            VaultAction::Info { json }
+            | VaultAction::List { json }
+            | VaultAction::Add { json, .. }
+            | VaultAction::Switch { json, .. } => *json,
+        },
+        Command::Capture { json, .. } => *json,
+        Command::Note { action } => match action {
+            NoteAction::Search { json, .. } => *json,
+        },
+        Command::Link { action } => match action {
+            LinkAction::Unresolved { json } | LinkAction::Backlinks { json, .. } => *json,
+        },
+        Command::Diff { json, .. } => *json,
+        Command::Daily { json, .. } => *json,
+        Command::Template { action } => match action {
+            TemplateAction::List { json } | TemplateAction::Apply { json, .. } => *json,
+        },
+        Command::Diary { action } => match action {
+            DiaryAction::Append { json, .. } => *json,
+        },
+        Command::Human { action } => match action {
+            HumanAction::Ask { json, .. } => *json,
+        },
+        Command::Ticket { json, .. } => *json,
+        Command::Discipline { action } => match action {
+            DisciplineAction::Show { json, .. } => *json,
+        },
+        Command::Tag { action } => match action {
+            TagAction::Auto { json, .. } => *json,
+        },
+        Command::Ask { json, .. } => *json,
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    // Single error chokepoint: dispatch in `run`, then envelope ANY escaping
+    // error here. Under `--json` an operational failure (bad date, missing
+    // template, corrupt registry, etc.) must print `{ok:false,error}` on stdout
+    // and exit 1 — never a raw `anyhow` line on stderr that breaks a JSON
+    // consumer. Success-path envelopes are already printed inside `run`.
+    let json = command_wants_json(&cli.command);
+    if let Err(e) = run(cli).await {
+        fail(format!("{e:#}"), json);
+    }
+    Ok(())
+}
+
+async fn run(cli: Cli) -> anyhow::Result<()> {
     let vault_arg = cli.vault.clone();
 
     match cli.command {

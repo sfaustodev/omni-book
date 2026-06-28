@@ -151,15 +151,21 @@ impl OmniNoteApp {
 
             header.header_response.context_menu(|ui| {
                 if ui.button("📄+ Nova nota aqui").clicked() {
-                    if let Some(v) = &mut self.vault {
-                        let rel = folder.clone();
-                        match v.create_note(Some(&rel), "", NoteType::default()) {
-                            Ok(note) => {
-                                self.active_note = Some(note);
-                                self.editing = true;
-                                self.dirty = false;
+                    // Creating a note here replaces active_note, so flush the
+                    // current buffer first. A pending external-change conflict
+                    // blocks the flush — bail so the unsaved edits it protects
+                    // aren't dropped (the modal stays up for the user to resolve).
+                    if self.flush_active() {
+                        if let Some(v) = &mut self.vault {
+                            let rel = folder.clone();
+                            match v.create_note(Some(&rel), "", NoteType::default()) {
+                                Ok(note) => {
+                                    self.active_note = Some(note);
+                                    self.editing = true;
+                                    self.dirty = false;
+                                }
+                                Err(e) => self.error_msg = Some(e),
                             }
-                            Err(e) => self.error_msg = Some(e),
                         }
                     }
                     ui.close_menu();
@@ -383,10 +389,23 @@ impl OmniNoteApp {
             }
         }
         if let Some((id, dest)) = pending_move {
-            let res = self
-                .vault
-                .as_mut()
-                .map(|v| v.move_note_by_id(&id, dest.as_deref()));
+            // Moving the ACTIVE note re-syncs `active_note` from a fresh on-disk
+            // copy below, which would clobber any unsaved buffer edits. Flush them
+            // to disk first so the move carries the latest content; if a pending
+            // external-change conflict blocks the flush, skip the move so the
+            // edits and the conflict modal survive.
+            let moves_active = self
+                .active_note
+                .as_ref()
+                .is_some_and(|n| n.frontmatter.id == id);
+            let flush_ok = !moves_active || self.flush_active();
+            let res = if flush_ok {
+                self.vault
+                    .as_mut()
+                    .map(|v| v.move_note_by_id(&id, dest.as_deref()))
+            } else {
+                None
+            };
             match res {
                 Some(Ok(())) => {
                     if let Some(active) = &mut self.active_note {
