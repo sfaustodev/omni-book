@@ -974,26 +974,35 @@ mod tests {
     }
 
     #[test]
-    fn gui_shortcuts_never_use_logical_consume_shortcut() {
-        // Mechanical gate (triad rounds 3-4): every shortcut must route through the
-        // AltGr-safe consume_app_shortcut. A bare egui consume-shortcut call matches
-        // logically and reintroduces the AltGr collision (typing `€` fires Cmd+E).
-        // Scan every GUI source; the needle is split so this test's own source is
-        // not a false positive.
-        let needle = ["consume", "_shortcut(&"].concat();
-        let src_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        for entry in std::fs::read_dir(&src_dir).expect("read src dir") {
-            let path = entry.expect("dir entry").path();
-            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
-                continue;
+    fn gui_shortcuts_route_through_altgr_safe_helper() {
+        // Mechanical gate (triad rounds 3-5): every shortcut must route through the
+        // AltGr-safe consume_app_shortcut. egui's logical InputState shortcut method
+        // matches logically and reintroduces the AltGr collision (typing `€` fires
+        // Cmd+E). Recurse the whole crate src/. The needle is the bare call form, so
+        // it catches both the method-call and fully-qualified spellings; it is split
+        // (and this fn's name avoids it) so the test's own source isn't a false
+        // positive. A space before the paren is normalized away by `cargo fmt`, and
+        // the AltGr-safe helper's own name does not contain the needle.
+        let needle = ["consume", "_shortcut("].concat();
+        fn scan(dir: &std::path::Path, needle: &str) {
+            for entry in std::fs::read_dir(dir).expect("read dir") {
+                let path = entry.expect("dir entry").path();
+                if path.is_dir() {
+                    scan(&path, needle);
+                } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                    let text = std::fs::read_to_string(&path).expect("read source");
+                    assert!(
+                        !text.contains(needle),
+                        "{}: route shortcuts through consume_app_shortcut, not egui's logical method",
+                        path.display()
+                    );
+                }
             }
-            let text = std::fs::read_to_string(&path).expect("read source");
-            assert!(
-                !text.contains(&needle),
-                "{}: route shortcuts through consume_app_shortcut, not the logical egui call",
-                path.display()
-            );
         }
+        scan(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &needle,
+        );
     }
 
     #[test]
