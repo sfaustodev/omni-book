@@ -33,9 +33,11 @@ impl OmniNoteApp {
                     .small_button("×")
                     .on_hover_text("Fechar (Cmd+W)")
                     .clicked()
-                    && self.flush_active()
                 {
-                    self.active_note = None;
+                    // Closing the tab drops the active note: flush-first so a
+                    // pending external-change conflict keeps the note open
+                    // instead of discarding the unsaved buffer.
+                    let _ = self.switch_active(None);
                 }
             } else {
                 ui.label(RichText::new("sem nota").weak().size(12.0));

@@ -229,10 +229,34 @@ impl OmniNoteApp {
         }
     }
 
-    fn append_to_inbox(&mut self, line: &str) -> Result<(), String> {
+    pub(crate) fn append_to_inbox(&mut self, line: &str) -> Result<(), String> {
+        // Flush-first: if the active note IS Inbox.md and dirty, an un-flushed
+        // buffer would be auto-saved over the line we're about to capture (and
+        // the post-append reload + self_write_until would mask that loss as our
+        // own write). Persist the buffer before appending so disk reflects the
+        // user's edits, then resync `active_note` from the reloaded vault so the
+        // captured bullet is in the live buffer. A pending external-change
+        // conflict blocks the flush — bail rather than clobber the disk file.
+        if !self.flush_active() {
+            return Err("conflito externo pendente — resolva o modal antes de capturar".into());
+        }
         let v = self.vault.as_mut().ok_or("sem vault")?;
         v.append_inbox_line(line)?;
         v.reload_notes();
+        // Suppress the watcher's external-change modal for our own write — the
+        // same self-write window the GUI's save path opens.
+        self.self_write_until = std::time::Instant::now() + std::time::Duration::from_millis(400);
+        // Resync the active buffer from disk if it was Inbox.md (or any note the
+        // append touched), so the just-captured bullet shows immediately instead
+        // of being overwritten by the next autosave of the pre-capture buffer.
+        if let Some(active_path) = self.active_note.as_ref().map(|n| n.path.clone()) {
+            if let Some(v) = &self.vault {
+                if let Some(fresh) = v.notes.iter().find(|n| n.path == active_path).cloned() {
+                    self.active_note = Some(fresh);
+                    self.dirty = false;
+                }
+            }
+        }
         Ok(())
     }
 }

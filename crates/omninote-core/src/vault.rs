@@ -4,6 +4,19 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
+/// Result of a quick-capture write to `Inbox.md`. The shared seam between the
+/// `omninote capture` CLI verb and the future global-hotkey daemon, so both
+/// report the same `{path, bullet, total_lines}` shape from one tested path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaptureOutcome {
+    /// Absolute path to the `Inbox.md` that received the line.
+    pub path: PathBuf,
+    /// The rendered bullet that was prepended, e.g. `- 2026-06-27 14:03 · buy milk`.
+    pub bullet: String,
+    /// Count of bullet lines (`- …`) in `Inbox.md` after the write.
+    pub total_lines: usize,
+}
+
 pub struct Vault {
     pub root: PathBuf,
     pub notes: Vec<Note>,
@@ -356,6 +369,18 @@ impl Vault {
     /// Quick-capture: prepend a timestamped bullet to `Inbox.md` (Q-06 — plain
     /// bullets at the top of the file, newest first, append-friendly). Creates
     /// the file with an `# Inbox` heading on first capture.
+    ///
+    /// Newest-first means inserting at the TOP after the heading, so a plain
+    /// O_APPEND write can't be used: it's read-modify-write. The write is made
+    /// crash-safe by staging the new content in a sibling temp file, fsyncing it,
+    /// then atomically renaming over `Inbox.md` — so a crash mid-write can never
+    /// leave a truncated or empty inbox; a reader sees either the old or the new
+    /// file, never a torn one.
+    ///
+    /// A cross-process advisory lock for concurrent WRITERS (two simultaneous
+    /// captures racing the read-modify-write) is intentionally deferred to the
+    /// future hotkey daemon, where concurrent capture becomes real. For the
+    /// single-user CLI today, atomic-rename is the right level.
     pub fn append_inbox_line(&self, text: &str) -> Result<(), String> {
         let line = text.trim();
         if line.is_empty() {
@@ -373,7 +398,33 @@ impl Vault {
         } else {
             format!("{bullet}{existing}")
         };
-        std::fs::write(&inbox, new).map_err(|e| e.to_string())
+        write_atomic(&inbox, new.as_bytes())
+    }
+
+    /// Quick-capture with a reportable outcome — the shared seam for the
+    /// `omninote capture` CLI verb and the future hotkey daemon. Wraps
+    /// [`append_inbox_line`](Self::append_inbox_line) (same trim/empty rules,
+    /// same newest-first bullet), then reads `Inbox.md` back to report the exact
+    /// bullet written and the running bullet count.
+    ///
+    /// Reading the file back (rather than re-rendering the bullet) avoids a
+    /// second `Local::now()` that could disagree with the persisted timestamp
+    /// across a minute boundary.
+    pub fn capture_line(&self, text: &str) -> Result<CaptureOutcome, String> {
+        self.append_inbox_line(text)?;
+        let inbox = self.root.join("Inbox.md");
+        let content = std::fs::read_to_string(&inbox).map_err(|e| e.to_string())?;
+        let bullet = content
+            .lines()
+            .find(|l| l.starts_with("- "))
+            .map(str::to_string)
+            .ok_or_else(|| "captured bullet not found in Inbox.md".to_string())?;
+        let total_lines = content.lines().filter(|l| l.starts_with("- ")).count();
+        Ok(CaptureOutcome {
+            path: inbox,
+            bullet,
+            total_lines,
+        })
     }
 
     /// Resolve an embed filename (`![[foo.png]]`) to an absolute path **inside**
@@ -496,6 +547,38 @@ fn insert_after_blank(rest: &str, bullet: &str) -> String {
     } else {
         format!("\n{bullet}{rest}")
     }
+}
+
+/// Write `bytes` to `dest` crash-safely: stage in a sibling temp file, fsync the
+/// data and the file, then atomically `rename` over `dest`. A crash at any point
+/// leaves either the prior file or the complete new one — never a torn/empty
+/// result. The temp file shares `dest`'s directory so the rename stays on one
+/// filesystem (cross-device rename would fail). A unique temp name avoids
+/// clobbering a concurrent writer's staging file.
+fn write_atomic(dest: &Path, bytes: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    let dir = dest.parent().unwrap_or_else(|| Path::new("."));
+    let stem = dest
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Inbox.md");
+    let tmp = dir.join(format!(".{stem}.{}.tmp", std::process::id()));
+    // Stage the write; on ANY failure (create/write/sync OR rename) remove the
+    // temp so a partial staging file never litters the vault.
+    let staged = (|| -> Result<(), String> {
+        let mut f = fs::File::create(&tmp).map_err(|e| format!("create temp: {e}"))?;
+        f.write_all(bytes).map_err(|e| format!("write temp: {e}"))?;
+        f.sync_all().map_err(|e| format!("sync temp: {e}"))?;
+        Ok(())
+    })();
+    if let Err(e) = staged {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
+    }
+    fs::rename(&tmp, dest).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        format!("rename temp: {e}")
+    })
 }
 
 pub fn sanitize_filename_pub(name: &str) -> String {
@@ -948,6 +1031,112 @@ mod tests {
         assert!(pos_seg < pos_pri);
         // Empty input rejected.
         assert!(vault.append_inbox_line("   ").is_err());
+    }
+
+    #[test]
+    fn capture_line_appends_bullet_and_reports_total() {
+        let (vault, _dir) = temp_vault();
+        let out = vault.capture_line("comprar leite").unwrap();
+        assert_eq!(out.path, vault.root.join("Inbox.md"));
+        assert!(out.bullet.starts_with("- "));
+        assert!(out.bullet.ends_with("· comprar leite"));
+        assert_eq!(out.total_lines, 1);
+        // The reported bullet is exactly what landed on disk.
+        let content = std::fs::read_to_string(&out.path).unwrap();
+        assert!(content.contains(&out.bullet));
+
+        let out2 = vault.capture_line("comprar pão").unwrap();
+        assert_eq!(out2.total_lines, 2);
+    }
+
+    #[test]
+    fn capture_line_prepends_newest_first() {
+        let (vault, _dir) = temp_vault();
+        vault.capture_line("primeira").unwrap();
+        let newest = vault.capture_line("segunda").unwrap();
+        // The outcome's bullet is the just-written (newest) line.
+        assert!(newest.bullet.contains("segunda"));
+        let content = std::fs::read_to_string(&newest.path).unwrap();
+        assert!(content.find("segunda").unwrap() < content.find("primeira").unwrap());
+    }
+
+    #[test]
+    fn capture_line_rejects_empty_and_whitespace() {
+        let (vault, _dir) = temp_vault();
+        assert_eq!(vault.capture_line(""), Err("linha vazia".into()));
+        assert_eq!(vault.capture_line("   \t  "), Err("linha vazia".into()));
+        // A rejected capture must not create the inbox.
+        assert!(!vault.root.join("Inbox.md").exists());
+    }
+
+    #[test]
+    fn capture_line_creates_inbox_when_absent() {
+        let (vault, _dir) = temp_vault();
+        assert!(!vault.root.join("Inbox.md").exists());
+        let out = vault.capture_line("first ever").unwrap();
+        let content = std::fs::read_to_string(&out.path).unwrap();
+        assert!(content.starts_with("# Inbox\n"));
+        assert_eq!(out.total_lines, 1);
+    }
+
+    #[test]
+    fn capture_line_preserves_existing_non_heading_body() {
+        let (vault, _dir) = temp_vault();
+        // A pre-existing Inbox with prose but no recognized `# Inbox` heading:
+        // the bullet is prepended and the prior body is preserved below it.
+        std::fs::write(vault.root.join("Inbox.md"), "prosa antiga\nmais prosa\n").unwrap();
+        let out = vault.capture_line("nova captura").unwrap();
+        let content = std::fs::read_to_string(&out.path).unwrap();
+        assert!(content.contains("prosa antiga"));
+        assert!(content.contains("mais prosa"));
+        assert!(content.contains("nova captura"));
+        // Bullet precedes the preserved prose.
+        assert!(content.find("nova captura").unwrap() < content.find("prosa antiga").unwrap());
+    }
+
+    #[test]
+    fn capture_outcome_total_lines_counts_only_bullet_lines() {
+        let (vault, _dir) = temp_vault();
+        vault.capture_line("um").unwrap();
+        vault.capture_line("dois").unwrap();
+        let out = vault.capture_line("tres").unwrap();
+        // Three captures → three bullets; the `# Inbox` heading + blank line do
+        // not count toward total_lines.
+        assert_eq!(out.total_lines, 3);
+        let content = std::fs::read_to_string(&out.path).unwrap();
+        let non_bullet = content
+            .lines()
+            .filter(|l| !l.starts_with("- ") && !l.is_empty())
+            .count();
+        // Only the heading line is a non-bullet, non-empty line.
+        assert_eq!(non_bullet, 1);
+    }
+
+    #[test]
+    fn append_inbox_never_leaves_partial_and_preserves_existing() {
+        let (vault, _dir) = temp_vault();
+        // Seed an existing inbox with a prior bullet.
+        vault.append_inbox_line("primeira").unwrap();
+        let before = std::fs::read_to_string(vault.root.join("Inbox.md")).unwrap();
+        assert!(before.contains("primeira"));
+
+        // A second capture: the atomic rewrite must keep the file whole.
+        vault.append_inbox_line("segunda").unwrap();
+        let inbox = vault.root.join("Inbox.md");
+        let after = std::fs::read_to_string(&inbox).unwrap();
+        // Never empty/truncated; the heading and the prior bullet survive.
+        assert!(!after.is_empty());
+        assert!(after.starts_with("# Inbox\n"));
+        assert!(after.contains("primeira"));
+        assert!(after.contains("segunda"));
+
+        // No staging temp file is left behind in the vault dir.
+        let leftover: Vec<_> = std::fs::read_dir(&vault.root)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(leftover.is_empty(), "stray temp file left in vault");
     }
 
     #[test]

@@ -10,6 +10,7 @@
 //! omninote-cli vault list
 //! omninote-cli vault add NAME PATH
 //! omninote-cli vault switch NAME
+//! omninote-cli capture TEXT
 //! omninote-cli note search QUERY [--case] [--limit N] [--titles-only]
 //! omninote-cli link unresolved
 //! omninote-cli link backlinks FILE
@@ -54,6 +55,14 @@ enum Command {
     Vault {
         #[command(subcommand)]
         action: VaultAction,
+    },
+    /// Quick-capture one line to `Inbox.md` (CAD-24). Prepends a timestamped
+    /// bullet, newest-first; creates the inbox on first capture.
+    Capture {
+        /// The line to capture — wrap in quotes for multi-word text.
+        text: String,
+        #[arg(long)]
+        json: bool,
     },
     /// Note operations.
     Note {
@@ -282,38 +291,46 @@ fn format_anchor(a: &Option<omninote_core::wikilinks::Anchor>) -> Option<String>
     })
 }
 
-/// Resolve the vault root: `--vault`/env first (handled by clap), then the
-/// active entry in `vaults.toml`, then the legacy `last_vault` file.
-///
-/// An explicitly-set active entry wins outright — even if its path is missing,
-/// we surface *that* vault (so the open fails loudly on the intended target)
-/// rather than silently falling through to a different legacy vault. Legacy is
-/// consulted only when the registry names no active entry.
-fn resolve_vault(arg: Option<PathBuf>) -> Option<PathBuf> {
-    if let Some(p) = arg {
-        return Some(p);
+/// Emit `msg` as a `--json` error envelope (or plain stderr) and exit non-zero.
+/// Centralizes the failure path so every verb keeps a consistent contract:
+/// under `--json` a resolution/open failure is a structured `{ok:false,error}`
+/// envelope, never a raw `anyhow` line that would break a JSON consumer.
+fn fail(msg: impl Into<String>, json: bool) -> ! {
+    let msg = msg.into();
+    if json {
+        // Best-effort print; if stdout serialization somehow fails we still exit
+        // non-zero so the caller sees the failure.
+        let _ = Envelope::<serde_json::Value>::error(msg).print();
+    } else {
+        eprintln!("{msg}");
     }
-    if let Some(reg) =
-        omninote_core::vaults::registry_path().and_then(|rp| omninote_core::vaults::load(&rp).ok())
-    {
-        if let Some(active) = reg.active.as_deref() {
-            return reg.get(active).map(|e| e.path.clone());
-        }
-    }
-    let last = dirs::config_dir()?.join("omninote").join("last_vault");
-    std::fs::read_to_string(last)
-        .ok()
-        .map(|s| PathBuf::from(s.trim()))
-        .filter(|p| p.exists())
+    std::process::exit(1);
 }
 
-/// Resolve or bail with the standard "no vault" error.
-fn require_vault(arg: Option<PathBuf>) -> anyhow::Result<PathBuf> {
-    resolve_vault(arg).ok_or_else(|| {
-        anyhow::anyhow!(
-            "no vault: pass --vault, set OMNINOTE_VAULT, run `vault add`, or open the GUI once"
-        )
-    })
+/// Resolve the active vault root or bail. Delegates the precedence ladder
+/// (`--vault`/env → registry active → legacy `last_vault`) to
+/// [`omninote_core::vaults::resolve_active`] — the single source of truth so
+/// other consumers (the future capture daemon) share one tested resolver. A
+/// corrupt registry surfaces as an explicit error (fail-closed) rather than a
+/// silent fallback to the wrong vault. On failure prints the `--json` error
+/// envelope (or plain stderr) and exits rather than propagating `?`.
+fn require_vault_json(arg: Option<PathBuf>, json: bool) -> PathBuf {
+    match omninote_core::vaults::resolve_active(arg) {
+        Ok(Some(p)) => p,
+        Ok(None) => fail(
+            "no vault: pass --vault, set OMNINOTE_VAULT, run `vault add`, or open the GUI once",
+            json,
+        ),
+        Err(e) => fail(format!("vault resolution failed: {e}"), json),
+    }
+}
+
+/// `--json`-aware vault open: prints the error envelope and exits on failure.
+fn open_vault_json(root: PathBuf, json: bool) -> omninote_core::vault::Vault {
+    match omninote_core::vault::Vault::open(root) {
+        Ok(v) => v,
+        Err(e) => fail(format!("vault open failed: {e}"), json),
+    }
 }
 
 fn parse_naive_date(s: &str) -> anyhow::Result<chrono::NaiveDate> {
@@ -333,17 +350,70 @@ fn emit_meta(data: serde_json::Value, meta: serde_json::Value) -> anyhow::Result
     Ok(())
 }
 
+/// Whether the active subcommand was invoked with `--json`. Read once in
+/// `main()` so the top-level error chokepoint can pick the right failure shape
+/// (structured envelope vs plain stderr) for ANY error that escapes `run` via
+/// `?`, without each verb having to wrap its own operational errors.
+fn command_wants_json(cmd: &Command) -> bool {
+    match cmd {
+        Command::Vault { action } => match action {
+            VaultAction::Info { json }
+            | VaultAction::List { json }
+            | VaultAction::Add { json, .. }
+            | VaultAction::Switch { json, .. } => *json,
+        },
+        Command::Capture { json, .. } => *json,
+        Command::Note { action } => match action {
+            NoteAction::Search { json, .. } => *json,
+        },
+        Command::Link { action } => match action {
+            LinkAction::Unresolved { json } | LinkAction::Backlinks { json, .. } => *json,
+        },
+        Command::Diff { json, .. } => *json,
+        Command::Daily { json, .. } => *json,
+        Command::Template { action } => match action {
+            TemplateAction::List { json } | TemplateAction::Apply { json, .. } => *json,
+        },
+        Command::Diary { action } => match action {
+            DiaryAction::Append { json, .. } => *json,
+        },
+        Command::Human { action } => match action {
+            HumanAction::Ask { json, .. } => *json,
+        },
+        Command::Ticket { json, .. } => *json,
+        Command::Discipline { action } => match action {
+            DisciplineAction::Show { json, .. } => *json,
+        },
+        Command::Tag { action } => match action {
+            TagAction::Auto { json, .. } => *json,
+        },
+        Command::Ask { json, .. } => *json,
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    // Single error chokepoint: dispatch in `run`, then envelope ANY escaping
+    // error here. Under `--json` an operational failure (bad date, missing
+    // template, corrupt registry, etc.) must print `{ok:false,error}` on stdout
+    // and exit 1 — never a raw `anyhow` line on stderr that breaks a JSON
+    // consumer. Success-path envelopes are already printed inside `run`.
+    let json = command_wants_json(&cli.command);
+    if let Err(e) = run(cli).await {
+        fail(format!("{e:#}"), json);
+    }
+    Ok(())
+}
+
+async fn run(cli: Cli) -> anyhow::Result<()> {
     let vault_arg = cli.vault.clone();
 
     match cli.command {
         Command::Vault { action } => match action {
             VaultAction::Info { json } => {
-                let vault_root = require_vault(vault_arg)?;
-                let vault = omninote_core::vault::Vault::open(vault_root)
-                    .map_err(|e| anyhow::anyhow!("vault open failed: {e}"))?;
+                let vault_root = require_vault_json(vault_arg, json);
+                let vault = open_vault_json(vault_root, json);
                 let stats = vault.index.stats();
                 if json {
                     emit(json!({
@@ -459,9 +529,8 @@ async fn main() -> anyhow::Result<()> {
                 titles_only,
                 json,
             } => {
-                let vault_root = require_vault(vault_arg)?;
-                let vault = omninote_core::vault::Vault::open(vault_root)
-                    .map_err(|e| anyhow::anyhow!("vault open failed: {e}"))?;
+                let vault_root = require_vault_json(vault_arg, json);
+                let vault = open_vault_json(vault_root, json);
                 let opts = omninote_core::search::SearchOpts {
                     case_sensitive: case,
                     limit,
@@ -500,9 +569,8 @@ async fn main() -> anyhow::Result<()> {
         },
         Command::Link { action } => match action {
             LinkAction::Unresolved { json } => {
-                let vault_root = require_vault(vault_arg)?;
-                let vault = omninote_core::vault::Vault::open(vault_root)
-                    .map_err(|e| anyhow::anyhow!("vault open failed: {e}"))?;
+                let vault_root = require_vault_json(vault_arg, json);
+                let vault = open_vault_json(vault_root, json);
                 let unresolved = vault.index.unresolved_links(&vault.notes);
                 if json {
                     let data = unresolved
@@ -518,12 +586,15 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             LinkAction::Backlinks { file, json } => {
-                let vault_root = require_vault(vault_arg)?;
-                let vault = omninote_core::vault::Vault::open(vault_root)
-                    .map_err(|e| anyhow::anyhow!("vault open failed: {e}"))?;
-                let target = vault.index.resolve(&file).cloned().ok_or_else(|| {
-                    anyhow::anyhow!("file does not match any note in vault: {file}")
-                })?;
+                let vault_root = require_vault_json(vault_arg, json);
+                let vault = open_vault_json(vault_root, json);
+                let target = match vault.index.resolve(&file).cloned() {
+                    Some(t) => t,
+                    None => fail(
+                        format!("file does not match any note in vault: {file}"),
+                        json,
+                    ),
+                };
                 let backlinks = vault.index.backlinks_to(&target, &vault.notes);
                 if json {
                     let data = backlinks
@@ -556,7 +627,7 @@ async fn main() -> anyhow::Result<()> {
             }
         },
         Command::Diff { since, json } => {
-            let vault_root = require_vault(vault_arg)?;
+            let vault_root = require_vault_json(vault_arg, json);
             let report = omninote_core::snapshot::diff_since(&vault_root, &since)
                 .map_err(|e| anyhow::anyhow!("diff: {e}"))?;
             if json {
@@ -587,6 +658,35 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
+        Command::Capture { text, json } => {
+            // Vault resolution and open are themselves failure modes here: under
+            // `--json` each must surface as an error envelope (not a propagated
+            // anyhow exit), so route through the `--json`-aware helpers.
+            let vault_root = require_vault_json(vault_arg, json);
+            let vault = open_vault_json(vault_root, json);
+            match vault.capture_line(&text) {
+                Ok(out) => {
+                    if json {
+                        emit_meta(
+                            json!({ "path": out.path, "line_appended": out.bullet }),
+                            json!({ "total_lines": out.total_lines }),
+                        )?;
+                    } else {
+                        println!("✓ Inbox.md  (+1 line)");
+                        println!("{}", out.bullet);
+                    }
+                }
+                Err(e) => {
+                    if json {
+                        Envelope::<serde_json::Value>::error(e).print()?;
+                    } else {
+                        eprintln!("{e}");
+                    }
+                    std::process::exit(1);
+                }
+            }
+        }
+
         // ────────── CAD-22 verbs ──────────
         Command::Daily {
             date,
@@ -594,7 +694,7 @@ async fn main() -> anyhow::Result<()> {
             folder,
             json,
         } => {
-            let vault_root = require_vault(vault_arg)?;
+            let vault_root = require_vault_json(vault_arg, json);
             let opts = omninote_core::daily::DailyOpts {
                 date: date.as_deref().map(parse_naive_date).transpose()?,
                 template_name: template,
@@ -622,7 +722,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Template { action } => match action {
             TemplateAction::List { json } => {
-                let vault_root = require_vault(vault_arg)?;
+                let vault_root = require_vault_json(vault_arg, json);
                 let list = omninote_core::templates::list_templates(&vault_root);
                 if json {
                     let data = list
@@ -645,7 +745,7 @@ async fn main() -> anyhow::Result<()> {
                 out,
                 json,
             } => {
-                let vault_root = require_vault(vault_arg)?;
+                let vault_root = require_vault_json(vault_arg, json);
                 let body = omninote_core::templates::load_template(&vault_root, &name)
                     .map_err(|e| anyhow::anyhow!("template: {e}"))?;
                 let ctx = omninote_core::templates::TemplateContext::now(title);
@@ -665,7 +765,7 @@ async fn main() -> anyhow::Result<()> {
         },
         Command::Diary { action } => match action {
             DiaryAction::Append { text, ticket, json } => {
-                let vault_root = require_vault(vault_arg)?;
+                let vault_root = require_vault_json(vault_arg, json);
                 let path =
                     omninote_core::discipline::diary_quick(&vault_root, &text, ticket.as_deref())
                         .map_err(|e| anyhow::anyhow!("diary append: {e}"))?;
@@ -678,7 +778,7 @@ async fn main() -> anyhow::Result<()> {
         },
         Command::Human { action } => match action {
             HumanAction::Ask { question, json } => {
-                let vault_root = require_vault(vault_arg)?;
+                let vault_root = require_vault_json(vault_arg, json);
                 let (path, qn) = omninote_core::discipline::human_ask(&vault_root, &question)
                     .map_err(|e| anyhow::anyhow!("human ask: {e}"))?;
                 if json {
@@ -689,7 +789,7 @@ async fn main() -> anyhow::Result<()> {
             }
         },
         Command::Ticket { ticket_id, json } => {
-            let vault_root = require_vault(vault_arg)?;
+            let vault_root = require_vault_json(vault_arg, json);
             match omninote_core::discipline::ticket_status(&vault_root, &ticket_id) {
                 Some(t) => {
                     if json {
@@ -719,7 +819,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Discipline { action } => match action {
             DisciplineAction::Show { file, json } => {
-                let vault_root = require_vault(vault_arg)?;
+                let vault_root = require_vault_json(vault_arg, json);
                 let f = DisciplineFile::from_slug(&file).ok_or_else(|| {
                     anyhow::anyhow!(
                         "unknown discipline file '{file}' — try: diary|sprint|human|plan|jira|notion|eternal"
@@ -741,7 +841,7 @@ async fn main() -> anyhow::Result<()> {
             model,
             json,
         } => {
-            let vault_root = require_vault(vault_arg)?;
+            let vault_root = require_vault_json(vault_arg, json);
             cmd_ask(&vault_root, &query, top_k, no_llm, model, json).await?;
         }
         Command::Tag { action } => match action {
@@ -754,7 +854,7 @@ async fn main() -> anyhow::Result<()> {
                 model,
                 json,
             } => {
-                let vault_root = require_vault(vault_arg)?;
+                let vault_root = require_vault_json(vault_arg, json);
                 cmd_tag_auto(
                     &vault_root,
                     &file,
@@ -785,8 +885,7 @@ async fn cmd_tag_auto(
     model: Option<String>,
     json: bool,
 ) -> anyhow::Result<()> {
-    let mut vault = omninote_core::vault::Vault::open(vault_root.to_path_buf())
-        .map_err(|e| anyhow::anyhow!("vault open failed: {e}"))?;
+    let mut vault = open_vault_json(vault_root.to_path_buf(), json);
     let rel = vault
         .index
         .resolve(file)
@@ -874,8 +973,7 @@ async fn cmd_ask(
     let started = std::time::Instant::now();
 
     // 1. Vault scan.
-    let vault = omninote_core::vault::Vault::open(vault_root.to_path_buf())
-        .map_err(|e| anyhow::anyhow!("vault open failed: {e}"))?;
+    let vault = open_vault_json(vault_root.to_path_buf(), json);
 
     // 2. Embedder + index. First call downloads the BGE small model
     //    (~100MB → ~/.cache/huggingface) and takes ~15s to init; subsequent
