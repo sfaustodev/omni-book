@@ -39,6 +39,10 @@ pub enum TicketFilter {
 
 /// OpenDyslexic, bundled in the binary (OFL). Selectable via the a11y font setting.
 const OPEN_DYSLEXIC_OTF: &[u8] = include_bytes!("../assets/fonts/OpenDyslexic-Regular.otf");
+/// JetBrains Mono (OFL) — the Terminal body + monospace face, bundled in the binary.
+const JETBRAINS_MONO_TTF: &[u8] = include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf");
+/// Space Grotesk SemiBold (OFL) — the display face used for headings, bundled in.
+const SPACE_GROTESK_TTF: &[u8] = include_bytes!("../assets/fonts/SpaceGrotesk-SemiBold.ttf");
 
 /// Register bundled custom fonts. Call once before applying theme/styles.
 /// Resolve a config to its concrete theme. While `theme_preset` is still at its
@@ -71,23 +75,81 @@ pub(crate) fn toggle_light_dark(cfg: &mut omninote_core::types::AppConfig) {
 }
 
 fn register_custom_fonts(ctx: &egui::Context) {
+    // Start from egui's defaults: they carry the emoji/symbol fallback fonts that
+    // render the UI glyphs (◧ ◷ ▤ …) and emoji. We register our faces as the
+    // PRIMARY of each family and APPEND egui's original chain as fallback, so a
+    // glyph our face lacks still resolves instead of rendering as tofu.
     let mut fonts = egui::FontDefinitions::default();
+
     fonts.font_data.insert(
         theme::OPEN_DYSLEXIC_NAME.to_owned(),
         egui::FontData::from_static(OPEN_DYSLEXIC_OTF),
     );
-    // OpenDyslexic ships no emoji/symbol glyphs. Register it as the primary face
-    // but append egui's default proportional chain (which carries the emoji
-    // fonts) as fallback — otherwise every icon renders as tofu when the
-    // dyslexic family is active.
-    let mut chain = vec![theme::OPEN_DYSLEXIC_NAME.to_owned()];
-    if let Some(default_prop) = fonts.families.get(&egui::FontFamily::Proportional) {
-        chain.extend(default_prop.iter().cloned());
-    }
+    fonts.font_data.insert(
+        "JetBrainsMono".to_owned(),
+        egui::FontData::from_static(JETBRAINS_MONO_TTF),
+    );
+    fonts.font_data.insert(
+        theme::SPACE_GROTESK_NAME.to_owned(),
+        egui::FontData::from_static(SPACE_GROTESK_TTF),
+    );
+
+    // Snapshot egui's default chains before we mutate them, to reuse as the
+    // emoji/symbol fallback tail for every family below.
+    let default_prop = fonts
+        .families
+        .get(&egui::FontFamily::Proportional)
+        .cloned()
+        .unwrap_or_default();
+    let default_mono = fonts
+        .families
+        .get(&egui::FontFamily::Monospace)
+        .cloned()
+        .unwrap_or_default();
+
+    // Terminal = mono body: JetBrains Mono leads BOTH the proportional (primary
+    // body) and monospace families. Append egui's original tails for fallback.
+    let prop_chain = {
+        let mut c = vec!["JetBrainsMono".to_owned()];
+        c.extend(default_prop.iter().cloned());
+        c
+    };
+    let mono_chain = {
+        let mut c = vec!["JetBrainsMono".to_owned()];
+        c.extend(default_mono.iter().cloned());
+        c
+    };
+    fonts
+        .families
+        .insert(egui::FontFamily::Proportional, prop_chain.clone());
+    fonts
+        .families
+        .insert(egui::FontFamily::Monospace, mono_chain);
+
+    // Space Grotesk display family (headings) — falls back through the same
+    // proportional tail so non-Latin/emoji headings still render.
+    let grotesk_chain = {
+        let mut c = vec![theme::SPACE_GROTESK_NAME.to_owned()];
+        c.extend(default_prop.iter().cloned());
+        c
+    };
+    fonts.families.insert(
+        egui::FontFamily::Name(theme::SPACE_GROTESK_NAME.into()),
+        grotesk_chain,
+    );
+
+    // OpenDyslexic (a11y opt-in) ships no emoji/symbol glyphs — same tofu-proof
+    // fallback tail as the body.
+    let dyslexic_chain = {
+        let mut c = vec![theme::OPEN_DYSLEXIC_NAME.to_owned()];
+        c.extend(default_prop.iter().cloned());
+        c
+    };
     fonts.families.insert(
         egui::FontFamily::Name(theme::OPEN_DYSLEXIC_NAME.into()),
-        chain,
+        dyslexic_chain,
     );
+
     ctx.set_fonts(fonts);
 }
 
@@ -288,25 +350,56 @@ impl OmniNoteApp {
         let cfg = &v.config;
         let mut style = (*ctx.style()).clone();
 
-        // Font sizes — scale all text styles relative to base font_size
-        let base = cfg.font_size;
-        let scale = base / 14.0; // 14pt is egui default base
-        for (text_style, font_id) in style.text_styles.iter_mut() {
-            let default_size = match text_style {
-                egui::TextStyle::Heading => 20.0,
-                egui::TextStyle::Body => 14.0,
-                egui::TextStyle::Monospace => 12.0,
-                egui::TextStyle::Button => 14.0,
-                egui::TextStyle::Small => 10.0,
-                _ => 14.0,
-            };
-            font_id.size = (default_size * scale).round();
-            font_id.family = crate::theme::font_family_to_egui(cfg.font_family);
-        }
+        // Mono-forward Terminal type scale. Sizes are px-before-scale; the whole
+        // map scales by the user's font_size relative to egui's 14px base. The
+        // BODY face follows the a11y font setting (JetBrains Mono by default, or
+        // OpenDyslexic when chosen); the HEADING is always the Space Grotesk
+        // display face — a deliberate display/body split — UNLESS the user picked
+        // the dyslexic face, where legibility wins and the heading uses it too.
+        let scale = cfg.font_size / 14.0;
+        let body_family = crate::theme::font_family_to_egui(cfg.font_family);
+        let heading_family = if cfg.font_family == omninote_core::types::FontFamily::Dyslexic {
+            body_family.clone()
+        } else {
+            egui::FontFamily::Name(crate::theme::SPACE_GROTESK_NAME.into())
+        };
+        let px = |size: f32| (size * scale).round();
+        style.text_styles = [
+            (
+                egui::TextStyle::Heading,
+                egui::FontId::new(px(26.0), heading_family),
+            ),
+            (
+                egui::TextStyle::Body,
+                egui::FontId::new(px(13.5), body_family.clone()),
+            ),
+            (
+                egui::TextStyle::Monospace,
+                egui::FontId::new(px(12.5), egui::FontFamily::Monospace),
+            ),
+            (
+                egui::TextStyle::Button,
+                egui::FontId::new(px(12.0), body_family.clone()),
+            ),
+            (
+                egui::TextStyle::Small,
+                egui::FontId::new(px(11.0), body_family),
+            ),
+        ]
+        .into();
 
-        // Line spacing via item_spacing
-        let extra = (base * (cfg.line_height - 1.0)).max(0.0);
+        // Accessibility line-height: extra vertical gap between stacked widgets
+        // (and wrapped lines) proportional to the chosen line_height. Owned here,
+        // not in `theme.apply()`, so a theme re-bind never wipes it.
+        let extra = (cfg.font_size * (cfg.line_height - 1.0)).max(0.0);
         style.spacing.item_spacing.y = 3.0 + extra;
+
+        // TODO(letter_spacing): egui 0.29 exposes no native per-glyph tracking on
+        // TextStyle/FontId, so `cfg.letter_spacing` cannot be applied to the egui
+        // text layout here. It is applied in the md_render text paths in a later
+        // phase. The settings slider still round-trips the value (persisted in
+        // config); it is intentionally not silently dropped.
+        let _ = cfg.letter_spacing;
 
         ctx.set_style(style);
     }

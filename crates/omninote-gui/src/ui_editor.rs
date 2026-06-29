@@ -189,10 +189,21 @@ impl OmniNoteApp {
     }
 
     fn show_edit_panel(&mut self, ui: &mut egui::Ui) {
+        // Resolve the note-type ink before the mutable borrow of `active_note`
+        // below — the "Tipo:" label is tinted with it (the per-type content hue).
+        let type_color = self.active_note.as_ref().map(|n| {
+            let theme = self
+                .vault
+                .as_ref()
+                .map(|v| crate::app::theme_for_config(&v.config))
+                .unwrap_or_else(crate::theme::Theme::obsidian_dark);
+            theme.note_type_color(n.frontmatter.note_type)
+        });
         let note = match self.active_note.as_mut() {
             Some(n) => n,
             None => return,
         };
+        let type_color = type_color.unwrap_or(egui::Color32::GRAY);
 
         // Title
         if ui
@@ -209,7 +220,7 @@ impl OmniNoteApp {
 
         // Metadata row
         ui.horizontal(|ui| {
-            ui.label("Tipo:");
+            ui.label(RichText::new("Tipo:").color(type_color));
             let current = note.frontmatter.note_type;
             egui::ComboBox::from_id_salt("note_type_combo")
                 .selected_text(format!("{} {}", current.icon(), current.label()))

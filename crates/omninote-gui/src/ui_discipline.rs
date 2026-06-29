@@ -1208,13 +1208,13 @@ fn chip(ui: &mut egui::Ui, theme: &crate::theme::Theme, text: &str) {
 }
 
 /// Status semaphore color, resolved through the theme's semantic accessors so
-/// the high-contrast preset stays legible. Todo uses the `dim` token.
+/// the high-contrast preset stays legible.
 fn status_color(theme: &crate::theme::Theme, status: TaskStatus) -> egui::Color32 {
     match status {
         TaskStatus::Done => theme.status_done(),
         TaskStatus::Doing => theme.status_doing(),
         TaskStatus::Blocked => theme.status_blocked(),
-        TaskStatus::Todo => theme.dim,
+        TaskStatus::Todo => theme.status_todo(),
     }
 }
 
