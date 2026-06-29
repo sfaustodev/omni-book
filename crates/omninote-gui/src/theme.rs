@@ -99,6 +99,41 @@ impl Theme {
         self.bg == Color32::BLACK
     }
 
+    /// Semantic status semaphores (sprint/ticket lifecycle). These are fixed
+    /// content hues — green=ok, amber=in-flight, red=stuck — not themeable chrome,
+    /// so they live as named accessors here rather than scattered literals (mirrors
+    /// the success/error toast colors). Under high-contrast they fold to the accent
+    /// so the WCAG preset stays legible. `dim` is the theme token, not a constant.
+    pub fn status_done(&self) -> Color32 {
+        if self.is_high_contrast() {
+            self.accent
+        } else {
+            Color32::from_rgb(0x4c, 0xaf, 0x50)
+        }
+    }
+    pub fn status_doing(&self) -> Color32 {
+        if self.is_high_contrast() {
+            self.accent
+        } else {
+            Color32::from_rgb(0xe0, 0xa4, 0x2b)
+        }
+    }
+    pub fn status_blocked(&self) -> Color32 {
+        if self.is_high_contrast() {
+            self.accent
+        } else {
+            Color32::from_rgb(0xe0, 0x5a, 0x4f)
+        }
+    }
+    /// Tag color for a Jira-origin ticket row (Notion uses `accent`).
+    pub fn provider_jira(&self) -> Color32 {
+        if self.is_high_contrast() {
+            self.accent
+        } else {
+            Color32::from_rgb(0x4c, 0x8a, 0xf0)
+        }
+    }
+
     /// Resolve the preset selected in `AppConfig` to a concrete token set.
     pub fn from_preset(preset: ThemePreset, accent: [u8; 3]) -> Self {
         match preset {

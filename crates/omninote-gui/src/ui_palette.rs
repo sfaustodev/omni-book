@@ -23,6 +23,8 @@ pub enum Cmd {
     ToggleRail,
     SwitchVault,
     QuickCapture,
+    Tickets,
+    Timeline,
 }
 
 impl PaletteItem {
@@ -45,6 +47,8 @@ fn commands() -> Vec<PaletteItem> {
         ("⊞ Alternar painel direito", ToggleRail),
         ("📂 Trocar vault", SwitchVault),
         ("✎ Captura rápida", QuickCapture),
+        ("◧ Tickets", Tickets),
+        ("◷ Timeline", Timeline),
     ]
     .into_iter()
     .map(|(label, action)| PaletteItem::Command { label, action })
@@ -174,6 +178,8 @@ impl OmniNoteApp {
                     self.capture_open = true;
                     self.capture_text.clear();
                 }
+                Cmd::Tickets => self.toggle_central_overlay(crate::app::CentralOverlay::Tickets),
+                Cmd::Timeline => self.toggle_central_overlay(crate::app::CentralOverlay::Timeline),
             },
         }
     }
