@@ -176,13 +176,15 @@ fn discipline_show_bad_arg_json_error_is_enveloped() {
 fn vault_list_corrupt_registry_json_error_is_enveloped() {
     // `vault list` reads the registry directly (no `--vault`). A corrupt
     // `vaults.toml` must surface as a `{ok:false,error}` envelope, not a raw
-    // anyhow line. On this platform the registry lives under
-    // `$HOME/Library/Application Support/omninote/vaults.toml` (dirs::config_dir
-    // ignores XDG_CONFIG_HOME on macOS — verified at runtime), but the CLI also
-    // honors `$HOME/.config` on Linux; write to both so the test is portable.
+    // anyhow line. `dirs::config_dir()` resolves per platform: macOS ignores
+    // XDG_CONFIG_HOME and uses `~/Library/Application Support`; Linux uses
+    // `$XDG_CONFIG_HOME` directly when set (run_no_vault sets it to this temp dir),
+    // otherwise `$HOME/.config`. Write the corrupt file to all three candidates so
+    // the registry is found wherever the CLI actually looks.
     let home = tempfile::tempdir().unwrap();
     for sub in [
         home.path().join("Library/Application Support/omninote"),
+        home.path().join("omninote"),
         home.path().join(".config/omninote"),
     ] {
         std::fs::create_dir_all(&sub).unwrap();
