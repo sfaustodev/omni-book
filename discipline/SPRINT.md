@@ -35,7 +35,7 @@ CAD-23 foi fatiado em 4 subtasks shipáveis (per decisão AskUserQuestion 2026-0
 | 2 | CAD-23.2 | Auto-tag + summary | ✅ Done (PR #19) | ⚡ | 6h | mergeado main |
 | 3 | CAD-23.3 | Dictation Whisper (local) | 🌱 Backlog | ⚡ | 10h | depende 23.1 ✅ · whisper-rs offline |
 | 4 | CAD-23.4 | OCR PDF (local) | 🌱 Backlog | 📌 | 8h | depende 23.1 ✅ · tesseract local |
-| 5 | CAD-24 | Power automation | 🔄 Parcial | 📌 | 20h | multi-vault + diff + `--json` portados pro main; falta só o daemon `omninote-capture` (hotkey global) |
+| 5 | CAD-24 | Power automation | 🔄 Layer A ✅ (#29) | 📌 | 20h | multi-vault + diff + `--json` (todos verbos) + `omninote capture` + `resolve_active` core mergeados; Layer B (hotkey global) spike-gated (Q-10: fold no GUI) |
 | 6 | CAD-25 (Fase B) | UI Design v2 — implementação egui | 🔄 Em execução | ⚡ | ~50h | **DESBLOQUEADO** (Q-01..Q-30 resolvidas, doc §10). Fatiado em 6 slices. Slice 1 (fundação) gated pelo trio, em PR. |
 
 ### CAD-25 Fase B — slices
@@ -46,10 +46,10 @@ CAD-23 foi fatiado em 4 subtasks shipáveis (per decisão AskUserQuestion 2026-0
 | 2 | Shell 3-painéis + chrome (titlebar/breadcrumb/tabs/right-rail) | ✅ merged (#24) |
 | 3 | Renderer markdown custom (`md_render.rs`, hover-preview/embeds/imagens/seções/#tags) | ✅ merged (#25) |
 | 4 | Overlays (command palette Cmd+P, quick-capture, toasts, calendar pt-BR, onboarding) | ✅ merged (#26) — close-out: 4 triad findings + 2 rounds review adversarial interno |
-| 5 | Views tipadas (`ui_discipline` sprint/diary/human/tickets + `ui_timeline` snapshot) | 🌱 não começou |
+| 5 | Views tipadas (`ui_discipline` sprint/diary/human/tickets + `ui_timeline` snapshot) | ✅ merged (#30) — 5 rounds trio (data-loss diary/a11y/conflito), chokepoint `switch_active` |
 | 6 | AI surfaces (`ui_chat` RAG real + `ui_dictation` escondido até CAD-23.3) + a11y polish | 🌱 não começou |
 
-> **Estado real (2026-06-27):** 4 de 6 slices mergeadas no main (1-3 via #23/#24/#25, Slice 4 via #26 close-out) **+ ui-polish merged (#28)** com 4 fixes de a11y do trio COMPLETO (Claude+Codex+agy): fonte-grande (altura/clip proporcional), foco-teclado, alto-contraste. Falta Slice 5 (views tipadas) + Slice 6 (AI chat/dictation). Arquivos `ui_chat.rs`/`ui_dictation.rs`/`ui_discipline.rs`/`ui_timeline.rs` do §5.2 ainda não existem. ~67% do CAD-25 Fase B. **Sec:** lopdf 0.34→0.42 + quinn-proto 0.11.15 (RUSTSEC-2026-0187/0185, advisories de jun/26) via #27.
+> **Estado real (2026-06-28):** 5 de 6 slices mergeadas (1-3 #23/#24/#25, Slice 4 #26, **Slice 5 #30**) + ui-polish #28. **CAD-24 Layer A mergeado (#29)** — capture CLI + resolve_active core + --json todos verbos. Falta só Slice 6 (`ui_chat` RAG + `ui_dictation`). `ui_discipline.rs`/`ui_timeline.rs`/`ui_a11y.rs` agora existem; `ui_chat.rs`/`ui_dictation.rs` não. ~83% do CAD-25 Fase B. **Sec:** lopdf 0.34→0.42 + quinn-proto 0.11.15 (RUSTSEC-2026-0187/0185) via #27.
 
 ### Dependency graph
 

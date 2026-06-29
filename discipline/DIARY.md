@@ -4,6 +4,35 @@
 
 ---
 
+## 2026-06-28 — CAD-25b Slice 5 + CAD-24 Layer A: dois PRs mergeados via trio (5 rounds)
+
+**Tickets touched:** CAD-25 Fase B Slice 5, CAD-24 Layer A
+
+**Done:**
+- **Slice 5 mergeado main (PR #30).** Typed views dos sacred files (`ui_discipline` sprint/diary/human/tickets + `ui_timeline` snapshot), read-only (Q-11). a11y: foco-teclado + `selected` AccessKit + feedback visual (wash translúcido alpha 48/22 + barra de acento) extraídos em `ui_a11y::clickable_row` (chokepoint da receita — rule #31). Timeline cacheada por (root,token) com `Result` inteiro (Err não re-spawna git — lição busy-loop). Diary append flush-first (`append_diary_entry`).
+- **CAD-24 Layer A mergeado main (PR #29).** Verbo `omninote capture` + `resolve_active` promovido pro core (single source, precedência arg→env→registry→last_vault, fail-closed em registry corrompido) + Inbox atômico (temp+sync+rename) + `--json` envelope em TODOS os verbos. Layer B (hotkey, Q-10) spike-gated.
+
+**Trio (rule #26) — 5 rounds no cad-24, cada round pegou data-loss REAL:**
+- R1 (6): auto-save GUI sobrescrevia captura externa; Inbox read-modify-write; resolve_active fail-open; MCP resolver stale; palette/--json.
+- R2: gate do `flush_active` (R1) só cobria auto-save, faltava `select_note`/close; + diary re-sync apagava edits Raw (mesma classe).
+- R3 (BLOQUEAR): `select_note` ignorava o `false` do `flush_active` → trocava nota e perdia buffer.
+- R4 (BLOQUEAR): MAIS callers sem guard (pick_vault, sidebar new-note, imports com check errado) + palette perdia captura com Inbox ativo+dirty + `--json` só cobria vault-open.
+- R5 (codex APROVAR): **chokepoints** — `switch_active(new)->bool` flush-first (17 sites de `active_note=` auditados+classificados user-switch vs reload-interno) + `--json` num handler único (`run()->Result` no `main()`). Codex fez o próprio grep, zero path: acabou o whack-a-mole.
+
+**Lição [chokepoint-vs-whack-a-mole]:** guard por-call-site é whack-a-mole — toda lente acha "+1 path". Cura = chokepoint: rotear o comportamento perigoso por UM ponto (`switch_active`, handler `--json`) + classificar exaustivamente os sites (`grep 'active_note ='` → user-switch precisa flush / reload-interno não). R3→R4 cada round +1 caller; R5 chokepoint = zero. Cross-feature: o MESMO invariante (escrita externa à nota-ativa precisa reconciliação flush-first) apareceu no diary (slice5) E no capture/palette (cad-24). Candidata a gate.
+
+**Lição [git-add-A-sugou-build-artifacts]:** `git add -A` nos worktrees de review sugou `.codextmp/` (528 no slice5, 14895 no cad-24 — travou o push). Fix: `git rm --cached` + amend + `.git/info/exclude` local + SEMPRE `git add <paths>` explícito. Trava: nunca `-A` em worktree que rodou codex/agy (deixam target dir).
+
+**Lição [CI-linux-vs-macos-config-dir]:** teste `vault_list_corrupt_registry` passou local (macOS) e quebrou no CI (Linux) — `dirs::config_dir()` honra `$XDG_CONFIG_HOME` direto no Linux quando setado, não `$HOME/.config`. Fix: escrever o fixture nos 3 paths candidatos. Gate: teste dependente de config-dir escreve em todos os candidatos de plataforma.
+
+**Meta-lição [esperar-review-demais]:** o Fausto me cortou ("serio que tu ta ate agora esperando ele") — eu ficava IDLE esperando a 3ª lente num round de mera verificação. Codex aprovado + meu review + CI verde = gate suficiente; não bloquear no agy (que ainda se perdeu achando o projeto 2x). Trio é pra pegar bug, não pra me deixar parado.
+
+**Files:** `omninote-gui/{ui_discipline,ui_timeline,ui_a11y,app,ui_modals,ui_sidebar,ui_tabs,ui_palette,ui_editor}.rs`, `omninote-cli/{main.rs,tests/json_error_envelope.rs}`, `omninote-core/{vault,vaults}.rs`, `omninote-mcp/main.rs`.
+
+**Next:** follow-ups (não bloqueiam): limpeza rule #18/#16 (refs `triad-*` + renomear `triad_claude_*.rs`); CAD-24 Layer B (hotkey, spike); +2 testes ask/tag `--json` (Info codex); right-rail sob overlay (slice5, chip aberto). Sprint v1.3: falta Slice 6 (`ui_chat` RAG + `ui_dictation`).
+
+---
+
 ## 2026-06-27 — CAD-25b Slice 4 close-out + dep security bump
 
 **Tickets touched:** CAD-25 Fase B Slice 4
