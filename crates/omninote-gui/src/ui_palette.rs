@@ -76,6 +76,19 @@ impl OmniNoteApp {
     /// Build the full candidate list: commands + every note title.
     fn palette_items(&self) -> Vec<PaletteItem> {
         let mut items = commands();
+        // The right-rail toggle is inert while a full-panel overlay covers the
+        // editor — drop it so the palette doesn't offer a no-op command.
+        if self.central_overlay != crate::app::CentralOverlay::None {
+            items.retain(|it| {
+                !matches!(
+                    it,
+                    PaletteItem::Command {
+                        action: Cmd::ToggleRail,
+                        ..
+                    }
+                )
+            });
+        }
         if let Some(v) = &self.vault {
             for n in &v.notes {
                 items.push(PaletteItem::Note {
@@ -162,11 +175,7 @@ impl OmniNoteApp {
                 Cmd::NewNote => self.show_new = true,
                 Cmd::Settings => self.show_settings = true,
                 Cmd::Import => self.show_import = true,
-                Cmd::ToggleRail => {
-                    if let Some(v) = &mut self.vault {
-                        v.config.right_rail_open = !v.config.right_rail_open;
-                    }
-                }
+                Cmd::ToggleRail => self.toggle_right_rail(),
                 Cmd::ToggleTheme => {
                     if let Some(v) = &mut self.vault {
                         crate::app::toggle_light_dark(&mut v.config);

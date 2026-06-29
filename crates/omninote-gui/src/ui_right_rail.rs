@@ -4,9 +4,11 @@
 //! only the two tabs that have real data.
 //!
 //! A `SidePanel::right`, shown after the left sidebar and before the central
-//! editor in `update()`. Toggled by `config.right_rail_open`.
+//! editor in `update()`. Toggled by `config.right_rail_open`, and hidden while a
+//! full-panel overlay (Tickets/Timeline) replaces the editor — there's no note
+//! in focus, so its per-note backlinks/outline would be stale context.
 
-use crate::app::OmniNoteApp;
+use crate::app::{CentralOverlay, OmniNoteApp};
 use egui::RichText;
 use omninote_core::resolver::VaultIndex;
 use omninote_core::types::RightRailTab;
@@ -63,9 +65,33 @@ fn outline(content: &str) -> Vec<Heading> {
 }
 
 impl OmniNoteApp {
+    /// Whether the right rail should render this frame. It shows metadata for the
+    /// note in focus, so it only makes sense over the editor: hidden when there's
+    /// no vault, when the user closed it, or while a full-panel overlay
+    /// (Tickets/Timeline) replaces the editor and no note is in focus.
+    pub(crate) fn right_rail_visible(&self) -> bool {
+        self.central_overlay == CentralOverlay::None
+            && self
+                .vault
+                .as_ref()
+                .is_some_and(|v| v.config.right_rail_open)
+    }
+
+    /// Flip the right-rail open/closed preference. No-op while a full-panel
+    /// overlay (Tickets/Timeline) is active: the rail isn't part of that view, so
+    /// every toggle affordance (sidebar, tabs, palette, `Cmd+\`) routes here and
+    /// is inert there. Mirrors the overlay gate in `right_rail_visible`.
+    pub(crate) fn toggle_right_rail(&mut self) {
+        if self.central_overlay != CentralOverlay::None {
+            return;
+        }
+        if let Some(v) = &mut self.vault {
+            v.config.right_rail_open = !v.config.right_rail_open;
+        }
+    }
+
     pub fn show_right_rail(&mut self, ctx: &egui::Context) {
-        let Some(v) = &self.vault else { return };
-        if !v.config.right_rail_open {
+        if !self.right_rail_visible() {
             return;
         }
 

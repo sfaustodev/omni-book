@@ -46,14 +46,14 @@ impl OmniNoteApp {
                         {
                             self.pick_vault_with_ctx(ctx);
                         }
+                        let rail_enabled = self.central_overlay == crate::app::CentralOverlay::None;
                         if ui
-                            .small_button("⊟")
+                            .add_enabled(rail_enabled, egui::Button::new("⊟").small())
                             .on_hover_text("Painel direito (backlinks/outline)")
+                            .on_disabled_hover_text("Painel direito (indisponível em overlay)")
                             .clicked()
                         {
-                            if let Some(v) = &mut self.vault {
-                                v.config.right_rail_open = !v.config.right_rail_open;
-                            }
+                            self.toggle_right_rail();
                         }
                     });
                 });
@@ -65,7 +65,9 @@ impl OmniNoteApp {
                         .hint_text("🔍 Buscar... (Cmd+K)")
                         .desired_width(f32::INFINITY),
                 );
-                if ctx.input(|i| i.key_pressed(egui::Key::K) && i.modifiers.command) {
+                // `command_only()` (not `.command`) so AltGr (= Ctrl+Alt) typing of
+                // a `k`-keyed character on intl layouts doesn't steal editor focus.
+                if ctx.input(|i| i.key_pressed(egui::Key::K) && i.modifiers.command_only()) {
                     search.request_focus();
                 }
 

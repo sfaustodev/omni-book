@@ -91,6 +91,35 @@ fn register_custom_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
+/// Consume an application keyboard shortcut, returning whether it fired this
+/// frame. AltGr-safe: rejects any event where Alt is held. No app shortcut uses
+/// Alt, and on Windows/Linux AltGr arrives as Ctrl+Alt and maps to `command`, so
+/// egui's own `consume_shortcut` (a logical match that ignores extra modifiers)
+/// fires every COMMAND chord while the user types an AltGr character — `€`
+/// (AltGr+E) would trip Cmd+E. Shift, by contrast, is matched logically: a
+/// pattern's Shift must be present, but extra Shift is tolerated, because some
+/// layouts need Shift to produce a shortcut's key (`=` is Shift+0 on German
+/// QWERTZ, so invoking Cmd+= sends Ctrl+Shift+Equals). Key repeats are consumed
+/// too — so a held chord doesn't leak to a focused editor — but only a fresh
+/// press fires the action.
+pub(crate) fn consume_app_shortcut(i: &mut egui::InputState, sc: &egui::KeyboardShortcut) -> bool {
+    let mut hit = false;
+    i.events.retain(|e| {
+        let matched = matches!(
+            e,
+            egui::Event::Key { key, pressed: true, modifiers, .. }
+            if *key == sc.logical_key
+                && !modifiers.alt
+                && modifiers.matches_logically(sc.modifiers)
+        );
+        if matched && matches!(e, egui::Event::Key { repeat: false, .. }) {
+            hit = true;
+        }
+        !matched
+    });
+    hit
+}
+
 pub struct OmniNoteApp {
     pub vault: Option<Vault>,
     pub active_note: Option<Note>,
@@ -495,8 +524,11 @@ impl eframe::App for OmniNoteApp {
         // Request repaint regularly so watcher events are noticed even when idle
         ctx.request_repaint_after(Duration::from_millis(500));
 
-        // `consume_shortcut` maps COMMAND to Cmd on macOS and Ctrl elsewhere, and
-        // consumes the event so a focused TextEdit doesn't also intercept it.
+        // All shortcuts go through `consume_app_shortcut` (AltGr-safe — rejects
+        // Alt) instead of egui's logical `consume_shortcut`, which fired every
+        // COMMAND chord while typing an AltGr char on Windows/Linux (`€` = AltGr+E
+        // tripped Cmd+E). COMMAND maps to Cmd on macOS / Ctrl elsewhere; the consume
+        // removes the event so a focused TextEdit doesn't also see it.
         let new_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::N);
         let edit_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::E);
         let settings_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Comma);
@@ -518,26 +550,40 @@ impl eframe::App for OmniNoteApp {
             egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
             egui::Key::H,
         );
-
-        let (new, toggle_edit, settings, close, palette, capture, toggle_dark, tickets, timeline) =
-            ctx.input_mut(|i| {
-                (
-                    i.consume_shortcut(&new_sc),
-                    i.consume_shortcut(&edit_sc),
-                    i.consume_shortcut(&settings_sc),
-                    i.consume_shortcut(&close_sc),
-                    i.consume_shortcut(&palette_sc),
-                    i.consume_shortcut(&capture_sc),
-                    i.consume_shortcut(&dark_sc),
-                    i.consume_shortcut(&tickets_sc),
-                    i.consume_shortcut(&timeline_sc),
-                )
-            });
+        let rail_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Backslash);
+        let (
+            new,
+            toggle_edit,
+            settings,
+            close,
+            palette,
+            capture,
+            toggle_dark,
+            tickets,
+            timeline,
+            rail,
+        ) = ctx.input_mut(|i| {
+            (
+                consume_app_shortcut(i, &new_sc),
+                consume_app_shortcut(i, &edit_sc),
+                consume_app_shortcut(i, &settings_sc),
+                consume_app_shortcut(i, &close_sc),
+                consume_app_shortcut(i, &palette_sc),
+                consume_app_shortcut(i, &capture_sc),
+                consume_app_shortcut(i, &dark_sc),
+                consume_app_shortcut(i, &tickets_sc),
+                consume_app_shortcut(i, &timeline_sc),
+                consume_app_shortcut(i, &rail_sc),
+            )
+        });
         if tickets {
             self.toggle_central_overlay(CentralOverlay::Tickets);
         }
         if timeline {
             self.toggle_central_overlay(CentralOverlay::Timeline);
+        }
+        if rail {
+            self.toggle_right_rail();
         }
         if palette {
             self.palette_open = !self.palette_open;
@@ -740,6 +786,223 @@ mod tests {
         // Switching directly to the other overlay (not toggling off) works too.
         app.toggle_central_overlay(CentralOverlay::Tickets);
         assert_eq!(app.central_overlay, CentralOverlay::Tickets);
+    }
+
+    #[test]
+    fn right_rail_hidden_under_central_overlay() {
+        // The rail renders per-active-note metadata, so it must hide while a
+        // full-panel overlay (Tickets/Timeline) replaces the editor — otherwise
+        // it shows stale context for the last note next to a global view.
+        let (mut app, _dir) = test_app();
+        app.vault.as_mut().unwrap().config.right_rail_open = true;
+        assert!(app.right_rail_visible(), "visible over the editor");
+
+        app.toggle_central_overlay(CentralOverlay::Tickets);
+        assert!(
+            !app.right_rail_visible(),
+            "hidden under the Tickets overlay"
+        );
+
+        app.toggle_central_overlay(CentralOverlay::Timeline);
+        assert!(
+            !app.right_rail_visible(),
+            "hidden under the Timeline overlay"
+        );
+
+        app.toggle_central_overlay(CentralOverlay::Timeline);
+        assert!(app.right_rail_visible(), "returns with the editor");
+
+        // The overlay guard is independent of the user's open/closed toggle.
+        app.vault.as_mut().unwrap().config.right_rail_open = false;
+        assert!(
+            !app.right_rail_visible(),
+            "still hidden when toggled closed"
+        );
+    }
+
+    #[test]
+    fn show_right_rail_no_panic_under_overlay_and_editor() {
+        // Render smoke: the guard must hold inside a real egui frame, not only in
+        // the predicate. Under an overlay no SidePanel is registered (early-return);
+        // over the editor with the rail open it renders and exercises the post-guard
+        // vault unwrap. A future regression that drops the guard would panic or
+        // reserve width here, which the predicate-only test cannot catch.
+        let (mut app, _dir) = test_app();
+        app.vault.as_mut().unwrap().config.right_rail_open = true;
+        let ctx = egui::Context::default();
+
+        app.central_overlay = CentralOverlay::Tickets;
+        let _ = ctx.run(Default::default(), |ctx| app.show_right_rail(ctx));
+
+        app.central_overlay = CentralOverlay::None;
+        let _ = ctx.run(Default::default(), |ctx| app.show_right_rail(ctx));
+    }
+
+    #[test]
+    fn toggle_right_rail_no_op_under_overlay() {
+        // Every rail-toggle affordance (sidebar/tabs/palette button, Cmd+\) routes
+        // through toggle_right_rail. Over the editor it flips the preference; under
+        // a full-panel overlay it is inert — the rail has nothing to toggle.
+        let (mut app, _dir) = test_app();
+        let open0 = app.vault.as_ref().unwrap().config.right_rail_open;
+
+        app.toggle_right_rail();
+        assert_eq!(
+            app.vault.as_ref().unwrap().config.right_rail_open,
+            !open0,
+            "toggles over the editor"
+        );
+        app.toggle_right_rail();
+        assert_eq!(app.vault.as_ref().unwrap().config.right_rail_open, open0);
+
+        app.central_overlay = CentralOverlay::Tickets;
+        app.toggle_right_rail();
+        assert_eq!(
+            app.vault.as_ref().unwrap().config.right_rail_open,
+            open0,
+            "inert while an overlay is active"
+        );
+    }
+
+    #[test]
+    fn shortcuts_reject_alt_but_tolerate_layout_shift() {
+        // Regression (triad rounds 3-4 + probes). egui's consume_shortcut matches
+        // logically and ignores extra Alt/Shift, so on Windows/Linux AltGr
+        // (= Ctrl+Alt, mapped to command) tripped every COMMAND chord — typing `€`
+        // (AltGr+E) fired Cmd+E. consume_app_shortcut rejects Alt (the fix) but
+        // TOLERATES Shift, because some layouts need Shift to produce a key (`=` is
+        // Shift+0 on QWERTZ, so invoking Cmd+= sends Ctrl+Shift+Equals — a strict
+        // exact match would wrongly break it). Drives the real helper.
+        use egui::{Event, Key, Modifiers};
+        let fires =
+            |sc: &egui::KeyboardShortcut, key: Key, mods: Modifiers, repeat: bool| -> bool {
+                let ctx = egui::Context::default();
+                let mut input = egui::RawInput::default();
+                input.events.push(Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat,
+                    modifiers: mods,
+                });
+                let mut hit = false;
+                let _ = ctx.run(input, |ctx| {
+                    hit = ctx.input_mut(|i| consume_app_shortcut(i, sc));
+                });
+                hit
+            };
+        let altgr = Modifiers {
+            ctrl: true,
+            alt: true,
+            command: true,
+            ..Default::default()
+        };
+        let cmd_e = egui::KeyboardShortcut::new(Modifiers::COMMAND, Key::E);
+        let cmd_eq = egui::KeyboardShortcut::new(Modifiers::COMMAND, Key::Equals);
+        let cmd_shift_j =
+            egui::KeyboardShortcut::new(Modifiers::COMMAND.plus(Modifiers::SHIFT), Key::J);
+
+        // Intended chords fire.
+        assert!(
+            fires(&cmd_e, Key::E, Modifiers::COMMAND, false),
+            "Cmd/Ctrl+E"
+        );
+        assert!(
+            fires(
+                &cmd_shift_j,
+                Key::J,
+                Modifiers::COMMAND.plus(Modifiers::SHIFT),
+                false
+            ),
+            "Cmd/Ctrl+Shift+J"
+        );
+        // Layout Shift tolerated: on QWERTZ `=` is Shift+0, so Cmd+= arrives as
+        // Ctrl+Shift+Equals and MUST still fire (the agy round-4 regression).
+        assert!(
+            fires(
+                &cmd_eq,
+                Key::Equals,
+                Modifiers::COMMAND.plus(Modifiers::SHIFT),
+                false
+            ),
+            "Cmd+= with layout Shift (QWERTZ) must fire"
+        );
+
+        // Alt is rejected — the € / Cmd+E bug.
+        assert!(
+            !fires(&cmd_e, Key::E, altgr, false),
+            "AltGr+E (€) must not fire Cmd+E"
+        );
+        assert!(
+            !fires(
+                &cmd_e,
+                Key::E,
+                Modifiers {
+                    alt: true,
+                    ..Modifiers::COMMAND
+                },
+                false
+            ),
+            "Cmd+Alt+E must not fire"
+        );
+        // A Shift chord still requires its Shift.
+        assert!(
+            !fires(&cmd_shift_j, Key::J, Modifiers::COMMAND, false),
+            "Cmd+J without Shift must not fire the Shift chord"
+        );
+
+        // Held repeats fire once. egui derives the `repeat` flag, so drive two
+        // presses without a release on one Context: egui marks the second a repeat.
+        let ctx = egui::Context::default();
+        let press = || {
+            let mut input = egui::RawInput::default();
+            input.events.push(Event::Key {
+                key: Key::E,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::COMMAND,
+            });
+            let mut hit = false;
+            let _ = ctx.run(input, |ctx| {
+                hit = ctx.input_mut(|i| consume_app_shortcut(i, &cmd_e));
+            });
+            hit
+        };
+        assert!(press(), "first press fires");
+        assert!(!press(), "held repeat must not refire");
+    }
+
+    #[test]
+    fn gui_shortcuts_route_through_altgr_safe_helper() {
+        // Mechanical gate (triad rounds 3-5): every shortcut must route through the
+        // AltGr-safe consume_app_shortcut. egui's logical InputState shortcut method
+        // matches logically and reintroduces the AltGr collision (typing `€` fires
+        // Cmd+E). Recurse the whole crate src/. The needle is the bare call form, so
+        // it catches both the method-call and fully-qualified spellings; it is split
+        // (and this fn's name avoids it) so the test's own source isn't a false
+        // positive. A space before the paren is normalized away by `cargo fmt`, and
+        // the AltGr-safe helper's own name does not contain the needle.
+        let needle = ["consume", "_shortcut("].concat();
+        fn scan(dir: &std::path::Path, needle: &str) {
+            for entry in std::fs::read_dir(dir).expect("read dir") {
+                let path = entry.expect("dir entry").path();
+                if path.is_dir() {
+                    scan(&path, needle);
+                } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                    let text = std::fs::read_to_string(&path).expect("read source");
+                    assert!(
+                        !text.contains(needle),
+                        "{}: route shortcuts through consume_app_shortcut, not egui's logical method",
+                        path.display()
+                    );
+                }
+            }
+        }
+        scan(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &needle,
+        );
     }
 
     #[test]

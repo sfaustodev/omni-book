@@ -1024,9 +1024,13 @@ impl OmniNoteApp {
             return;
         }
         // Cmd/Ctrl+Enter submits; a bare Enter falls through to the TextEdit as a
-        // newline. `command` maps to Cmd on macOS and Ctrl elsewhere.
+        // newline. `command` maps to Cmd on macOS and Ctrl elsewhere. `!alt` keeps
+        // AltGr (= Ctrl+Alt) from triggering submit, consistent with the app's
+        // other shortcuts.
         let mut submit = ctx.input(|i| {
-            i.key_pressed(egui::Key::Enter) && (i.modifiers.command || i.modifiers.ctrl)
+            i.key_pressed(egui::Key::Enter)
+                && !i.modifiers.alt
+                && (i.modifiers.command || i.modifiers.ctrl)
         });
         egui::Window::new("diary_append")
             .title_bar(false)
