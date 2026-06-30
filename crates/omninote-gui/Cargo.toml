@@ -14,24 +14,12 @@ path = "src/main.rs"
 [dependencies]
 omninote-core.workspace = true
 
-# Re-exported from workspace
+# egui stack: app shell, image loaders, native file dialogs, FS watcher, fuzzy search.
 eframe.workspace = true
 egui.workspace = true
-egui_commonmark.workspace = true
 egui_extras.workspace = true
 rfd.workspace = true
 notify.workspace = true
 fuzzy-matcher.workspace = true
-
-# Shared with core (gui uses serde/chrono/uuid/dirs/open directly)
-serde.workspace = true
-serde_json.workspace = true
-serde_yaml.workspace = true
-chrono.workspace = true
-dirs.workspace = true
-uuid.workspace = true
+# Opens PDF / non-image embeds in the platform default app.
 open.workspace = true
-
-[dev-dependencies]
-tempfile.workspace = true
-proptest.workspace = true
