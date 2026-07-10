@@ -47,20 +47,21 @@ pub struct Theme {
 }
 
 impl Theme {
-    /// Terminal dark — the primary variant. Near-black canvas, cold slate panels,
-    /// phosphor-green accent.
+    /// Matrix terminal — the primary variant. A black void with phosphor-green
+    /// text and dim-green hairline borders; bright-green for highlights/cursor.
+    /// Green-on-black is the whole identity — grey chrome read as Windows 98.
     pub const fn obsidian_dark() -> Self {
         Self {
-            bg: Color32::from_rgb(0x0c, 0x0d, 0x10),
-            panel: Color32::from_rgb(0x14, 0x16, 0x1b),
-            panel_alt: Color32::from_rgb(0x1a, 0x1d, 0x24),
-            border: Color32::from_rgb(0x2a, 0x2f, 0x3a),
-            border_strong: Color32::from_rgb(0x3a, 0x41, 0x50),
-            text: Color32::from_rgb(0xc9, 0xd1, 0xd9),
-            dim: Color32::from_rgb(0x6b, 0x75, 0x85),
-            faint: Color32::from_rgb(0x45, 0x4c, 0x5a),
-            accent: Color32::from_rgb(0x4a, 0xde, 0x80),
-            accent_ink: Color32::from_rgb(0x06, 0x14, 0x0b),
+            bg: Color32::from_rgb(0x01, 0x06, 0x04),
+            panel: Color32::from_rgb(0x04, 0x12, 0x0b),
+            panel_alt: Color32::from_rgb(0x08, 0x20, 0x0f),
+            border: Color32::from_rgb(0x0e, 0x3a, 0x22),
+            border_strong: Color32::from_rgb(0x1d, 0x7a, 0x45),
+            text: Color32::from_rgb(0x3c, 0xe0, 0x6f),
+            dim: Color32::from_rgb(0x1f, 0x9b, 0x4d),
+            faint: Color32::from_rgb(0x13, 0x5c, 0x2e),
+            accent: Color32::from_rgb(0x6b, 0xff, 0x9a),
+            accent_ink: Color32::from_rgb(0x00, 0x16, 0x09),
             dark: true,
         }
     }
@@ -69,15 +70,15 @@ impl Theme {
     /// contrast on a bright background.
     pub const fn obsidian_light() -> Self {
         Self {
-            bg: Color32::from_rgb(0xfa, 0xfa, 0xf7),
-            panel: Color32::from_rgb(0xf1, 0xf1, 0xec),
-            panel_alt: Color32::from_rgb(0xe9, 0xe9, 0xe2),
-            border: Color32::from_rgb(0xd8, 0xd8, 0xcf),
-            border_strong: Color32::from_rgb(0xb8, 0xb8, 0xad),
-            text: Color32::from_rgb(0x11, 0x13, 0x1a),
-            dim: Color32::from_rgb(0x5a, 0x5f, 0x6b),
-            faint: Color32::from_rgb(0x9a, 0x9e, 0xa7),
-            accent: Color32::from_rgb(0x16, 0xa3, 0x4a),
+            bg: Color32::from_rgb(0xec, 0xf1, 0xed),
+            panel: Color32::from_rgb(0xdd, 0xe6, 0xe0),
+            panel_alt: Color32::from_rgb(0xd0, 0xdb, 0xd4),
+            border: Color32::from_rgb(0xb6, 0xc6, 0xbb),
+            border_strong: Color32::from_rgb(0x8d, 0xa1, 0x95),
+            text: Color32::from_rgb(0x0e, 0x17, 0x12),
+            dim: Color32::from_rgb(0x4e, 0x60, 0x57),
+            faint: Color32::from_rgb(0x86, 0x99, 0x8e),
+            accent: Color32::from_rgb(0x0e, 0x8c, 0x42),
             accent_ink: Color32::from_rgb(0xff, 0xff, 0xff),
             dark: false,
         }
@@ -110,6 +111,103 @@ impl Theme {
         t
     }
 
+    /// "Almanac" — warm parchment + terracotta editorial, recovered from the
+    /// `cortex/off-1` design experiment's `Palette::light` (independently
+    /// reconfirmed by `cortex/off-3`'s blind rebuild converging on the same
+    /// identity). The primary/signature Almanac variant.
+    pub const fn almanac_light() -> Self {
+        Self {
+            bg: Color32::from_rgb(0xEF, 0xE7, 0xD3),
+            panel: Color32::from_rgb(0xE7, 0xDC, 0xC2),
+            panel_alt: Color32::from_rgb(0xF6, 0xF0, 0xE0),
+            border: Color32::from_rgb(0xCD, 0xBE, 0x9E),
+            border_strong: Color32::from_rgb(0x9C, 0x8B, 0x6A),
+            text: Color32::from_rgb(0x2A, 0x26, 0x20),
+            dim: Color32::from_rgb(0x6B, 0x62, 0x53),
+            faint: Color32::from_rgb(0x9A, 0x8F, 0x79),
+            accent: Color32::from_rgb(0xBF, 0x4D, 0x26),
+            accent_ink: Color32::from_rgb(0xFA, 0xF3, 0xE6),
+            dark: false,
+        }
+    }
+
+    /// "Almanac Noite" — the night variant from `cortex/off-1`'s `Palette::dark`.
+    /// Same terracotta accent as [`Self::almanac_light`] for brand continuity.
+    pub const fn almanac_dark() -> Self {
+        Self {
+            bg: Color32::from_rgb(0x1B, 0x18, 0x13),
+            panel: Color32::from_rgb(0x22, 0x1E, 0x18),
+            panel_alt: Color32::from_rgb(0x29, 0x24, 0x1C),
+            border: Color32::from_rgb(0x3A, 0x33, 0x28),
+            border_strong: Color32::from_rgb(0x7A, 0x70, 0x5C),
+            text: Color32::from_rgb(0xEC, 0xE2, 0xCD),
+            dim: Color32::from_rgb(0xA8, 0x9B, 0x82),
+            faint: Color32::from_rgb(0x5C, 0x53, 0x43),
+            accent: Color32::from_rgb(0xBF, 0x4D, 0x26),
+            accent_ink: Color32::from_rgb(0xFA, 0xF3, 0xE6),
+            dark: true,
+        }
+    }
+
+    /// "Blueprint" — cool navy/cyan drafting-table palette, recovered from the
+    /// `cortex/off-2` design experiment's `Palette::blueprint`. The cyan accent
+    /// is lifted from off-2's own high-contrast variant, the only place it
+    /// hardcoded a concrete "cyan" (the normal variant parameterized accent via
+    /// `AppConfig`). The primary/signature Blueprint variant.
+    pub const fn blueprint() -> Self {
+        Self {
+            bg: Color32::from_rgb(0x0E, 0x1A, 0x2B),
+            panel: Color32::from_rgb(0x0A, 0x14, 0x22),
+            panel_alt: Color32::from_rgb(0x14, 0x25, 0x3B),
+            border: Color32::from_rgb(0x21, 0x3D, 0x5E),
+            border_strong: Color32::from_rgb(0x4A, 0x6E, 0x90),
+            text: Color32::from_rgb(0xDC, 0xE8, 0xF2),
+            dim: Color32::from_rgb(0x7E, 0x9C, 0xB6),
+            faint: Color32::from_rgb(0x4E, 0x6B, 0x85),
+            accent: Color32::from_rgb(0x4F, 0xC3, 0xF7),
+            accent_ink: Color32::from_rgb(0x0A, 0x14, 0x22),
+            dark: true,
+        }
+    }
+
+    /// "Blueprint Rascunho" — the light "draft on white" variant from
+    /// `cortex/off-2`'s `Palette::draft`. Uses a deeper technical blue accent
+    /// than [`Self::blueprint`]'s cyan, which reads washed-out on a white ground.
+    pub const fn blueprint_light() -> Self {
+        Self {
+            bg: Color32::from_rgb(0xF2, 0xF6, 0xFB),
+            panel: Color32::from_rgb(0xE6, 0xEE, 0xF6),
+            panel_alt: Color32::from_rgb(0xFF, 0xFF, 0xFF),
+            border: Color32::from_rgb(0xB8, 0xCC, 0xDD),
+            border_strong: Color32::from_rgb(0x74, 0x88, 0x98),
+            text: Color32::from_rgb(0x0E, 0x22, 0x30),
+            dim: Color32::from_rgb(0x4A, 0x60, 0x75),
+            faint: Color32::from_rgb(0x8C, 0xA0, 0xB0),
+            accent: Color32::from_rgb(0x00, 0x6D, 0xA6),
+            accent_ink: Color32::from_rgb(0xFF, 0xFF, 0xFF),
+            dark: false,
+        }
+    }
+
+    /// "Swiss" — Bauhaus/International-Typographic-Style black + warm orange,
+    /// recovered from the `omninote-swiss-theme` stash (a Claude-Design HTML
+    /// handoff, never committed). Dark-only — no light variant was ever built.
+    pub const fn swiss() -> Self {
+        Self {
+            bg: Color32::from_rgb(0x0E, 0x0E, 0x0E),
+            panel: Color32::from_rgb(0x14, 0x14, 0x14),
+            panel_alt: Color32::from_rgb(0x1C, 0x1C, 0x1C),
+            border: Color32::from_rgb(0x26, 0x26, 0x26),
+            border_strong: Color32::from_rgb(0x3A, 0x3A, 0x3A),
+            text: Color32::from_rgb(0xFA, 0xFA, 0xFA),
+            dim: Color32::from_rgb(0x8A, 0x8A, 0x8A),
+            faint: Color32::from_rgb(0x5A, 0x5A, 0x5A),
+            accent: Color32::from_rgb(0xFF, 0x5A, 0x1F),
+            accent_ink: Color32::from_rgb(0x00, 0x00, 0x00),
+            dark: true,
+        }
+    }
+
     /// The accent at an explicit alpha. Single helper so every translucent accent
     /// wash (row hover/selection, text selection) derives from one place instead
     /// of scattered `from_rgba_unmultiplied` literals.
@@ -119,8 +217,10 @@ impl Theme {
     }
 
     /// Translucent accent wash for a hovered list row (paints over the panel).
-    /// Subtle on purpose — the primary hover signal is handled by the row helper's
-    /// stroke; this is just a hint.
+    /// Subtle on purpose. The Terminal `clickable_row` no longer fills on hover —
+    /// it brightens the `>` prompt marker instead — so this token is currently
+    /// unused; kept as part of the palette for any non-Terminal hover surface.
+    #[allow(dead_code)]
     pub fn row_hover(&self) -> Color32 {
         self.accent_alpha(26)
     }
@@ -206,6 +306,11 @@ impl Theme {
             ThemePreset::ObsidianLight => Self::obsidian_light(),
             ThemePreset::HighContrast => Self::high_contrast(),
             ThemePreset::Custom => Self::custom(accent),
+            ThemePreset::AlmanacLight => Self::almanac_light(),
+            ThemePreset::AlmanacDark => Self::almanac_dark(),
+            ThemePreset::Blueprint => Self::blueprint(),
+            ThemePreset::BlueprintLight => Self::blueprint_light(),
+            ThemePreset::Swiss => Self::swiss(),
         }
     }
 
@@ -231,31 +336,39 @@ impl Theme {
             }
         };
 
+        // Borderless by default — buttons/inputs/labels are green text on the void,
+        // not framed boxes (boxy 1px-outline chrome read as Windows 98). Feedback is
+        // text brightening + a faint phosphor wash on touch, never an outline rect.
+        let no_stroke = egui::Stroke::NONE;
         let widgets = egui::style::Widgets {
-            // Windows/labels: panel fill, hairline outline, dim ink.
-            noninteractive: widget(self.panel, self.panel, hairline, self.dim),
-            // Resting buttons/inputs: flat panel, border outline, primary text.
-            inactive: widget(self.panel, self.panel, hairline, self.text),
-            // Hover: same flat fill, accent outline, primary text (no fill swap,
-            // no growth — the outline is the whole hover signal).
-            hovered: widget(
-                self.panel,
-                self.panel,
-                egui::Stroke::new(1.0, self.accent),
+            // Labels / window backgrounds: no fill, no outline, dim ink.
+            noninteractive: widget(
+                Color32::TRANSPARENT,
+                Color32::TRANSPARENT,
+                no_stroke,
+                self.dim,
+            ),
+            // Resting buttons/inputs: invisible until touched — no fill, no border.
+            inactive: widget(
+                Color32::TRANSPARENT,
+                Color32::TRANSPARENT,
+                no_stroke,
                 self.text,
             ),
-            // Active/pressed: solid accent block, accent_ink glyphs.
-            active: widget(
+            // Hover: a faint phosphor wash + brightened accent text, no outline.
+            hovered: widget(
+                self.accent_alpha(20),
+                self.accent_alpha(20),
+                no_stroke,
                 self.accent,
-                self.accent,
-                egui::Stroke::new(1.0, self.accent),
-                self.accent_ink,
             ),
-            // Open combo/menu owner: raised alt panel, accent outline.
+            // Active/pressed: a brief solid phosphor block.
+            active: widget(self.accent, self.accent, no_stroke, self.accent_ink),
+            // Open combo/menu owner: faint wash, accent text, no outline.
             open: widget(
-                self.panel_alt,
-                self.panel_alt,
-                egui::Stroke::new(1.0, self.accent),
+                self.accent_alpha(28),
+                self.accent_alpha(28),
+                no_stroke,
                 self.text,
             ),
         };
@@ -291,12 +404,11 @@ impl Theme {
                 off_duration: 0.5,
             },
             clip_rect_margin: 3.0,
-            // Terminal chrome: buttons carry a frame (the hairline IS the look),
-            // collapsing headers do not (flat section labels), indented regions
-            // get a left vline (tree affordance).
-            button_frame: true,
+            // No frames anywhere — buttons are bare green text (a frame box reads as
+            // Windows 98); collapsing headers and indents stay flat and lineless.
+            button_frame: false,
             collapsing_header_frame: false,
-            indent_has_left_vline: true,
+            indent_has_left_vline: false,
             striped: false,
             slider_trailing_fill: true,
             handle_shape: egui::style::HandleShape::Rect { aspect_ratio: 0.5 },
@@ -305,10 +417,11 @@ impl Theme {
             numeric_color_space: egui::style::NumericColorSpace::GammaByte,
         };
 
-        // ScrollStyle: non-floating (always-visible) solid bars, deliberately
-        // narrow, handle drawn from the border tokens so it reads as chrome.
+        // ScrollStyle: floating bars that overlay the content (no reserved chrome
+        // gutter — a permanent bar would box the scroll region against the void),
+        // deliberately narrow, fading in on hover/drag.
         let scroll = egui::style::ScrollStyle {
-            floating: false,
+            floating: true,
             bar_width: 10.0,
             handle_min_length: 16.0,
             bar_inner_margin: 2.0,
@@ -395,10 +508,51 @@ mod tests {
     fn presets_resolve_distinct_backgrounds() {
         assert_eq!(
             Theme::obsidian_dark().bg,
-            Color32::from_rgb(0x0c, 0x0d, 0x10)
+            Color32::from_rgb(0x01, 0x06, 0x04)
         );
         assert_eq!(Theme::high_contrast().bg, Color32::BLACK);
         assert_ne!(Theme::obsidian_dark().bg, Theme::obsidian_light().bg);
+    }
+
+    #[test]
+    fn new_presets_have_pairwise_distinct_backgrounds() {
+        let bgs = [
+            Theme::obsidian_dark().bg,
+            Theme::obsidian_light().bg,
+            Theme::high_contrast().bg,
+            Theme::almanac_light().bg,
+            Theme::almanac_dark().bg,
+            Theme::blueprint().bg,
+            Theme::blueprint_light().bg,
+            Theme::swiss().bg,
+        ];
+        for (i, a) in bgs.iter().enumerate() {
+            for (j, b) in bgs.iter().enumerate() {
+                if i != j {
+                    assert_ne!(a, b, "preset {i} and {j} share a background");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn new_presets_carry_the_right_darkness_flag() {
+        assert!(!Theme::almanac_light().dark);
+        assert!(Theme::almanac_dark().dark);
+        assert!(Theme::blueprint().dark);
+        assert!(!Theme::blueprint_light().dark);
+        assert!(Theme::swiss().dark);
+    }
+
+    #[test]
+    fn almanac_variants_share_the_terracotta_accent() {
+        // Brand continuity: both Almanac variants keep the same accent so the
+        // "Almanac" identity reads consistently regardless of dark/light pick.
+        assert_eq!(Theme::almanac_light().accent, Theme::almanac_dark().accent);
+        assert_eq!(
+            Theme::almanac_light().accent,
+            Color32::from_rgb(0xBF, 0x4D, 0x26)
+        );
     }
 
     #[test]
@@ -419,6 +573,26 @@ mod tests {
             Theme::from_preset(ThemePreset::Custom, accent).accent,
             Color32::from_rgb(1, 2, 3)
         );
+        assert_eq!(
+            Theme::from_preset(ThemePreset::AlmanacLight, accent),
+            Theme::almanac_light()
+        );
+        assert_eq!(
+            Theme::from_preset(ThemePreset::AlmanacDark, accent),
+            Theme::almanac_dark()
+        );
+        assert_eq!(
+            Theme::from_preset(ThemePreset::Blueprint, accent),
+            Theme::blueprint()
+        );
+        assert_eq!(
+            Theme::from_preset(ThemePreset::BlueprintLight, accent),
+            Theme::blueprint_light()
+        );
+        assert_eq!(
+            Theme::from_preset(ThemePreset::Swiss, accent),
+            Theme::swiss()
+        );
     }
 
     #[test]
@@ -430,12 +604,7 @@ mod tests {
         // raw r()/g()/b() comparison would fail: egui premultiplies on build.)
         assert_eq!(
             c,
-            Color32::from_rgba_unmultiplied(
-                t.accent.r(),
-                t.accent.g(),
-                t.accent.b(),
-                56
-            )
+            Color32::from_rgba_unmultiplied(t.accent.r(), t.accent.g(), t.accent.b(), 56)
         );
         assert_eq!(c.a(), 56);
         // Full opacity round-trips the accent exactly (premultiply is identity).
@@ -539,6 +708,11 @@ mod tests {
             Theme::obsidian_light(),
             Theme::high_contrast(),
             Theme::custom([0x12, 0x34, 0x56]),
+            Theme::almanac_light(),
+            Theme::almanac_dark(),
+            Theme::blueprint(),
+            Theme::blueprint_light(),
+            Theme::swiss(),
         ] {
             let ctx = egui::Context::default();
             theme.apply(&ctx);
@@ -621,17 +795,13 @@ mod tests {
             assert_eq!(sp.slider_width, 140.0);
             assert_eq!(sp.combo_height, 240.0);
             assert!(
-                !sp.scroll.floating,
-                "scrollbars are non-floating (always shown)"
+                sp.scroll.floating,
+                "scrollbars float over the void (no reserved gutter)"
             );
             assert_eq!(sp.scroll.bar_width, 10.0);
             assert_ne!(
                 sp.indent, def_style.spacing.indent,
                 "indent differs from egui's 18.0 default"
-            );
-            assert_ne!(
-                sp.scroll.floating, def_style.spacing.scroll.floating,
-                "default scroll is floating; ours is solid"
             );
 
             // --- Interaction: deliberate, not default ---
