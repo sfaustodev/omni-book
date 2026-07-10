@@ -20,7 +20,7 @@ pub enum MdFormat {
 }
 
 impl MdFormat {
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             MdFormat::Bold => "𝐁  Negrito",
             MdFormat::Italic => "𝐼  Itálico",
@@ -327,7 +327,10 @@ impl OmniNoteApp {
             let b = char_to_byte(r.secondary.ccursor.index);
             (a.min(b), a.max(b))
         });
-        let mut pending_format: Option<MdFormat> = None;
+        // Seed from a native "Editar" menu click (native_menu.rs) — it acts on
+        // `editor_sel` exactly like a right-click pick below, since both steal
+        // focus from the editor the same way.
+        let mut pending_format: Option<MdFormat> = self.pending_native_format.take();
         output.response.context_menu(|ui| {
             ui.label(egui::RichText::new("Formatar").size(10.0).weak());
             ui.separator();

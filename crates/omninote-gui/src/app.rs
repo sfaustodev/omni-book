@@ -1,3 +1,4 @@
+use crate::native_menu;
 use crate::theme;
 use crate::watcher::VaultWatcher;
 use eframe::egui;
@@ -60,16 +61,25 @@ pub(crate) fn theme_for_config(cfg: &omninote_core::types::AppConfig) -> theme::
 
 /// Flip light↔dark in-place, preserving an accessibility/custom preset. Keeps
 /// `dark_mode` and `theme_preset` in sync so neither source of truth drifts.
+/// Each theme family with a light/dark sibling pair flips within its own pair
+/// (Obsidian, Almanac, Blueprint); families with no sibling (`HighContrast`,
+/// `Custom`, `Swiss`) are deliberate choices left untouched.
 pub(crate) fn toggle_light_dark(cfg: &mut omninote_core::types::AppConfig) {
     use omninote_core::types::ThemePreset;
     cfg.dark_mode = !cfg.dark_mode;
-    // Only the plain Obsidian presets track the light/dark boolean; high-contrast
-    // and custom are deliberate choices left untouched.
     cfg.theme_preset = match cfg.theme_preset {
         ThemePreset::ObsidianDark | ThemePreset::ObsidianLight if cfg.dark_mode => {
             ThemePreset::ObsidianDark
         }
         ThemePreset::ObsidianDark | ThemePreset::ObsidianLight => ThemePreset::ObsidianLight,
+        ThemePreset::AlmanacDark | ThemePreset::AlmanacLight if cfg.dark_mode => {
+            ThemePreset::AlmanacDark
+        }
+        ThemePreset::AlmanacDark | ThemePreset::AlmanacLight => ThemePreset::AlmanacLight,
+        ThemePreset::Blueprint | ThemePreset::BlueprintLight if cfg.dark_mode => {
+            ThemePreset::Blueprint
+        }
+        ThemePreset::Blueprint | ThemePreset::BlueprintLight => ThemePreset::BlueprintLight,
         other => other,
     };
 }
@@ -224,6 +234,18 @@ pub struct OmniNoteApp {
     /// while the editor has it so the right-click format menu can act on it even
     /// after the menu steals focus.
     pub editor_sel: Option<(usize, usize)>,
+    /// Format command clicked from the native macOS "Editar" menu (`native_menu`),
+    /// consumed by `show_edit_panel` the same way a right-click menu pick is —
+    /// via `editor_sel`, since a native menu click steals focus exactly like the
+    /// in-app context menu does.
+    pub pending_native_format: Option<crate::ui_editor::MdFormat>,
+    /// The native macOS "Tema"/"Editar" menu bar (`native_menu.rs`). A no-op
+    /// stub on non-macOS targets — see that module's doc comment. `Option` so
+    /// `update()` can `.take()` it before calling `pump(self, ctx)` — the same
+    /// take-then-restore idiom `flush_active`/`active_note` use, sidestepping
+    /// the double-mutable-borrow a plain field would need (`pump` takes
+    /// `&mut OmniNoteApp`, which is `self` itself).
+    pub native_menu: Option<native_menu::NativeMenu>,
     /// CAD-25 Slice 5 — full-panel overlay (Tickets / Timeline) over the editor.
     pub central_overlay: CentralOverlay,
     /// Tickets panel: status filter + free-text query (transient).
@@ -277,9 +299,15 @@ impl OmniNoteApp {
             .apply(&cc.egui_ctx);
 
         let watcher = vault.as_ref().and_then(|v| VaultWatcher::new(&v.root).ok());
+        let current_preset = vault
+            .as_ref()
+            .map(|v| v.config.theme_preset)
+            .unwrap_or_default();
+        let native_menu = Some(native_menu::NativeMenu::build(&cc.egui_ctx, current_preset));
 
         let app = Self {
             vault,
+            native_menu,
             active_note: None,
             editing: false,
             query: String::new(),
@@ -306,6 +334,7 @@ impl OmniNoteApp {
             calendar_open: false,
             calendar_ym: None,
             editor_sel: None,
+            pending_native_format: None,
             central_overlay: CentralOverlay::None,
             tickets_filter: TicketFilter::All,
             tickets_query: String::new(),
@@ -679,6 +708,15 @@ impl eframe::App for OmniNoteApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         use std::time::Duration;
 
+        // Drain native "Tema"/"Editar" menu clicks first, before anything else
+        // reads `pending_native_format`/`editor_sel` this frame. Take-then-restore
+        // (mirrors `flush_active`/`active_note`): `pump` needs `&mut self`, which
+        // a plain `&mut self.native_menu` field access can't also hold.
+        if let Some(mut nm) = self.native_menu.take() {
+            nm.pump(self, ctx);
+            self.native_menu = Some(nm);
+        }
+
         // Order is load-bearing: poll the watcher BEFORE the auto-save decision so
         // an external change detected this frame sets `external_change_pending`
         // before `should_autosave` is consulted. Otherwise the inactivity auto-save
@@ -843,6 +881,27 @@ impl eframe::App for OmniNoteApp {
         self.show_onboarding(ctx);
         self.show_diary_append(ctx);
         self.show_toasts(ctx);
+        // CRT / phosphor scanlines — the Matrix-terminal texture. A thin dark line
+        // every 3px on a foreground layer (sits above all panels, captures no
+        // input). Dark mode only; a light theme has no CRT to fake.
+        let crt = self
+            .vault
+            .as_ref()
+            .map(|v| theme_for_config(&v.config).dark)
+            .unwrap_or(true);
+        if crt {
+            let screen = ctx.screen_rect();
+            let p = ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new("crt_scanlines"),
+            ));
+            let line = egui::Color32::from_rgba_unmultiplied(0, 0, 0, 30);
+            let mut y = screen.top();
+            while y < screen.bottom() {
+                p.hline(screen.x_range(), y, egui::Stroke::new(1.0, line));
+                y += 3.0;
+            }
+        }
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -898,6 +957,11 @@ mod tests {
             calendar_open: false,
             calendar_ym: None,
             editor_sel: None,
+            pending_native_format: None,
+            // None in the headless test helper: `muda::Menu` can only be built on
+            // the real AppKit main thread, and `cargo test` runs each test on its
+            // own worker thread. `pump`/`sync_theme_check` are no-ops on `None`.
+            native_menu: None,
             central_overlay: CentralOverlay::None,
             tickets_filter: TicketFilter::All,
             tickets_query: String::new(),
