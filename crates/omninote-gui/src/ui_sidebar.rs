@@ -5,21 +5,28 @@ use std::path::{Path, PathBuf};
 
 impl OmniNoteApp {
     pub fn show_sidebar(&mut self, ctx: &egui::Context) {
-        egui::SidePanel::left("sidebar")
+        let theme = self.sidebar_theme();
+        let resp = egui::SidePanel::left("sidebar")
             .exact_width(280.0)
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing.y = 4.0;
 
-                // Header
+                // Header: OMNINOTE wordmark + vault name in dim mono.
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("📓 OmniNote").strong().size(16.0));
+                    ui.label(
+                        RichText::new("OMNINOTE")
+                            .monospace()
+                            .strong()
+                            .size(15.0)
+                            .color(theme.text),
+                    );
                     if let Some(v) = &self.vault {
                         let name = v
                             .root
                             .file_name()
                             .and_then(|s| s.to_str())
                             .unwrap_or("vault");
-                        ui.label(RichText::new(name).size(10.0).weak());
+                        ui.label(RichText::new(name).monospace().size(10.0).color(theme.dim));
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
@@ -57,40 +64,50 @@ impl OmniNoteApp {
                         }
                     });
                 });
-                ui.separator();
+                ui.add_space(4.0);
 
-                // Search
-                let search = ui.add(
-                    egui::TextEdit::singleline(&mut self.query)
-                        .hint_text("🔍 Buscar... (Cmd+K)")
-                        .desired_width(f32::INFINITY),
-                );
-                // `command_only()` (not `.command`) so AltGr (= Ctrl+Alt) typing of
-                // a `k`-keyed character on intl layouts doesn't steal editor focus.
-                if ctx.input(|i| i.key_pressed(egui::Key::K) && i.modifiers.command_only()) {
-                    search.request_focus();
-                }
-
-                // Type filter chips
-                ui.horizontal_wrapped(|ui| {
+                // Search: terminal-prompt field — a leading `/` accent glyph and a
+                // borderless input floating on the void (no framed box).
+                ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
-                    if ui
-                        .selectable_label(self.type_filter.is_none(), "todos")
-                        .clicked()
-                    {
+                    ui.label(
+                        RichText::new("/")
+                            .monospace()
+                            .color(theme.accent)
+                            .size(crate::ui_a11y::scaled(ui, 13.0)),
+                    );
+                    let search = ui.add(
+                        egui::TextEdit::singleline(&mut self.query)
+                            .frame(false)
+                            .hint_text(RichText::new("buscar… ^K").monospace().color(theme.faint))
+                            .desired_width(f32::INFINITY),
+                    );
+                    // `command_only()` (not `.command`) so AltGr (= Ctrl+Alt)
+                    // typing of a `k`-keyed character on intl layouts doesn't
+                    // steal editor focus.
+                    if ctx.input(|i| i.key_pressed(egui::Key::K) && i.modifiers.command_only()) {
+                        search.request_focus();
+                    }
+                });
+                ui.add_space(4.0);
+
+                // Type filters: bare colored mono words, ink from note_type_color;
+                // selected = full-brightness ink + a leading `>` (no box, no stroke).
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 4.0);
+                    if tag_filter(ui, &theme, "todos", theme.dim, self.type_filter.is_none()) {
                         self.type_filter = None;
                     }
                     for t in NoteType::all() {
                         let selected = self.type_filter == Some(t);
-                        if ui
-                            .selectable_label(selected, format!("{} {}", t.icon(), t.label()))
-                            .clicked()
-                        {
+                        let ink = theme.note_type_color(t);
+                        if tag_filter(ui, &theme, t.label(), ink, selected) {
                             self.type_filter = if selected { None } else { Some(t) };
                         }
                     }
                 });
-                ui.separator();
+                ui.add_space(2.0);
+                crate::ui_a11y::section_header(ui, &theme, "notes");
 
                 // Note/folder tree
                 egui::ScrollArea::vertical()
@@ -101,29 +118,52 @@ impl OmniNoteApp {
                         self.show_notes_in_folder(ui, &PathBuf::new());
                     });
 
-                // Footer
-                ui.separator();
+                // Footer: mono action buttons with kbd_hint chips.
+                ui.add_space(2.0);
+                crate::ui_a11y::section_header(ui, &theme, "actions");
                 ui.horizontal(|ui| {
-                    if ui.button("➕ Nota").on_hover_text("Cmd+N").clicked() {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    if footer_action(ui, &theme, "+ nota", Some("^N")) {
                         self.show_new = true;
                     }
-                    if ui.button("📁 Pasta").clicked() {
+                    if footer_action(ui, &theme, "+ pasta", None) {
                         if let Some(v) = &mut self.vault {
                             let _ = v.create_folder(None, "Nova pasta");
                         }
                     }
-                    if ui.button("📥 Importar").clicked() {
+                });
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    if footer_action(ui, &theme, "importar", None) {
                         self.show_import = true;
                     }
-                    if ui
-                        .button("◷ Timeline")
-                        .on_hover_text("Mudanças do vault (Cmd+Shift+H)")
-                        .clicked()
-                    {
+                    if footer_action(ui, &theme, "timeline", Some("⇧^H")) {
                         self.toggle_central_overlay(crate::app::CentralOverlay::Timeline);
                     }
                 });
             });
+
+        // 1px hairline on the panel's right edge — the terminal frame separating
+        // the sidebar from the editor.
+        let panel_rect = resp.response.rect;
+        ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("sidebar_edge"),
+        ))
+        .vline(
+            panel_rect.right(),
+            panel_rect.y_range(),
+            egui::Stroke::new(1.0, theme.border),
+        );
+    }
+
+    /// Theme for the sidebar chrome, resolved from the active vault config (or the
+    /// dark default before a vault is open).
+    fn sidebar_theme(&self) -> crate::theme::Theme {
+        self.vault
+            .as_ref()
+            .map(|v| crate::app::theme_for_config(&v.config))
+            .unwrap_or_else(crate::theme::Theme::obsidian_dark)
     }
 
     fn show_folder_tree(&mut self, ui: &mut egui::Ui, parent: PathBuf) {
@@ -151,13 +191,16 @@ impl OmniNoteApp {
                 .to_string();
             let folder_clone = folder.clone();
 
-            let header = egui::CollapsingHeader::new(format!("📁 {}", name))
-                .id_salt(format!("folder_{}", folder.to_string_lossy()))
-                .default_open(true)
-                .show(ui, |ui| {
-                    self.show_folder_tree(ui, folder_clone.clone());
-                    self.show_notes_in_folder(ui, &folder_clone);
-                });
+            let theme = self.sidebar_theme();
+            let header =
+                egui::CollapsingHeader::new(RichText::new(&name).monospace().color(theme.text))
+                    .id_salt(format!("folder_{}", folder.to_string_lossy()))
+                    .default_open(true)
+                    .icon(move |ui, openness, resp| disclosure_marker(ui, &theme, openness, resp))
+                    .show(ui, |ui| {
+                        self.show_folder_tree(ui, folder_clone.clone());
+                        self.show_notes_in_folder(ui, &folder_clone);
+                    });
 
             header.header_response.context_menu(|ui| {
                 if ui.button("📄+ Nova nota aqui").clicked() {
@@ -239,7 +282,7 @@ impl OmniNoteApp {
                 .map(|n| {
                     (
                         n.frontmatter.id.clone(),
-                        format!("{} {}", n.frontmatter.note_type.icon(), n.title),
+                        n.title.clone(),
                         n.frontmatter.note_type,
                     )
                 })
@@ -259,86 +302,30 @@ impl OmniNoteApp {
         let mut pending_retype: Option<(String, NoteType)> = None;
         let mut pending_move: Option<(String, Option<PathBuf>)> = None;
 
-        let theme = self
-            .vault
-            .as_ref()
-            .map(|v| crate::app::theme_for_config(&v.config))
-            .unwrap_or_else(crate::theme::Theme::obsidian_dark);
-        let font_id = egui::TextStyle::Body.resolve(ui.style());
-        let row_w = ui.available_width();
-        // Scale row height and char-width estimate with the font so large a11y
-        // fonts don't overflow the fixed card nor bleed past the panel. (triad-agy)
-        let row_h = (font_id.size * 1.8).max(28.0).round();
-        let char_w = 7.2 * (font_id.size / 14.0);
-        let max_chars = (((row_w - 30.0) / char_w) as usize).max(8);
+        let theme = self.sidebar_theme();
 
-        for (id, label, current_type) in notes {
+        for (id, title, current_type) in notes {
             let is_active = active_id.as_deref() == Some(&id);
-            // Hand-painted row card: accent wash + left bar when active, faint wash
-            // on hover. Focusable so keyboard Tab/Enter reaches the list; a solid
-            // outline (not a translucent wash) in high-contrast. (triad-agy)
-            let (rect, resp) =
-                ui.allocate_exact_size(egui::vec2(row_w, row_h), egui::Sense::click());
-            let hc = theme.is_high_contrast();
-            if is_active {
-                if hc {
-                    ui.painter().rect_stroke(
-                        rect,
-                        egui::Rounding::same(6.0),
-                        egui::Stroke::new(2.0, theme.accent),
+            let ink = theme.note_type_color(current_type);
+            // Terminal note row: the `>` prompt + accent left-bar selection and the
+            // focus border come from the shared helper; the closure only paints the
+            // type-colored marker dot and the (truncated) title. AccessKit label is
+            // the bare title so screen readers don't read the marker glyph.
+            let (resp, activated) =
+                crate::ui_a11y::clickable_row(ui, &theme, &title, is_active, |ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    ui.label(crate::ui_a11y::scaled_text(ui, "•", 11.0).color(ink));
+                    let title_color = if is_active { theme.accent } else { theme.text };
+                    // `truncate` keeps a long title inside the panel instead of
+                    // bleeding under the scrollbar/editor edge.
+                    ui.add(
+                        egui::Label::new(
+                            crate::ui_a11y::scaled_text(ui, &title, 13.0).color(title_color),
+                        )
+                        .truncate(),
                     );
-                } else {
-                    ui.painter()
-                        .rect_filled(rect, egui::Rounding::same(6.0), theme.row_selected());
-                }
-                let bar =
-                    egui::Rect::from_min_max(rect.min, egui::pos2(rect.min.x + 3.0, rect.max.y));
-                ui.painter()
-                    .rect_filled(bar, egui::Rounding::same(1.5), theme.accent);
-            } else if resp.hovered() {
-                if hc {
-                    ui.painter().rect_stroke(
-                        rect,
-                        egui::Rounding::same(6.0),
-                        egui::Stroke::new(1.0, theme.accent),
-                    );
-                } else {
-                    ui.painter()
-                        .rect_filled(rect, egui::Rounding::same(6.0), theme.row_hover());
-                }
-            }
-            // Keyboard focus ring — selectable_label drew one; the manual paint must too.
-            if resp.has_focus() {
-                ui.painter().rect_stroke(
-                    rect,
-                    egui::Rounding::same(6.0),
-                    egui::Stroke::new(1.5, theme.accent),
-                );
-            }
-            // Clip the painted label to the row so a long title can't bleed past the
-            // panel under the scrollbar/editor when the font is large. (triad-agy)
-            ui.painter().with_clip_rect(rect).text(
-                egui::pos2(rect.left() + 12.0, rect.center().y),
-                egui::Align2::LEFT_CENTER,
-                truncate_chars(&label, max_chars),
-                font_id.clone(),
-                theme.text,
-            );
-            let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
-            // Re-announce to AccessKit — the hand-painted row replaced
-            // selectable_label, which would otherwise drop screen-reader semantics.
-            resp.widget_info(|| {
-                egui::WidgetInfo::selected(
-                    egui::WidgetType::SelectableLabel,
-                    true,
-                    is_active,
-                    &label,
-                )
-            });
-            // Keyboard activation: Enter/Space selects the focused row.
-            let kbd_select = resp.has_focus()
-                && ui.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Space));
-            if resp.clicked() || kbd_select {
+                });
+            if activated {
                 pending_select = Some(id.clone());
             }
             resp.context_menu(|ui| {
@@ -443,13 +430,93 @@ impl OmniNoteApp {
     }
 }
 
-/// Truncate a label to `max` chars with an ellipsis. Row text is painted (not an
-/// auto-clipping widget), so an over-long title would otherwise bleed under the
-/// scrollbar.
-fn truncate_chars(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        return s.to_string();
+/// A bare-word type filter (`resumo`, `codigo`). `ink` colors the word (from
+/// `note_type_color`); the SELECTED filter is marked by full-brightness ink + a
+/// leading `>` prompt, the unselected ones are dimmed — NO box, NO stroke, the
+/// void look carries structure through color and the marker alone. Keyboard focus
+/// brightens the word to `accent` (still no rectangle). Returns true when clicked.
+/// Focusable/keyboard-activatable so the filter is reachable by Tab.
+fn tag_filter(
+    ui: &mut egui::Ui,
+    theme: &crate::theme::Theme,
+    label: &str,
+    ink: egui::Color32,
+    selected: bool,
+) -> bool {
+    // A leading `>` marks the active filter; unselected words reserve the same
+    // width with a space so the labels don't shift sideways when selection moves.
+    let glyph = if selected { '>' } else { ' ' };
+    let font = egui::FontId::monospace(crate::ui_a11y::scaled(ui, 11.0));
+    let galley = ui.painter().layout_no_wrap(
+        format!("{glyph}{label}"),
+        font,
+        egui::Color32::PLACEHOLDER, // recolored per-state at paint time below
+    );
+    let (rect, resp) = ui.allocate_exact_size(galley.size(), egui::Sense::click());
+    let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+    // Color decided after interaction: hover/focus brighten the word to the accent
+    // (the void-look focus signal — no outline box); otherwise full ink when active,
+    // dimmed when resting.
+    let color = if resp.hovered() || resp.has_focus() {
+        theme.accent
+    } else if selected {
+        ink
+    } else {
+        ink.gamma_multiply(0.55)
+    };
+    ui.painter().galley(rect.min, galley, color);
+    resp.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, label)
+    });
+    let kbd = resp.has_focus()
+        && ui.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Space));
+    resp.clicked() || kbd
+}
+
+/// A footer action: a bare mono `Button` (borderless — `button_frame: false` in
+/// `Theme::apply`, so it renders as green text on the void, not a framed box) plus
+/// an optional `kbd_hint` of bracketed keys. Returns true when clicked.
+fn footer_action(
+    ui: &mut egui::Ui,
+    theme: &crate::theme::Theme,
+    label: &str,
+    keys: Option<&str>,
+) -> bool {
+    let clicked = ui
+        .button(
+            RichText::new(label)
+                .monospace()
+                .size(crate::ui_a11y::scaled(ui, 12.0)),
+        )
+        .clicked();
+    if let Some(k) = keys {
+        crate::ui_a11y::kbd_hint(ui, theme, k);
     }
-    let kept: String = s.chars().take(max.saturating_sub(1)).collect();
-    format!("{kept}…")
+    clicked
+}
+
+/// Disclosure marker for a folder `CollapsingHeader` — `v` when open, `>` when
+/// closed, in `dim` mono. Replaces egui's default triangle so folders speak the
+/// same terminal language as the note rows. `openness` is the 0→1 animation
+/// progress; the glyph flips at the halfway point.
+fn disclosure_marker(
+    ui: &mut egui::Ui,
+    theme: &crate::theme::Theme,
+    openness: f32,
+    resp: &egui::Response,
+) {
+    let glyph = if openness > 0.5 { "v" } else { ">" };
+    let color = if resp.hovered() {
+        theme.accent
+    } else {
+        theme.dim
+    };
+    let rect = resp.rect;
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        glyph,
+        egui::FontId::monospace(crate::ui_a11y::scaled(ui, 12.0)),
+        color,
+    );
 }

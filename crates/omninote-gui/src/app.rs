@@ -1,3 +1,4 @@
+use crate::native_menu;
 use crate::theme;
 use crate::watcher::VaultWatcher;
 use eframe::egui;
@@ -39,6 +40,10 @@ pub enum TicketFilter {
 
 /// OpenDyslexic, bundled in the binary (OFL). Selectable via the a11y font setting.
 const OPEN_DYSLEXIC_OTF: &[u8] = include_bytes!("../assets/fonts/OpenDyslexic-Regular.otf");
+/// JetBrains Mono (OFL) — the Terminal body + monospace face, bundled in the binary.
+const JETBRAINS_MONO_TTF: &[u8] = include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf");
+/// Space Grotesk SemiBold (OFL) — the display face used for headings, bundled in.
+const SPACE_GROTESK_TTF: &[u8] = include_bytes!("../assets/fonts/SpaceGrotesk-SemiBold.ttf");
 
 /// Register bundled custom fonts. Call once before applying theme/styles.
 /// Resolve a config to its concrete theme. While `theme_preset` is still at its
@@ -56,38 +61,105 @@ pub(crate) fn theme_for_config(cfg: &omninote_core::types::AppConfig) -> theme::
 
 /// Flip light↔dark in-place, preserving an accessibility/custom preset. Keeps
 /// `dark_mode` and `theme_preset` in sync so neither source of truth drifts.
+/// Each theme family with a light/dark sibling pair flips within its own pair
+/// (Obsidian, Almanac, Blueprint); families with no sibling (`HighContrast`,
+/// `Custom`, `Swiss`) are deliberate choices left untouched.
 pub(crate) fn toggle_light_dark(cfg: &mut omninote_core::types::AppConfig) {
     use omninote_core::types::ThemePreset;
     cfg.dark_mode = !cfg.dark_mode;
-    // Only the plain Obsidian presets track the light/dark boolean; high-contrast
-    // and custom are deliberate choices left untouched.
     cfg.theme_preset = match cfg.theme_preset {
         ThemePreset::ObsidianDark | ThemePreset::ObsidianLight if cfg.dark_mode => {
             ThemePreset::ObsidianDark
         }
         ThemePreset::ObsidianDark | ThemePreset::ObsidianLight => ThemePreset::ObsidianLight,
+        ThemePreset::AlmanacDark | ThemePreset::AlmanacLight if cfg.dark_mode => {
+            ThemePreset::AlmanacDark
+        }
+        ThemePreset::AlmanacDark | ThemePreset::AlmanacLight => ThemePreset::AlmanacLight,
+        ThemePreset::Blueprint | ThemePreset::BlueprintLight if cfg.dark_mode => {
+            ThemePreset::Blueprint
+        }
+        ThemePreset::Blueprint | ThemePreset::BlueprintLight => ThemePreset::BlueprintLight,
         other => other,
     };
 }
 
 fn register_custom_fonts(ctx: &egui::Context) {
+    // Start from egui's defaults: they carry the emoji/symbol fallback fonts that
+    // render the UI glyphs (◧ ◷ ▤ …) and emoji. We register our faces as the
+    // PRIMARY of each family and APPEND egui's original chain as fallback, so a
+    // glyph our face lacks still resolves instead of rendering as tofu.
     let mut fonts = egui::FontDefinitions::default();
+
     fonts.font_data.insert(
         theme::OPEN_DYSLEXIC_NAME.to_owned(),
         egui::FontData::from_static(OPEN_DYSLEXIC_OTF),
     );
-    // OpenDyslexic ships no emoji/symbol glyphs. Register it as the primary face
-    // but append egui's default proportional chain (which carries the emoji
-    // fonts) as fallback — otherwise every icon renders as tofu when the
-    // dyslexic family is active.
-    let mut chain = vec![theme::OPEN_DYSLEXIC_NAME.to_owned()];
-    if let Some(default_prop) = fonts.families.get(&egui::FontFamily::Proportional) {
-        chain.extend(default_prop.iter().cloned());
-    }
+    fonts.font_data.insert(
+        "JetBrainsMono".to_owned(),
+        egui::FontData::from_static(JETBRAINS_MONO_TTF),
+    );
+    fonts.font_data.insert(
+        theme::SPACE_GROTESK_NAME.to_owned(),
+        egui::FontData::from_static(SPACE_GROTESK_TTF),
+    );
+
+    // Snapshot egui's default chains before we mutate them, to reuse as the
+    // emoji/symbol fallback tail for every family below.
+    let default_prop = fonts
+        .families
+        .get(&egui::FontFamily::Proportional)
+        .cloned()
+        .unwrap_or_default();
+    let default_mono = fonts
+        .families
+        .get(&egui::FontFamily::Monospace)
+        .cloned()
+        .unwrap_or_default();
+
+    // Terminal = mono body: JetBrains Mono leads BOTH the proportional (primary
+    // body) and monospace families. Append egui's original tails for fallback.
+    let prop_chain = {
+        let mut c = vec!["JetBrainsMono".to_owned()];
+        c.extend(default_prop.iter().cloned());
+        c
+    };
+    let mono_chain = {
+        let mut c = vec!["JetBrainsMono".to_owned()];
+        c.extend(default_mono.iter().cloned());
+        c
+    };
+    fonts
+        .families
+        .insert(egui::FontFamily::Proportional, prop_chain.clone());
+    fonts
+        .families
+        .insert(egui::FontFamily::Monospace, mono_chain);
+
+    // Space Grotesk display family (headings) — falls back through the same
+    // proportional tail so non-Latin/emoji headings still render.
+    let grotesk_chain = {
+        let mut c = vec![theme::SPACE_GROTESK_NAME.to_owned()];
+        c.extend(default_prop.iter().cloned());
+        c
+    };
+    fonts.families.insert(
+        egui::FontFamily::Name(theme::SPACE_GROTESK_NAME.into()),
+        grotesk_chain,
+    );
+
+    // OpenDyslexic (a11y opt-in) ships no emoji/symbol glyphs — same tofu-proof
+    // fallback tail as the body.
+    let dyslexic_chain = {
+        let mut c = vec![theme::OPEN_DYSLEXIC_NAME.to_owned()];
+        c.extend(default_prop.iter().cloned());
+        c
+    };
     fonts.families.insert(
         egui::FontFamily::Name(theme::OPEN_DYSLEXIC_NAME.into()),
-        chain,
+        dyslexic_chain,
     );
+
     ctx.set_fonts(fonts);
 }
 
@@ -162,6 +234,18 @@ pub struct OmniNoteApp {
     /// while the editor has it so the right-click format menu can act on it even
     /// after the menu steals focus.
     pub editor_sel: Option<(usize, usize)>,
+    /// Format command clicked from the native macOS "Editar" menu (`native_menu`),
+    /// consumed by `show_edit_panel` the same way a right-click menu pick is —
+    /// via `editor_sel`, since a native menu click steals focus exactly like the
+    /// in-app context menu does.
+    pub pending_native_format: Option<crate::ui_editor::MdFormat>,
+    /// The native macOS "Tema"/"Editar" menu bar (`native_menu.rs`). A no-op
+    /// stub on non-macOS targets — see that module's doc comment. `Option` so
+    /// `update()` can `.take()` it before calling `pump(self, ctx)` — the same
+    /// take-then-restore idiom `flush_active`/`active_note` use, sidestepping
+    /// the double-mutable-borrow a plain field would need (`pump` takes
+    /// `&mut OmniNoteApp`, which is `self` itself).
+    pub native_menu: Option<native_menu::NativeMenu>,
     /// CAD-25 Slice 5 — full-panel overlay (Tickets / Timeline) over the editor.
     pub central_overlay: CentralOverlay,
     /// Tickets panel: status filter + free-text query (transient).
@@ -215,9 +299,15 @@ impl OmniNoteApp {
             .apply(&cc.egui_ctx);
 
         let watcher = vault.as_ref().and_then(|v| VaultWatcher::new(&v.root).ok());
+        let current_preset = vault
+            .as_ref()
+            .map(|v| v.config.theme_preset)
+            .unwrap_or_default();
+        let native_menu = Some(native_menu::NativeMenu::build(&cc.egui_ctx, current_preset));
 
         let app = Self {
             vault,
+            native_menu,
             active_note: None,
             editing: false,
             query: String::new(),
@@ -244,6 +334,7 @@ impl OmniNoteApp {
             calendar_open: false,
             calendar_ym: None,
             editor_sel: None,
+            pending_native_format: None,
             central_overlay: CentralOverlay::None,
             tickets_filter: TicketFilter::All,
             tickets_query: String::new(),
@@ -288,25 +379,56 @@ impl OmniNoteApp {
         let cfg = &v.config;
         let mut style = (*ctx.style()).clone();
 
-        // Font sizes — scale all text styles relative to base font_size
-        let base = cfg.font_size;
-        let scale = base / 14.0; // 14pt is egui default base
-        for (text_style, font_id) in style.text_styles.iter_mut() {
-            let default_size = match text_style {
-                egui::TextStyle::Heading => 20.0,
-                egui::TextStyle::Body => 14.0,
-                egui::TextStyle::Monospace => 12.0,
-                egui::TextStyle::Button => 14.0,
-                egui::TextStyle::Small => 10.0,
-                _ => 14.0,
-            };
-            font_id.size = (default_size * scale).round();
-            font_id.family = crate::theme::font_family_to_egui(cfg.font_family);
-        }
+        // Mono-forward Terminal type scale. Sizes are px-before-scale; the whole
+        // map scales by the user's font_size relative to egui's 14px base. The
+        // BODY face follows the a11y font setting (JetBrains Mono by default, or
+        // OpenDyslexic when chosen); the HEADING is always the Space Grotesk
+        // display face — a deliberate display/body split — UNLESS the user picked
+        // the dyslexic face, where legibility wins and the heading uses it too.
+        let scale = cfg.font_size / 14.0;
+        let body_family = crate::theme::font_family_to_egui(cfg.font_family);
+        let heading_family = if cfg.font_family == omninote_core::types::FontFamily::Dyslexic {
+            body_family.clone()
+        } else {
+            egui::FontFamily::Name(crate::theme::SPACE_GROTESK_NAME.into())
+        };
+        let px = |size: f32| (size * scale).round();
+        style.text_styles = [
+            (
+                egui::TextStyle::Heading,
+                egui::FontId::new(px(26.0), heading_family),
+            ),
+            (
+                egui::TextStyle::Body,
+                egui::FontId::new(px(13.5), body_family.clone()),
+            ),
+            (
+                egui::TextStyle::Monospace,
+                egui::FontId::new(px(12.5), egui::FontFamily::Monospace),
+            ),
+            (
+                egui::TextStyle::Button,
+                egui::FontId::new(px(12.0), body_family.clone()),
+            ),
+            (
+                egui::TextStyle::Small,
+                egui::FontId::new(px(11.0), body_family),
+            ),
+        ]
+        .into();
 
-        // Line spacing via item_spacing
-        let extra = (base * (cfg.line_height - 1.0)).max(0.0);
+        // Accessibility line-height: extra vertical gap between stacked widgets
+        // (and wrapped lines) proportional to the chosen line_height. Owned here,
+        // not in `theme.apply()`, so a theme re-bind never wipes it.
+        let extra = (cfg.font_size * (cfg.line_height - 1.0)).max(0.0);
         style.spacing.item_spacing.y = 3.0 + extra;
+
+        // TODO(letter_spacing): egui 0.29 exposes no native per-glyph tracking on
+        // TextStyle/FontId, so `cfg.letter_spacing` cannot be applied to the egui
+        // text layout here. It is applied in the md_render text paths in a later
+        // phase. The settings slider still round-trips the value (persisted in
+        // config); it is intentionally not silently dropped.
+        let _ = cfg.letter_spacing;
 
         ctx.set_style(style);
     }
@@ -586,6 +708,15 @@ impl eframe::App for OmniNoteApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         use std::time::Duration;
 
+        // Drain native "Tema"/"Editar" menu clicks first, before anything else
+        // reads `pending_native_format`/`editor_sel` this frame. Take-then-restore
+        // (mirrors `flush_active`/`active_note`): `pump` needs `&mut self`, which
+        // a plain `&mut self.native_menu` field access can't also hold.
+        if let Some(mut nm) = self.native_menu.take() {
+            nm.pump(self, ctx);
+            self.native_menu = Some(nm);
+        }
+
         // Order is load-bearing: poll the watcher BEFORE the auto-save decision so
         // an external change detected this frame sets `external_change_pending`
         // before `should_autosave` is consulted. Otherwise the inactivity auto-save
@@ -750,6 +881,27 @@ impl eframe::App for OmniNoteApp {
         self.show_onboarding(ctx);
         self.show_diary_append(ctx);
         self.show_toasts(ctx);
+        // CRT / phosphor scanlines — the Matrix-terminal texture. A thin dark line
+        // every 3px on a foreground layer (sits above all panels, captures no
+        // input). Dark mode only; a light theme has no CRT to fake.
+        let crt = self
+            .vault
+            .as_ref()
+            .map(|v| theme_for_config(&v.config).dark)
+            .unwrap_or(true);
+        if crt {
+            let screen = ctx.screen_rect();
+            let p = ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new("crt_scanlines"),
+            ));
+            let line = egui::Color32::from_rgba_unmultiplied(0, 0, 0, 30);
+            let mut y = screen.top();
+            while y < screen.bottom() {
+                p.hline(screen.x_range(), y, egui::Stroke::new(1.0, line));
+                y += 3.0;
+            }
+        }
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -805,6 +957,11 @@ mod tests {
             calendar_open: false,
             calendar_ym: None,
             editor_sel: None,
+            pending_native_format: None,
+            // None in the headless test helper: `muda::Menu` can only be built on
+            // the real AppKit main thread, and `cargo test` runs each test on its
+            // own worker thread. `pump`/`sync_theme_check` are no-ops on `None`.
+            native_menu: None,
             central_overlay: CentralOverlay::None,
             tickets_filter: TicketFilter::All,
             tickets_query: String::new(),

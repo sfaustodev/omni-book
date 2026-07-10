@@ -16,3 +16,13 @@ reports_fausto/
 .omninote/
 Daily/
 REPORTS_FAUSTO/
+
+# Local Cargo config: shared out-of-tree target-dir with a machine-specific
+# absolute path. Local-only — committing it would break CI and other machines.
+/.cargo/config.toml
+
+# Claude Code local state (agent worktrees, machine-local settings).
+/.claude/
+
+# Packaging output (scripts/make-dmg.sh) — build artifacts, never committed.
+/dist/

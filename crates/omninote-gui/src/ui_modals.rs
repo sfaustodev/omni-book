@@ -110,6 +110,7 @@ impl OmniNoteApp {
         }
         let mut open = self.show_settings;
         let mut style_dirty = false;
+        let mut picked_preset = None;
 
         egui::Window::new("Configurações")
             .open(&mut open)
@@ -119,10 +120,39 @@ impl OmniNoteApp {
             .show(ctx, |ui| {
                 if let Some(v) = &mut self.vault {
                     // Tema
-                    let mut dark = v.config.dark_mode;
-                    if ui.checkbox(&mut dark, "🌙 Modo escuro").changed() {
-                        crate::app::toggle_light_dark(&mut v.config);
-                        crate::app::theme_for_config(&v.config).apply(ctx);
+                    ui.horizontal(|ui| {
+                        ui.label("Tema:");
+                        let current = v.config.theme_preset;
+                        egui::ComboBox::from_id_salt("theme_preset_combo")
+                            .selected_text(current.label())
+                            .show_ui(ui, |ui| {
+                                for preset in omninote_core::types::ThemePreset::all() {
+                                    if ui
+                                        .selectable_label(
+                                            v.config.theme_preset == preset,
+                                            preset.label(),
+                                        )
+                                        .clicked()
+                                        && v.config.theme_preset != preset
+                                    {
+                                        v.config.theme_preset = preset;
+                                        v.config.dark_mode =
+                                            crate::app::theme_for_config(&v.config).dark;
+                                        crate::app::theme_for_config(&v.config).apply(ctx);
+                                        picked_preset = Some(preset);
+                                    }
+                                }
+                            });
+                    });
+                    if v.config.theme_preset == omninote_core::types::ThemePreset::Custom {
+                        ui.horizontal(|ui| {
+                            ui.label("Cor de destaque:");
+                            let mut rgb = v.config.accent_color;
+                            if ui.color_edit_button_srgb(&mut rgb).changed() {
+                                v.config.accent_color = rgb;
+                                crate::app::theme_for_config(&v.config).apply(ctx);
+                            }
+                        });
                     }
                     ui.separator();
 
@@ -206,6 +236,13 @@ impl OmniNoteApp {
 
         if style_dirty {
             self.apply_style(ctx);
+        }
+        // Keep the native "Tema" menu's checkmarks in lockstep when the pick
+        // came from this Settings ComboBox instead of the native menu itself.
+        if let Some(preset) = picked_preset {
+            if let Some(nm) = &self.native_menu {
+                nm.sync_theme_check(preset);
+            }
         }
 
         self.show_settings = open;

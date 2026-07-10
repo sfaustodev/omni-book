@@ -183,6 +183,13 @@ pub struct AppConfig {
 
 /// Theme variant selected in settings. Maps to a gui-side `Theme` (egui colors).
 /// `lowercase` wire format matches the sibling `FontFamily`/`NoteType` enums.
+///
+/// The first 4 variants shipped first (Slice 1) — their wire names are load-bearing
+/// for existing `.omninote/config.json` files, so new variants are appended after
+/// `Custom` rather than reordered/renamed. `AlmanacLight`/`AlmanacDark`/`Blueprint`/
+/// `BlueprintLight`/`Swiss` recover the palettes built in the `cortex/off-{1,2}`
+/// design experiments and the `omninote-swiss-theme` stash (see `omninote-gui`'s
+/// `theme.rs` for the concrete `Color32` values and provenance doc comments).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ThemePreset {
@@ -191,6 +198,40 @@ pub enum ThemePreset {
     ObsidianLight,
     HighContrast,
     Custom,
+    AlmanacLight,
+    AlmanacDark,
+    Blueprint,
+    BlueprintLight,
+    Swiss,
+}
+
+impl ThemePreset {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::ObsidianDark => "Terminal Escuro",
+            Self::ObsidianLight => "Terminal Claro",
+            Self::HighContrast => "Alto Contraste",
+            Self::Custom => "Personalizado",
+            Self::AlmanacLight => "Almanac",
+            Self::AlmanacDark => "Almanac Noite",
+            Self::Blueprint => "Blueprint",
+            Self::BlueprintLight => "Blueprint Rascunho",
+            Self::Swiss => "Swiss",
+        }
+    }
+    pub fn all() -> [ThemePreset; 9] {
+        [
+            Self::ObsidianDark,
+            Self::ObsidianLight,
+            Self::AlmanacLight,
+            Self::AlmanacDark,
+            Self::Blueprint,
+            Self::BlueprintLight,
+            Self::Swiss,
+            Self::HighContrast,
+            Self::Custom,
+        ]
+    }
 }
 
 /// Active tab in the right rail (320px panel).

@@ -51,13 +51,22 @@ impl OmniNoteApp {
         // Keep repainting while toasts are live so they disappear on time even idle.
         ctx.request_repaint_after(Duration::from_millis(250));
 
+        // Severity glyph colors come from the live theme tokens, so they track the
+        // active preset (and fold to the accent under high-contrast) instead of
+        // hardcoded hues. Falls back to the dark preset on the no-vault screen.
+        let theme = self
+            .vault
+            .as_ref()
+            .map(|v| crate::app::theme_for_config(&v.config))
+            .unwrap_or_else(crate::theme::Theme::obsidian_dark);
+
         let mut offset = 16.0;
         // Render newest-last, stacking upward from the bottom-right corner.
         for toast in self.toasts.clone().iter().rev() {
             let (glyph, color) = match toast.kind {
-                ToastKind::Info => ("ℹ", ctx.style().visuals.hyperlink_color),
-                ToastKind::Success => ("✓", egui::Color32::from_rgb(0x5d, 0xcc, 0x8f)),
-                ToastKind::Error => ("⚠", egui::Color32::from_rgb(0xe5, 0x71, 0x5a)),
+                ToastKind::Info => ("ℹ", theme.accent),
+                ToastKind::Success => ("✓", theme.status_done()),
+                ToastKind::Error => ("⚠", theme.status_blocked()),
             };
             let id = egui::Id::new(("toast", toast.expires));
             egui::Area::new(id)

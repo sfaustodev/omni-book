@@ -20,7 +20,7 @@ pub enum MdFormat {
 }
 
 impl MdFormat {
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             MdFormat::Bold => "𝐁  Negrito",
             MdFormat::Italic => "𝐼  Itálico",
@@ -189,10 +189,21 @@ impl OmniNoteApp {
     }
 
     fn show_edit_panel(&mut self, ui: &mut egui::Ui) {
+        // Resolve the note-type ink before the mutable borrow of `active_note`
+        // below — the "Tipo:" label is tinted with it (the per-type content hue).
+        let type_color = self.active_note.as_ref().map(|n| {
+            let theme = self
+                .vault
+                .as_ref()
+                .map(|v| crate::app::theme_for_config(&v.config))
+                .unwrap_or_else(crate::theme::Theme::obsidian_dark);
+            theme.note_type_color(n.frontmatter.note_type)
+        });
         let note = match self.active_note.as_mut() {
             Some(n) => n,
             None => return,
         };
+        let type_color = type_color.unwrap_or(egui::Color32::GRAY);
 
         // Title
         if ui
@@ -209,7 +220,7 @@ impl OmniNoteApp {
 
         // Metadata row
         ui.horizontal(|ui| {
-            ui.label("Tipo:");
+            ui.label(RichText::new("Tipo:").color(type_color));
             let current = note.frontmatter.note_type;
             egui::ComboBox::from_id_salt("note_type_combo")
                 .selected_text(format!("{} {}", current.icon(), current.label()))
@@ -316,7 +327,10 @@ impl OmniNoteApp {
             let b = char_to_byte(r.secondary.ccursor.index);
             (a.min(b), a.max(b))
         });
-        let mut pending_format: Option<MdFormat> = None;
+        // Seed from a native "Editar" menu click (native_menu.rs) — it acts on
+        // `editor_sel` exactly like a right-click pick below, since both steal
+        // focus from the editor the same way.
+        let mut pending_format: Option<MdFormat> = self.pending_native_format.take();
         output.response.context_menu(|ui| {
             ui.label(egui::RichText::new("Formatar").size(10.0).weak());
             ui.separator();
