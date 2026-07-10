@@ -28,14 +28,18 @@
 
 /// The byte range covering the whole note (used by "Selecionar tudo"). Pure
 /// and platform-independent so it's unit-tested on every CI runner, not just
-/// macOS.
+/// macOS. Off macOS the only non-test caller (`macos::pump`) is compiled out,
+/// so the bin target sees it as dead there — hence the scoped allow.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn select_all_range(len: usize) -> (usize, usize) {
     (0, len)
 }
 
 /// Char-boundary-safe substring extraction for "Copiar" — same snapping
 /// technique `apply_md_format` (`ui_editor.rs`) uses, so a selection ending
-/// mid-multibyte-char never panics. Pure and platform-independent.
+/// mid-multibyte-char never panics. Pure and platform-independent; same
+/// scoped allow as [`select_all_range`] (caller compiled out off macOS).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn copy_slice(content: &str, sel: (usize, usize)) -> String {
     let mut a = sel.0.min(content.len());
     let mut b = sel.1.min(content.len());
