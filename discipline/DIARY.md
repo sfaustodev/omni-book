@@ -4,6 +4,23 @@
 
 ---
 
+## 2026-07-10 (2) — [ci-red-triage] main vermelho pós-merge #32: clippy 1.97 drift + advisory DB quick-xml
+
+**Contexto:** CI de main quebrou no merge do PR #32 (Lint + Security Audit; Tests/Build skipped). NENHUMA das causas era o código novo do Slice 7 — as duas eram drift de ambiente que o merge só revelou: (a) CI usa `dtolnay/rust-toolchain@stable` = rust 1.97 (2026-07-07), local estava em 1.96 — lints novos; (b) advisory DB do rustsec atualizou desde 28/jun (mesmo padrão do lopdf/quinn no #27).
+
+**Done:**
+- **Clippy 1.97:** `pdf.rs:8` `for_kv_map` (código pré-existente de v0.1!) + **9 sites** do lint novo `float_literal_f32_fallback` em `egui::Stroke::new(1.0, …)` (theme/app/ui_a11y/ui_sidebar — o CI só mostrou o PRIMEIRO erro porque abortou em core; rodar local em 1.97 revelou o resto). Fix: `rustup update stable` local (1.96→1.97, agora = CI) + `cargo clippy --fix` (sufixos `_f32` machine-applicable) + fix manual do `pages.keys()`.
+- **Audit:** os 4 erros eram TODOS quick-xml <0.41 (RUSTSEC-2026-0194/0195 × 2 versões), transitiva Linux-only do stack egui 0.29 pinado (zbus_xml/atspi runtime local D-Bus; wayland-scanner é PROC-MACRO = só compile-time). Nenhum pai aceita ≥0.41 sem bump major do egui. Decisão decide-and-flag (rule #7): `.cargo/audit.toml` novo com ignore documentado por-ID + **Q-12 aberta no HUMAN.md** (ratificar o ignore vs priorizar upgrade do egui). Lockfile local também estava stale (quinn-proto 0.11.14 < bump do #27! Cargo.lock gitignored = cada máquina deriva) — `cargo update -p crossbeam-epoch -p quinn-proto` limpou o audit local.
+- Verificação em 1.97: clippy `-D warnings` exit 0, fmt limpo, suite inteira verde (14 suítes, 0 failed), `cargo audit` 0 vulnerabilidades (6 warnings allowed: unmaintained bincode/paste/ttf-parser — não falham o job).
+
+**Lição [toolchain-drift-ci-stable-flutuante]:** CI em `@stable` flutuante + dev local parado numa stable antiga = bomba-relógio que detona no merge mais inocente. O clippy local verde de HOJE não prova nada sobre o clippy do CI de AMANHÃ. Trava mecânica candidata (rule #31): pin de toolchain versionado (`rust-toolchain.toml` commitado, CI e local lêem o MESMO arquivo) — decide sozinho quando atualizar em vez de o crates.io decidir por nós. Segunda opção: job noturno de canary em stable-next. Não apliquei o pin agora (mudança de contrato de build — vai pra Q-12/follow-up junto da discussão do egui).
+
+**Files changed:** `crates/omninote-core/src/pdf.rs`, `crates/omninote-gui/src/{theme,app,ui_a11y,ui_sidebar}.rs` (sufixos `_f32`), `.cargo/audit.toml` (novo), `discipline/{HUMAN,DIARY}.md`.
+
+**Next:** PR de fix → auto-merge → confirmar main verde. Q-12 aguarda Fausto.
+
+---
+
 ## 2026-07-10 — CAD-25 Slice 7: theme gallery (Almanac/Blueprint/Swiss) + menu nativo macOS (Tema/Editar)
 
 **Tickets touched:** CAD-25 (Fase B, Slice 7 — nova, não estava no plano original)
