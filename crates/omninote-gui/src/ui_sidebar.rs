@@ -153,7 +153,7 @@ impl OmniNoteApp {
         .vline(
             panel_rect.right(),
             panel_rect.y_range(),
-            egui::Stroke::new(1.0, theme.border),
+            egui::Stroke::new(1.0_f32, theme.border),
         );
     }
 

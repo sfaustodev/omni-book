@@ -161,7 +161,7 @@ pub fn clickable_row(
             ui.painter().rect_stroke(
                 resp.rect,
                 egui::Rounding::ZERO,
-                egui::Stroke::new(1.0, theme.accent),
+                egui::Stroke::new(1.0_f32, theme.accent),
             );
         }
         let bar = egui::Rect::from_min_max(
@@ -177,7 +177,7 @@ pub fn clickable_row(
         ui.painter().rect_stroke(
             resp.rect,
             egui::Rounding::ZERO,
-            egui::Stroke::new(1.0, theme.accent),
+            egui::Stroke::new(1.0_f32, theme.accent),
         );
     }
 

@@ -322,7 +322,7 @@ impl Theme {
     /// map and the accessibility `item_spacing.y`) is owned by
     /// `OmniNoteApp::apply_style`, which runs after this.
     pub fn apply(&self, ctx: &egui::Context) {
-        let hairline = egui::Stroke::new(1.0, self.border);
+        let hairline = egui::Stroke::new(1.0_f32, self.border);
         let none = egui::Rounding::ZERO;
 
         let widget = |fill: Color32, weak: Color32, stroke: egui::Stroke, fg: Color32| {
@@ -331,7 +331,7 @@ impl Theme {
                 weak_bg_fill: weak,
                 bg_stroke: stroke,
                 rounding: none,
-                fg_stroke: egui::Stroke::new(1.0, fg),
+                fg_stroke: egui::Stroke::new(1.0_f32, fg),
                 expansion: 0.0,
             }
         };
@@ -379,7 +379,7 @@ impl Theme {
             widgets,
             selection: egui::style::Selection {
                 bg_fill: self.accent_alpha(56),
-                stroke: egui::Stroke::new(1.0, self.accent),
+                stroke: egui::Stroke::new(1.0_f32, self.accent),
             },
             hyperlink_color: self.accent,
             faint_bg_color: self.panel_alt,
@@ -397,7 +397,7 @@ impl Theme {
             popup_shadow: egui::epaint::Shadow::NONE,
             resize_corner_size: 10.0,
             text_cursor: egui::style::TextCursorStyle {
-                stroke: egui::Stroke::new(1.5, self.accent),
+                stroke: egui::Stroke::new(1.5_f32, self.accent),
                 preview: false,
                 blink: true,
                 on_duration: 0.5,
@@ -752,7 +752,7 @@ mod tests {
             assert_eq!(v.extreme_bg_color, theme.panel);
             assert_eq!(v.faint_bg_color, theme.panel_alt);
             assert_eq!(v.code_bg_color, theme.panel_alt);
-            assert_eq!(v.window_stroke, egui::Stroke::new(1.0, theme.border));
+            assert_eq!(v.window_stroke, egui::Stroke::new(1.0_f32, theme.border));
             assert_ne!(
                 v.panel_fill, def_dark.panel_fill,
                 "panel fill differs from egui dark base"
@@ -773,7 +773,7 @@ mod tests {
 
             // --- Selection wash != default (default is ~opaque accent) ---
             assert_eq!(v.selection.bg_fill, theme.accent_alpha(56));
-            assert_eq!(v.selection.stroke, egui::Stroke::new(1.0, theme.accent));
+            assert_eq!(v.selection.stroke, egui::Stroke::new(1.0_f32, theme.accent));
             assert_ne!(
                 v.selection.bg_fill, def_vis.selection.bg_fill,
                 "selection fill is a deliberate translucent wash"
