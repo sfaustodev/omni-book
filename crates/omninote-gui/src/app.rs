@@ -898,7 +898,7 @@ impl eframe::App for OmniNoteApp {
             let line = egui::Color32::from_rgba_unmultiplied(0, 0, 0, 30);
             let mut y = screen.top();
             while y < screen.bottom() {
-                p.hline(screen.x_range(), y, egui::Stroke::new(1.0, line));
+                p.hline(screen.x_range(), y, egui::Stroke::new(1.0_f32, line));
                 y += 3.0;
             }
         }

@@ -1,0 +1,24 @@
+# cargo-audit config — read by the Security Audit CI job.
+#
+# Each ignore below is scoped to a specific advisory ID with the reasoning
+# inline. Remove the entry the moment the egui stack is upgraded past 0.29
+# (that bump clears every parent pinning the vulnerable versions).
+
+[advisories]
+ignore = [
+    # RUSTSEC-2026-0194 / RUSTSEC-2026-0195: quick-xml < 0.41 DoS (quadratic
+    # attribute check / unbounded NsReader allocation) when parsing
+    # ATTACKER-CONTROLLED XML. Both vulnerable copies are transitive,
+    # Linux-only plumbing of the pinned egui-0.29 stack and never see hostile
+    # input in this offline desktop app:
+    #   - 0.30.x via zbus_xml/atspi (accesskit_unix): parses local D-Bus
+    #     introspection data from the user's own session bus.
+    #   - 0.39.x via wayland-scanner: a PROC-MACRO — quick-xml runs at
+    #     compile time over Wayland protocol XML bundled in the crate; zero
+    #     runtime exposure.
+    # No parent in either chain accepts quick-xml >= 0.41 without a major
+    # egui upgrade (0.29 -> 0.32+), which CLAUDE.md/SPRINT pin deliberately
+    # (egui_commonmark 0.18 requires egui 0.29). Tracked in HUMAN.md Q-12.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]

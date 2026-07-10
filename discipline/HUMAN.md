@@ -7,7 +7,14 @@
 
 ## Open questions
 
-_(nenhuma — Q-01 a Q-08 resolvidas em batch 2026-05-22)_
+### Q-12 · Ignorar RUSTSEC-2026-0194/0195 (quick-xml DoS, transitiva do egui 0.29) no cargo audit · raised 2026-07-10 · context: CI red pós-merge PR #32
+**Por que eu perguntei:** decisão de segurança (filtro (c)) tomada em modo decide-and-flag (rule #7) pra destravar o CI de main, que ficou vermelho quando o advisory DB atualizou. As duas cópias vulneráveis de quick-xml (<0.41) são transitivas do stack egui 0.29 pinado, Linux-only, e nunca veem XML de atacante (uma é proc-macro compile-time via wayland-scanner; outra parseia D-Bus local via atspi/accesskit). Nenhum pai aceita ≥0.41 sem bump major do egui (0.29→0.32+), que o CLAUDE.md pina de propósito (egui_commonmark 0.18 ↔ egui 0.29).
+**Options que considerei:**
+- (a) Ignore documentado por advisory-ID em `.cargo/audit.toml` (reversível, 1 linha por ID), removível no upgrade do egui — **o que apliquei**
+- (b) Bump major do stack egui agora (0.29→0.32+) só pra limpar o audit — dias de trabalho de migração de API, fora de escopo de hotfix
+- (c) Desligar o job Security Audit — inaceitável, perde cobertura de advisories reais
+**Minha escolha (aplicada):** (a). O risco real é ~zero pro threat model (app desktop offline single-user), e o ignore é rastreado + auto-documentado.
+**Ask:** (a) tá OK como estado permanente até o upgrade do egui? Ou você prefere priorizar o bump do egui (b) num ticket próprio já?
 
 ---
 
