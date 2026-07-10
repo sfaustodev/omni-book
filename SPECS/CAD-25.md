@@ -31,7 +31,11 @@ Ver Notion page (link acima) — body Notion tem goal completo.
   - [ ] Calendar widget (daily picker)
   - [ ] Tag explorer (counts + filter)
   - [ ] Timeline view (snapshot diff render)
-
+**Slice 7 — Theme gallery + native macOS menu bar** (recovered from `cortex/off-{1,2}` design experiments + the `omninote-swiss-theme` stash — see `discipline/DIARY.md` 2026-07-10):
+  - [x] `ThemePreset` grown 4→9: `AlmanacLight`/`AlmanacDark` (parchment/oxblood, ex-`cortex/off-1`), `Blueprint`/`BlueprintLight` (navy/cyan drafting, ex-`cortex/off-2`), `Swiss` (Bauhaus black+orange, ex-stash) — additive, existing wire names untouched
+  - [x] Settings modal: dark-mode checkbox → full `ThemePreset` picker (closes the pre-existing `HighContrast`/`Custom` orphan) + accent color picker for `Custom`
+  - [x] Native macOS menu bar (`native_menu.rs`, `muda` crate, macOS-only — no-op stub elsewhere): **Tema** (9 presets, one per line, checkmarked) + **Editar** (same `MdFormat` set as right-click/`/` menu, plus Selecionar tudo/Copiar) + minimal **Arquivo**
+  - [ ] Cut/Paste/Undo/Redo as clickable native menu items — deliberately deferred (see `native_menu.rs` module doc); already work via keyboard today
 
 ## Verification
 

@@ -4,6 +4,36 @@
 
 ---
 
+## 2026-07-10 — CAD-25 Slice 7 — theme gallery + native macOS menu bar
+
+### Contexto
+
+Prompt Fausto: recuperar os frontends feitos em experimentos anteriores (córtex OFF-arm `cortex/off-{1,2,3}` + stash `omninote-swiss-theme`) e implementá-los como temas trocáveis via dropdown "Tema" na barra de menus nativa do macOS, com um menu "Editar" expondo os mesmos comandos de formatação do menu `/`/botão-direito. Full plan em `~/.claude/plans/memoized-splashing-corbato.md`.
+
+### Escopo
+
+1. `ThemePreset` (omninote-core) 4→9 variantes: `AlmanacLight`/`AlmanacDark` (ex-`cortex/off-1`, parchment/oxblood/terracotta `#BF4D26`), `Blueprint`/`BlueprintLight` (ex-`cortex/off-2`, navy/cyan `#4FC3F7`), `Swiss` (ex-stash `omninote-swiss-theme`, Bauhaus preto/laranja `#FF5A1F`) — aditivo, wire names dos 4 originais preservados.
+2. `theme.rs`: 5 novos `Theme::` construtores (cores só — rounding/shadow/spacing seguem universais, mecanismo `apply()` intocado) + testes estendidos.
+3. Settings modal: checkbox "Modo escuro" → ComboBox completo sobre `ThemePreset::all()` (fecha órfão pré-existente de `HighContrast`/`Custom`, que não tinham UI nenhuma) + color picker de accent pra `Custom`.
+4. `native_menu.rs` novo (crate `muda`, macOS-only via `#[cfg]`, stub no-op em outras plataformas — `app.rs` não precisa de nenhum `#[cfg]` próprio): menu **Tema** (9 `CheckMenuItem`, um por linha, radio manual) + **Editar** (mesmo `MdFormat` do right-click/slash, ⌘B/⌘I novos + Selecionar tudo/Copiar sem accelerator pra não colidir com o que `TextEdit` já trata nativamente) + **Arquivo** mínimo.
+5. Cut/Paste/Undo/Redo nativos — deliberadamente fora de escopo (documentado no module doc do `native_menu.rs`): já funcionam via teclado hoje; PredefinedMenuItem provavelmente não alcança o buffer custom-rendered do egui (sem responder chain NSTextView) e Undo/Redo exigiriam stack próprio — não pedido, não construído especulativamente.
+
+### Verificação
+
+```bash
+cargo fmt --check && cargo clippy --all-targets -- -D warnings
+cargo test --workspace   # 100 gui + 253 core + 126 ai + resto — todos verdes
+cargo build --release    # confirma muda linka em release
+```
+
+Smoke humano macOS obrigatório (menu nativo não é testável por unit test) — checklist em `discipline/MANUAL_TEST_PLAN.md`.
+
+### Next single-step
+
+Rodar `/pre-merge-coverage` → `/codex-cross-review` (ou triad completo, dado que toca `app.rs`/settings) → aguardar Fausto confirmar smoke test macOS em chat → só então `gh pr create` (rule #13, #26).
+
+---
+
 ## 2026-06-02 — triad-codex-section — wikilinks adversarial tests
 
 ### Contexto
