@@ -4,6 +4,12 @@
 
 ---
 
+## 2026-07-10 (3) — main verde: triage encerrado em 3 PRs
+
+Desfecho do triage abaixo: #33 (clippy 1.97 + audit ignores) matou Lint-quase-todo e Security Audit, mas revelou um 2º resto Linux-only — `select_all_range`/`copy_slice` do `native_menu.rs` viram `dead_code` no runner Linux (caller `macos::pump` compilado fora). #34 (`cfg_attr(not(macos), allow(dead_code))` escopado, doc inline) fechou. **CI main @ `237e9a5`: success — 4/4 jobs.** Merge do #34 autorizado explicitamente pelo Fausto ("da logo auto merge em tudo"). App em `/Applications` (build do `7cf7dfe`) permanece equivalente — o fix é atributo-only fora do macOS. Q-12 (audit ignore vs upgrade egui) segue aberta.
+
+---
+
 ## 2026-07-10 (2) — [ci-red-triage] main vermelho pós-merge #32: clippy 1.97 drift + advisory DB quick-xml
 
 **Contexto:** CI de main quebrou no merge do PR #32 (Lint + Security Audit; Tests/Build skipped). NENHUMA das causas era o código novo do Slice 7 — as duas eram drift de ambiente que o merge só revelou: (a) CI usa `dtolnay/rust-toolchain@stable` = rust 1.97 (2026-07-07), local estava em 1.96 — lints novos; (b) advisory DB do rustsec atualizou desde 28/jun (mesmo padrão do lopdf/quinn no #27).
