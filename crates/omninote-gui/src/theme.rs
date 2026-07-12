@@ -46,6 +46,50 @@ pub struct Theme {
     pub dark: bool,
 }
 
+fn linear_channel(channel: u8) -> f32 {
+    let value = f32::from(channel) / 255.0;
+    if value <= 0.04045 {
+        value / 12.92
+    } else {
+        ((value + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn relative_luminance(color: Color32) -> f32 {
+    0.2126 * linear_channel(color.r())
+        + 0.7152 * linear_channel(color.g())
+        + 0.0722 * linear_channel(color.b())
+}
+
+pub(crate) fn contrast_ratio(a: Color32, b: Color32) -> f32 {
+    let a = relative_luminance(a);
+    let b = relative_luminance(b);
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+
+pub(crate) fn contrast_ink(background: Color32) -> Color32 {
+    if contrast_ratio(Color32::BLACK, background) >= contrast_ratio(Color32::WHITE, background) {
+        Color32::BLACK
+    } else {
+        Color32::WHITE
+    }
+}
+
+#[cfg(test)]
+fn composite_over(foreground: Color32, background: Color32) -> Color32 {
+    let [front_r, front_g, front_b, front_a] = foreground.to_srgba_unmultiplied();
+    let [back_r, back_g, back_b, _] = background.to_srgba_unmultiplied();
+    let alpha = f32::from(front_a) / 255.0;
+    let channel = |front: u8, back: u8| {
+        (f32::from(front) * alpha + f32::from(back) * (1.0 - alpha)).round() as u8
+    };
+    Color32::from_rgb(
+        channel(front_r, back_r),
+        channel(front_g, back_g),
+        channel(front_b, back_b),
+    )
+}
+
 impl Theme {
     /// Matrix terminal — the primary variant. A black void with phosphor-green
     /// text and dim-green hairline borders; bright-green for highlights/cursor.
@@ -79,7 +123,7 @@ impl Theme {
             dim: Color32::from_rgb(0x4e, 0x60, 0x57),
             faint: Color32::from_rgb(0x86, 0x99, 0x8e),
             accent: Color32::from_rgb(0x0e, 0x8c, 0x42),
-            accent_ink: Color32::from_rgb(0xff, 0xff, 0xff),
+            accent_ink: Color32::from_rgb(0x00, 0x00, 0x00),
             dark: false,
         }
     }
@@ -105,9 +149,10 @@ impl Theme {
     }
 
     /// Terminal dark with a user-chosen accent (settings color picker).
-    pub const fn custom(accent: [u8; 3]) -> Self {
+    pub fn custom(accent: [u8; 3]) -> Self {
         let mut t = Self::obsidian_dark();
         t.accent = Color32::from_rgb(accent[0], accent[1], accent[2]);
+        t.accent_ink = contrast_ink(t.accent);
         t
     }
 
@@ -126,7 +171,7 @@ impl Theme {
             dim: Color32::from_rgb(0x6B, 0x62, 0x53),
             faint: Color32::from_rgb(0x9A, 0x8F, 0x79),
             accent: Color32::from_rgb(0xBF, 0x4D, 0x26),
-            accent_ink: Color32::from_rgb(0xFA, 0xF3, 0xE6),
+            accent_ink: Color32::from_rgb(0xFF, 0xFF, 0xFF),
             dark: false,
         }
     }
@@ -144,7 +189,7 @@ impl Theme {
             dim: Color32::from_rgb(0xA8, 0x9B, 0x82),
             faint: Color32::from_rgb(0x5C, 0x53, 0x43),
             accent: Color32::from_rgb(0xBF, 0x4D, 0x26),
-            accent_ink: Color32::from_rgb(0xFA, 0xF3, 0xE6),
+            accent_ink: Color32::from_rgb(0xFF, 0xFF, 0xFF),
             dark: true,
         }
     }
@@ -820,6 +865,42 @@ mod tests {
                 style.animation_time, def_style.animation_time,
                 "animation differs from egui's 0.2 default"
             );
+        }
+    }
+
+    #[test]
+    fn control_states_meet_contrast_in_all_nine_themes() {
+        for preset in ThemePreset::all() {
+            let theme = Theme::from_preset(preset, [0x6b, 0xff, 0x9a]);
+            assert!(
+                contrast_ratio(theme.text, theme.bg) >= 4.5,
+                "normal text contrast in {preset:?}"
+            );
+            assert!(
+                contrast_ratio(theme.accent_ink, theme.accent) >= 4.5,
+                "active control contrast in {preset:?}"
+            );
+            let selected = composite_over(theme.accent_alpha(56), theme.bg);
+            assert!(
+                contrast_ratio(theme.text, selected) >= 4.5,
+                "selected control contrast in {preset:?}"
+            );
+            assert!(
+                contrast_ratio(theme.accent, theme.bg) >= 3.0,
+                "focus indicator contrast in {preset:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn contrast_ink_is_aa_for_pathological_custom_accents() {
+        for accent in [
+            Color32::BLACK,
+            Color32::WHITE,
+            Color32::from_gray(127),
+            Theme::obsidian_dark().accent,
+        ] {
+            assert!(contrast_ratio(contrast_ink(accent), accent) >= 4.5);
         }
     }
 }

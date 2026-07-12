@@ -1,9 +1,7 @@
-//! Tab strip above the breadcrumb — CAD-25 Fase B §2.4/§5.5. Single-tab for now:
-//! renders the one active note as a tab (consistent chrome with the multi-tab
-//! future in v1.3). Right cluster: undo/redo (disabled stubs until an edit-history
-//! backend exists) + right-rail toggle.
+//! Single-note tab strip with close, edit-history status and right-rail toggle.
 
 use crate::app::OmniNoteApp;
+use crate::ui_a11y::{command_shortcut, icon_button, IconButtonSpec};
 use egui::RichText;
 
 /// Truncate a tab title to fit, appending `…` when cut. `max_chars` is a rough
@@ -19,6 +17,8 @@ fn truncate_title(title: &str, max_chars: usize) -> String {
 
 impl OmniNoteApp {
     pub fn show_tab_strip(&mut self, ui: &mut egui::Ui) {
+        let close_shortcut = command_shortcut(ui.ctx(), egui::Key::W, false);
+        let rail_shortcut = command_shortcut(ui.ctx(), egui::Key::Backslash, false);
         ui.horizontal(|ui| {
             if let Some(note) = &self.active_note {
                 let glyph = note.frontmatter.note_type.icon();
@@ -29,10 +29,11 @@ impl OmniNoteApp {
                 };
                 let dot = if self.dirty { " ●" } else { "" };
                 ui.label(RichText::new(format!("{glyph} {title}{dot}")).size(12.0));
-                if ui
-                    .small_button("×")
-                    .on_hover_text("Fechar (Cmd+W)")
-                    .clicked()
+                if icon_button(
+                    ui,
+                    IconButtonSpec::new("×", "Fechar nota").shortcut(&close_shortcut),
+                )
+                .clicked()
                 {
                     // Closing the tab drops the active note: flush-first so a
                     // pending external-change conflict keeps the note open
@@ -47,20 +48,26 @@ impl OmniNoteApp {
                 let rail_open = self.vault.as_ref().map(|v| v.config.right_rail_open);
                 if let Some(open) = rail_open {
                     let rail_enabled = self.central_overlay == crate::app::CentralOverlay::None;
-                    if ui
-                        .add_enabled(rail_enabled, egui::SelectableLabel::new(open, "⊞"))
-                        .on_hover_text("Painel direito")
-                        .on_disabled_hover_text("Painel direito (indisponível em overlay)")
-                        .clicked()
+                    if icon_button(
+                        ui,
+                        IconButtonSpec::new("⊞", "Painel direito")
+                            .shortcut(&rail_shortcut)
+                            .selected(open)
+                            .enabled(rail_enabled, "Indisponível sobre outro painel"),
+                    )
+                    .clicked()
                     {
                         self.toggle_right_rail();
                     }
                 }
-                // Undo/redo: no edit-history backend yet — visible but disabled.
-                ui.add_enabled(false, egui::Button::new("↷").small())
-                    .on_disabled_hover_text("Refazer (em breve)");
-                ui.add_enabled(false, egui::Button::new("↶").small())
-                    .on_disabled_hover_text("Desfazer (em breve)");
+                icon_button(
+                    ui,
+                    IconButtonSpec::new("↷", "Refazer").enabled(false, "Em breve"),
+                );
+                icon_button(
+                    ui,
+                    IconButtonSpec::new("↶", "Desfazer").enabled(false, "Em breve"),
+                );
             });
         });
     }

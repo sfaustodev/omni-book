@@ -2,7 +2,7 @@ use crate::app::OmniNoteApp;
 use egui::RichText;
 use omninote_core::types::NoteType;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MdFormat {
     Bold,
     Italic,
@@ -17,9 +17,74 @@ pub enum MdFormat {
     Quote,
     Link,
     CodeBlock,
+    Wikilink,
+    Divider,
+    Math,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditorEntryPoint {
+    #[cfg(any(target_os = "macos", test))]
+    NativeMenu,
+    SlashMenu,
+    CommandPalette,
+    UiButton,
+    Keyboard,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditTarget {
+    Selection(usize, usize),
+    Cursor(usize),
+    Slash(usize),
+}
+
+impl EditTarget {
+    fn selection_hint(self) -> (usize, usize) {
+        match self {
+            Self::Selection(a, b) => (a, b),
+            Self::Cursor(pos) => (pos, pos),
+            Self::Slash(pos) => {
+                let cursor = pos.saturating_add(1);
+                (cursor, cursor)
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EditResult {
+    pub content: String,
+    pub selection: (usize, usize),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingEditorAction {
+    note_id: String,
+    format: MdFormat,
+    target: EditTarget,
 }
 
 impl MdFormat {
+    pub const ALL: [Self; 16] = [
+        Self::Bold,
+        Self::Italic,
+        Self::Strike,
+        Self::InlineCode,
+        Self::CodeBlock,
+        Self::H1,
+        Self::H2,
+        Self::H3,
+        Self::Bullet,
+        Self::Numbered,
+        Self::Todo,
+        Self::Quote,
+        Self::Link,
+        Self::Wikilink,
+        Self::Divider,
+        Self::Math,
+    ];
+
     pub(crate) fn label(self) -> &'static str {
         match self {
             MdFormat::Bold => "𝐁  Negrito",
@@ -35,8 +100,24 @@ impl MdFormat {
             MdFormat::Numbered => "1.  Lista numerada",
             MdFormat::Todo => "☐  Tarefa",
             MdFormat::Quote => "❝  Citação",
+            MdFormat::Wikilink => "⟦⟧  Wikilink",
+            MdFormat::Divider => "―  Divisor",
+            MdFormat::Math => "∑  Avaliar linha",
         }
     }
+
+    pub fn supports(self, entrypoint: EditorEntryPoint) -> bool {
+        match entrypoint {
+            #[cfg(any(target_os = "macos", test))]
+            EditorEntryPoint::NativeMenu => true,
+            EditorEntryPoint::CommandPalette | EditorEntryPoint::UiButton => true,
+            EditorEntryPoint::SlashMenu => self != Self::Math,
+            EditorEntryPoint::Keyboard => {
+                matches!(self, Self::Bold | Self::Italic | Self::Math)
+            }
+        }
+    }
+
     fn is_line_prefix(self) -> bool {
         matches!(
             self,
@@ -51,13 +132,7 @@ impl MdFormat {
     }
 }
 
-/// Apply a markdown format over the byte range `sel` (start,end; may be empty
-/// for a bare cursor) and return the new content. Wrapping formats surround the
-/// selection; line-prefix formats insert at the start of every line the range
-/// touches. Byte offsets are snapped to char boundaries so multibyte text is
-/// never split. Pure → unit-testable.
-pub fn apply_md_format(content: &str, sel: (usize, usize), fmt: MdFormat) -> String {
-    // snap + order + clamp
+fn normalized_byte_range(content: &str, sel: (usize, usize)) -> (usize, usize) {
     let mut a = sel.0.min(content.len());
     let mut b = sel.1.min(content.len());
     if a > b {
@@ -69,9 +144,109 @@ pub fn apply_md_format(content: &str, sel: (usize, usize), fmt: MdFormat) -> Str
     while b < content.len() && !content.is_char_boundary(b) {
         b += 1;
     }
+    (a, b)
+}
 
-    if fmt.is_line_prefix() {
-        let prefix = match fmt {
+fn char_index_to_byte(content: &str, char_index: usize) -> usize {
+    content
+        .char_indices()
+        .nth(char_index)
+        .map(|(byte_index, _)| byte_index)
+        .unwrap_or(content.len())
+}
+
+fn fence_marker(line: &str) -> Option<(char, usize)> {
+    let trimmed = line.trim_start();
+    let marker = trimmed.chars().next()?;
+    if marker != '`' && marker != '~' {
+        return None;
+    }
+    let count = trimmed.chars().take_while(|&ch| ch == marker).count();
+    (count >= 3).then_some((marker, count))
+}
+
+fn inside_code_fence(content: &str, byte_pos: usize) -> bool {
+    let (pos, _) = normalized_byte_range(content, (byte_pos, byte_pos));
+    let mut open: Option<(char, usize)> = None;
+    for line in content[..pos].split_inclusive('\n') {
+        let Some((marker, count)) = fence_marker(line) else {
+            continue;
+        };
+        match open {
+            Some((open_marker, open_count)) if marker == open_marker && count >= open_count => {
+                open = None;
+            }
+            None => open = Some((marker, count)),
+            _ => {}
+        }
+    }
+    open.is_some()
+}
+
+fn wrapping_markers(format: MdFormat) -> Option<(&'static str, &'static str)> {
+    match format {
+        MdFormat::Bold => Some(("**", "**")),
+        MdFormat::Italic => Some(("_", "_")),
+        MdFormat::Strike => Some(("~~", "~~")),
+        MdFormat::InlineCode => Some(("`", "`")),
+        MdFormat::CodeBlock => Some(("```\n", "\n```")),
+        MdFormat::Link => Some(("[", "](url)")),
+        MdFormat::Wikilink => Some(("[[", "]]")),
+        _ => None,
+    }
+}
+
+/// Applies one editor action at a validated byte target and returns the new
+/// content plus the byte selection to restore. Invalid or stale targets are
+/// no-ops, so UI adapters never call `replace_range` directly.
+pub fn apply_editor_action(
+    content: &str,
+    target: EditTarget,
+    format: MdFormat,
+) -> Option<EditResult> {
+    if matches!(target, EditTarget::Slash(_)) && !format.supports(EditorEntryPoint::SlashMenu) {
+        return None;
+    }
+
+    let (working, sel) = match target {
+        EditTarget::Slash(pos) => {
+            if pos >= content.len()
+                || !content.is_char_boundary(pos)
+                || content.as_bytes().get(pos).copied() != Some(b'/')
+            {
+                return None;
+            }
+            let mut working = content.to_string();
+            working.replace_range(pos..pos + 1, "");
+            (working, (pos, pos))
+        }
+        EditTarget::Selection(a, b) => {
+            (content.to_string(), normalized_byte_range(content, (a, b)))
+        }
+        EditTarget::Cursor(pos) => {
+            let pos = normalized_byte_range(content, (pos, pos)).0;
+            (content.to_string(), (pos, pos))
+        }
+    };
+    let (a, b) = normalized_byte_range(&working, sel);
+
+    if format == MdFormat::Math {
+        let (new_line, start, end) = omninote_core::autoformat::try_math_substitute(&working, b)?;
+        let mut out = working;
+        out.replace_range(start..end, &new_line);
+        let cursor = start + new_line.len();
+        return Some(EditResult {
+            content: out,
+            selection: (cursor, cursor),
+        });
+    }
+
+    if format == MdFormat::CodeBlock && inside_code_fence(&working, a) {
+        return None;
+    }
+
+    if format.is_line_prefix() {
+        let prefix = match format {
             MdFormat::H1 => "# ",
             MdFormat::H2 => "## ",
             MdFormat::H3 => "### ",
@@ -82,11 +257,11 @@ pub fn apply_md_format(content: &str, sel: (usize, usize), fmt: MdFormat) -> Str
             _ => unreachable!(),
         };
         // First line start = byte after the last '\n' before `a` (or 0).
-        let first = content[..a].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let first = working[..a].rfind('\n').map(|i| i + 1).unwrap_or(0);
         // Collect every line-start offset within [first, b]: `first`, plus each
         // index after a '\n' that falls before `b`.
         let mut starts = vec![first];
-        for (i, ch) in content.char_indices() {
+        for (i, ch) in working.char_indices() {
             // `i + 1 < b` (not `i < b`): a selection ending right after a '\n'
             // must not prefix the empty line that newline opens. CAD-25b Slice 4.
             if ch == '\n' && i + 1 > first && i + 1 < b {
@@ -95,66 +270,161 @@ pub fn apply_md_format(content: &str, sel: (usize, usize), fmt: MdFormat) -> Str
         }
         starts.sort_unstable();
         starts.dedup();
-        // Insert from last to first so earlier offsets stay valid.
-        let mut out = content.to_string();
+        let shift_a = starts.iter().filter(|&&start| start <= a).count() * prefix.len();
+        let shift_b = starts.iter().filter(|&&start| start <= b).count() * prefix.len();
+        let mut out = working;
         for &s in starts.iter().rev() {
             out.insert_str(s, prefix);
         }
-        return out;
+        return Some(EditResult {
+            content: out,
+            selection: (a + shift_a, b + shift_b),
+        });
     }
 
-    let (pre, post): (&str, String) = match fmt {
-        MdFormat::Bold => ("**", "**".into()),
-        MdFormat::Italic => ("_", "_".into()),
-        MdFormat::Strike => ("~~", "~~".into()),
-        MdFormat::InlineCode => ("`", "`".into()),
-        MdFormat::CodeBlock => ("```\n", "\n```".into()),
-        MdFormat::Link => ("[", "](url)".into()),
-        _ => unreachable!(),
-    };
-    format!(
-        "{}{}{}{}{}",
-        &content[..a],
-        pre,
-        &content[a..b],
-        post,
-        &content[b..]
+    if format == MdFormat::Divider {
+        let line_start = working[..a].rfind('\n').map(|index| index + 1).unwrap_or(0);
+        let mut out = working;
+        out.insert_str(line_start, "---\n");
+        return Some(EditResult {
+            content: out,
+            selection: (a + 4, b + 4),
+        });
+    }
+
+    let (pre, post) = wrapping_markers(format)?;
+    let mut out = String::with_capacity(working.len() + pre.len() + post.len());
+    out.push_str(&working[..a]);
+    out.push_str(pre);
+    out.push_str(&working[a..b]);
+    out.push_str(post);
+    out.push_str(&working[b..]);
+    Some(EditResult {
+        content: out,
+        selection: (a + pre.len(), b + pre.len()),
+    })
+}
+
+type EditorSnapshot = (egui::text::CCursorRange, String);
+
+fn editor_snapshot(content: &str, selection: (usize, usize)) -> EditorSnapshot {
+    let (a, b) = normalized_byte_range(content, selection);
+    let a_chars = content[..a].chars().count();
+    let b_chars = content[..b].chars().count();
+    (
+        egui::text::CCursorRange::two(
+            egui::text::CCursor::new(a_chars),
+            egui::text::CCursor::new(b_chars),
+        ),
+        content.to_string(),
     )
+}
+
+fn record_programmatic_edit(
+    undoer: &mut egui::util::undoer::Undoer<EditorSnapshot>,
+    before: EditorSnapshot,
+    after: EditorSnapshot,
+) {
+    undoer.add_undo(&before);
+    undoer.feed_state(0.0, &after);
+    undoer.add_undo(&after);
+}
+
+pub(crate) fn content_editor_active_state(
+    editing: bool,
+    has_active_note: bool,
+    overlay: crate::app::CentralOverlay,
+    typed_view_active: bool,
+) -> bool {
+    editing && has_active_note && overlay == crate::app::CentralOverlay::None && !typed_view_active
+}
+
+fn content_editor_id(note_id: &str) -> egui::Id {
+    egui::Id::new(("note_content", note_id))
 }
 
 /// v0.8 — items shown in the slash menu when user types `/` at start of a line.
 /// Returns (label, snippet). Snippet replaces the `/` character.
-fn slash_menu_items() -> &'static [(&'static str, &'static str)] {
-    &[
-        ("# H1", "# "),
-        ("## H2", "## "),
-        ("### H3", "### "),
-        ("**negrito**", "****"),
-        ("_itálico_", "__"),
-        ("`código inline`", "``"),
-        ("```bloco de código```", "```\n\n```"),
-        ("> citação", "> "),
-        ("- lista", "- "),
-        ("1. lista numerada", "1. "),
-        ("- [ ] todo", "- [ ] "),
-        ("[link](url)", "[](url)"),
-        ("[[wikilink]]", "[[]]"),
-        ("--- divisor", "---\n"),
-    ]
+pub fn editor_actions_for(entrypoint: EditorEntryPoint) -> Vec<MdFormat> {
+    MdFormat::ALL
+        .into_iter()
+        .filter(|format| format.supports(entrypoint))
+        .collect()
+}
+
+fn slash_menu_items() -> Vec<MdFormat> {
+    editor_actions_for(EditorEntryPoint::SlashMenu)
 }
 
 impl OmniNoteApp {
+    pub(crate) fn content_editor_active(&self) -> bool {
+        let typed_view_active = self.discipline_typed
+            && self.active_note.as_ref().is_some_and(|note| {
+                crate::ui_discipline::has_typed_discipline_view(&note.rel_path)
+            });
+        content_editor_active_state(
+            self.editing,
+            self.active_note.is_some(),
+            self.central_overlay,
+            typed_view_active,
+        )
+    }
+
+    pub(crate) fn queue_editor_action(&mut self, format: MdFormat) {
+        if !self.content_editor_active() {
+            self.pending_editor_action = None;
+            return;
+        }
+        let Some(note) = self.active_note.as_ref() else {
+            self.pending_editor_action = None;
+            return;
+        };
+        let target = self
+            .editor_sel
+            .map(|(a, b)| EditTarget::Selection(a, b))
+            .unwrap_or(EditTarget::Cursor(note.content.len()));
+        self.pending_editor_action = Some(PendingEditorAction {
+            note_id: note.frontmatter.id.clone(),
+            format,
+            target,
+        });
+    }
+
+    pub(crate) fn clear_editor_transients(&mut self) {
+        self.editor_sel = None;
+        self.slash_menu_pos = None;
+        self.pending_editor_action = None;
+    }
+
     pub fn show_editor(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
             if self.active_note.is_none() {
                 ui.centered_and_justified(|ui| {
                     ui.vertical_centered(|ui| {
+                        let new_shortcut =
+                            crate::ui_a11y::command_shortcut(ctx, egui::Key::N, false);
+                        let search_shortcut =
+                            crate::ui_a11y::command_shortcut(ctx, egui::Key::K, false);
+                        let settings_shortcut =
+                            crate::ui_a11y::command_shortcut(ctx, egui::Key::Comma, false);
                         ui.add_space(100.0);
                         ui.label(RichText::new("📓 OmniNote").size(24.0).weak());
                         ui.add_space(16.0);
-                        ui.label(RichText::new("Cmd+N  Nova nota").size(12.0).weak());
-                        ui.label(RichText::new("Cmd+K  Buscar").size(12.0).weak());
-                        ui.label(RichText::new("Cmd+,  Configurações").size(12.0).weak());
+                        ui.label(
+                            RichText::new(format!("{new_shortcut}  Nova nota"))
+                                .size(12.0)
+                                .weak(),
+                        );
+                        ui.label(
+                            RichText::new(format!("{search_shortcut}  Buscar"))
+                                .size(12.0)
+                                .weak(),
+                        );
+                        ui.label(
+                            RichText::new(format!("{settings_shortcut}  Configurações"))
+                                .size(12.0)
+                                .weak(),
+                        );
                     });
                 });
                 return;
@@ -171,7 +441,8 @@ impl OmniNoteApp {
             // structured view is the Tickets panel, not a per-note fork), so they
             // fall through to the generic markdown body instead of a blank editor.
             if let Some(note) = self.active_note.clone() {
-                if self.discipline_typed && self.show_discipline_typed(ui, &note) {
+                if !self.editing && self.discipline_typed && self.show_discipline_typed(ui, &note) {
+                    self.pending_editor_action = None;
                     return;
                 }
             }
@@ -189,6 +460,7 @@ impl OmniNoteApp {
     }
 
     fn show_edit_panel(&mut self, ui: &mut egui::Ui) {
+        let queued_action = self.pending_editor_action.take();
         // Resolve the note-type ink before the mutable borrow of `active_note`
         // below — the "Tipo:" label is tinted with it (the per-type content hue).
         let type_color = self.active_note.as_ref().map(|n| {
@@ -288,12 +560,15 @@ impl OmniNoteApp {
         ui.separator();
 
         // Content editor — use show() to access cursor_range for math substitution
+        let editor_id = content_editor_id(&note.frontmatter.id);
         let output = egui::TextEdit::multiline(&mut note.content)
+            .id(editor_id)
             .code_editor()
             .desired_rows(30)
             .desired_width(ui.available_width())
             .hint_text("Escreva em markdown...")
             .show(ui);
+        let mut editor_state = output.state.clone();
 
         if output.response.changed() {
             self.dirty = true;
@@ -304,47 +579,33 @@ impl OmniNoteApp {
         // `ccursor.index` is a CHAR index; autoformat and the slash menu below index
         // `content` by BYTE, so convert once here — a char index used as a byte offset
         // corrupts/erases text (and can panic in replace_range) on non-ASCII lines.
-        let cursor_pos = output.cursor_range.map(|r| {
-            let char_idx = r.primary.ccursor.index;
-            note.content
-                .char_indices()
-                .nth(char_idx)
-                .map(|(byte_idx, _)| byte_idx)
-                .unwrap_or(note.content.len())
-        });
+        let cursor_pos = output
+            .cursor_range
+            .map(|r| char_index_to_byte(&note.content, r.primary.ccursor.index));
         let has_focus = output.response.has_focus();
         // Selection (byte range) for the format menu. cursor_range carries CHAR
         // indices; convert to bytes like the math/slash code does below.
-        let char_to_byte = |ci: usize| {
-            note.content
-                .char_indices()
-                .nth(ci)
-                .map(|(b, _)| b)
-                .unwrap_or(note.content.len())
-        };
         let sel = output.cursor_range.map(|r| {
-            let a = char_to_byte(r.primary.ccursor.index);
-            let b = char_to_byte(r.secondary.ccursor.index);
+            let a = char_index_to_byte(&note.content, r.primary.ccursor.index);
+            let b = char_index_to_byte(&note.content, r.secondary.ccursor.index);
             (a.min(b), a.max(b))
         });
         // Seed from a native "Editar" menu click (native_menu.rs) — it acts on
         // `editor_sel` exactly like a right-click pick below, since both steal
         // focus from the editor the same way.
-        let mut pending_format: Option<MdFormat> = self.pending_native_format.take();
+        let fallback_target = sel
+            .or(self.editor_sel)
+            .map(|(a, b)| EditTarget::Selection(a, b))
+            .unwrap_or(EditTarget::Cursor(note.content.len()));
+        let mut pending_action = queued_action.and_then(|pending| {
+            (pending.note_id == note.frontmatter.id).then_some((pending.format, pending.target))
+        });
         output.response.context_menu(|ui| {
             ui.label(egui::RichText::new("Formatar").size(10.0).weak());
             ui.separator();
-            use MdFormat::*;
-            for fmt in [Bold, Italic, Strike, InlineCode, Link] {
+            for fmt in editor_actions_for(EditorEntryPoint::UiButton) {
                 if ui.button(fmt.label()).clicked() {
-                    pending_format = Some(fmt);
-                    ui.close_menu();
-                }
-            }
-            ui.separator();
-            for fmt in [H1, H2, H3, Bullet, Numbered, Todo, Quote, CodeBlock] {
-                if ui.button(fmt.label()).clicked() {
-                    pending_format = Some(fmt);
+                    pending_action = Some((fmt, fallback_target));
                     ui.close_menu();
                 }
             }
@@ -358,14 +619,21 @@ impl OmniNoteApp {
             self.editor_sel = Some(s);
         }
 
-        let math_sc = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Equals);
-        if has_focus && ui.input_mut(|i| crate::app::consume_app_shortcut(i, &math_sc)) {
-            let pos = cursor_pos.unwrap_or(note.content.len());
-            if let Some((new_line, start, end)) =
-                omninote_core::autoformat::try_math_substitute(&note.content, pos)
-            {
-                note.content.replace_range(start..end, &new_line);
-                self.dirty = true;
+        for format in editor_actions_for(EditorEntryPoint::Keyboard) {
+            let key = match format {
+                MdFormat::Bold => egui::Key::B,
+                MdFormat::Italic => egui::Key::I,
+                MdFormat::Math => egui::Key::Equals,
+                _ => continue,
+            };
+            let shortcut = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, key);
+            if has_focus && ui.input_mut(|i| crate::app::consume_app_shortcut(i, &shortcut)) {
+                let target = if format == MdFormat::Math {
+                    EditTarget::Cursor(cursor_pos.unwrap_or(note.content.len()))
+                } else {
+                    fallback_target
+                };
+                pending_action = Some((format, target));
             }
         }
 
@@ -396,7 +664,7 @@ impl OmniNoteApp {
         }
 
         // Render slash menu popup
-        let mut pending_replacement: Option<(usize, &'static str)> = None;
+        let mut pending_slash_action: Option<(usize, MdFormat)> = None;
         if let Some(slash_at) = self.slash_menu_pos {
             egui::Window::new("Inserir bloco")
                 .id(egui::Id::new("slash_menu"))
@@ -410,47 +678,50 @@ impl OmniNoteApp {
                             .weak(),
                     );
                     ui.separator();
-                    for (label, snippet) in slash_menu_items() {
-                        if ui.button(*label).clicked() {
-                            pending_replacement = Some((slash_at, *snippet));
+                    for format in slash_menu_items() {
+                        if ui.button(format.label()).clicked() {
+                            pending_slash_action = Some((slash_at, format));
                         }
                     }
                 });
         }
-        if let Some((slash_at, snippet)) = pending_replacement {
-            // Replace the "/" with the snippet
-            note.content.replace_range(slash_at..slash_at + 1, snippet);
-            self.dirty = true;
+        if let Some((slash_at, format)) = pending_slash_action {
+            pending_action = Some((format, EditTarget::Slash(slash_at)));
             self.slash_menu_pos = None;
         }
 
-        // Attach file
-        ui.horizontal(|ui| {
-            if ui.button("📎 Anexar arquivo").clicked() {
-                if let Some(path) = rfd::FileDialog::new().pick_file() {
-                    if let Some(v) = &self.vault {
-                        match v.import_attachment(&path) {
-                            Ok(name) => {
-                                let note = self.active_note.as_mut().unwrap();
-                                note.content.push_str(&format!("\n![[{}]]", name));
-                                note.frontmatter.attachments.push(name);
-                                self.dirty = true;
-                            }
-                            Err(e) => self.error_msg = Some(e),
+        let attach_clicked = ui
+            .horizontal(|ui| ui.button("📎 Anexar arquivo").clicked())
+            .inner;
+        if attach_clicked {
+            if let Some(path) = rfd::FileDialog::new().pick_file() {
+                if let Some(vault) = &self.vault {
+                    match vault.import_attachment(&path) {
+                        Ok(name) => {
+                            note.content.push_str(&format!("\n![[{}]]", name));
+                            note.frontmatter.attachments.push(name);
+                            self.dirty = true;
                         }
+                        Err(error) => self.error_msg = Some(error),
                     }
                 }
             }
-        });
+        }
 
-        if let Some(fmt) = pending_format {
-            let note = self.active_note.as_mut().unwrap();
-            let range = self
-                .editor_sel
-                .map(|(a, b)| (a.min(note.content.len()), b.min(note.content.len())))
-                .unwrap_or((note.content.len(), note.content.len()));
-            note.content = apply_md_format(&note.content, range, fmt);
-            self.dirty = true;
+        if let Some((format, target)) = pending_action {
+            let before_content = note.content.clone();
+            if let Some(result) = apply_editor_action(&before_content, target, format) {
+                let before = editor_snapshot(&before_content, target.selection_hint());
+                let after = editor_snapshot(&result.content, result.selection);
+                let mut undoer = editor_state.undoer();
+                record_programmatic_edit(&mut undoer, before, after.clone());
+                editor_state.set_undoer(undoer);
+                editor_state.cursor.set_char_range(Some(after.0));
+                editor_state.store(ui.ctx(), editor_id);
+                note.content = result.content;
+                self.editor_sel = Some(result.selection);
+                self.dirty = true;
+            }
         }
     }
 
@@ -534,56 +805,321 @@ impl OmniNoteApp {
 mod tests {
     use super::*;
 
+    fn formatted(content: &str, selection: (usize, usize), format: MdFormat) -> String {
+        apply_editor_action(
+            content,
+            EditTarget::Selection(selection.0, selection.1),
+            format,
+        )
+        .map(|result| result.content)
+        .unwrap_or_else(|| content.to_owned())
+    }
+
+    #[test]
+    fn formatting_entrypoint_matrix_is_explicit() {
+        use EditorEntryPoint::*;
+        for action in MdFormat::ALL {
+            for entrypoint in [NativeMenu, SlashMenu, CommandPalette, UiButton, Keyboard] {
+                let expected = match entrypoint {
+                    NativeMenu | CommandPalette | UiButton => true,
+                    SlashMenu => action != MdFormat::Math,
+                    Keyboard => {
+                        matches!(action, MdFormat::Bold | MdFormat::Italic | MdFormat::Math)
+                    }
+                };
+                assert_eq!(
+                    action.supports(entrypoint),
+                    expected,
+                    "routing cell {action:?} x {entrypoint:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn formatting_semantics_are_exact_for_every_action() {
+        use MdFormat::*;
+        let cases = [
+            (Bold, "**word**", (2, 6)),
+            (Italic, "_word_", (1, 5)),
+            (Strike, "~~word~~", (2, 6)),
+            (InlineCode, "`word`", (1, 5)),
+            (H1, "# word", (2, 6)),
+            (H2, "## word", (3, 7)),
+            (H3, "### word", (4, 8)),
+            (Bullet, "- word", (2, 6)),
+            (Numbered, "1. word", (3, 7)),
+            (Todo, "- [ ] word", (6, 10)),
+            (Quote, "> word", (2, 6)),
+            (Link, "[word](url)", (1, 5)),
+            (CodeBlock, "```\nword\n```", (4, 8)),
+            (Wikilink, "[[word]]", (2, 6)),
+            (Divider, "---\nword", (4, 8)),
+        ];
+        for (action, expected_content, expected_selection) in cases {
+            let result = apply_editor_action("word", EditTarget::Selection(0, 4), action)
+                .unwrap_or_else(|| panic!("{action:?} should change canonical selection"));
+            assert_eq!(result.content, expected_content, "content for {action:?}");
+            assert_eq!(
+                result.selection, expected_selection,
+                "selection for {action:?}"
+            );
+        }
+
+        let math = apply_editor_action("2+2=", EditTarget::Cursor(4), Math)
+            .expect("math action should substitute a complete expression");
+        assert_eq!(math.content, "2+2= 4");
+        assert_eq!(math.selection, (6, 6));
+    }
+
+    #[test]
+    fn formatting_gauntlet_covers_every_action_entrypoint_fixture_cell() {
+        use EditorEntryPoint::*;
+        let fixtures = [
+            ("empty-note", "", EditTarget::Selection(0, 0), "/", 0),
+            ("cursor-zero", "abc", EditTarget::Cursor(0), "/abc", 0),
+            ("cursor-eof", "abc", EditTarget::Cursor(3), "abc\n/", 4),
+            (
+                "empty-selection",
+                "abc",
+                EditTarget::Selection(1, 1),
+                "a\n/bc",
+                2,
+            ),
+            (
+                "multi-line-selection",
+                "a\nb",
+                EditTarget::Selection(0, 3),
+                "/a\nb",
+                0,
+            ),
+            (
+                "multibyte-mid-codepoint",
+                "🙂 café ação",
+                EditTarget::Selection(1, 8),
+                "🙂\n/café ação",
+                5,
+            ),
+            (
+                "inside-existing-code-block",
+                "```\ncode\n```",
+                EditTarget::Selection(5, 8),
+                "```\n/code\n```",
+                4,
+            ),
+            (
+                "valid-math-at-eof",
+                "2+2=",
+                EditTarget::Cursor(4),
+                "/2+2=",
+                0,
+            ),
+        ];
+        let entrypoints = [NativeMenu, SlashMenu, CommandPalette, UiButton, Keyboard];
+        let mut cells = 0;
+
+        for action in MdFormat::ALL {
+            for entrypoint in entrypoints {
+                for (fixture, content, target, slash_content, slash_at) in fixtures {
+                    cells += 1;
+                    if !action.supports(entrypoint) {
+                        assert!(
+                            !editor_actions_for(entrypoint).contains(&action),
+                            "unsupported cell is exposed: {action:?} x {entrypoint:?} x {fixture}"
+                        );
+                        continue;
+                    }
+
+                    let (cell_content, cell_target) = if entrypoint == SlashMenu {
+                        (slash_content, EditTarget::Slash(slash_at))
+                    } else {
+                        (content, target)
+                    };
+                    let outcome = std::panic::catch_unwind(|| {
+                        apply_editor_action(cell_content, cell_target, action)
+                    });
+                    let result = outcome.unwrap_or_else(|_| {
+                        panic!("formatting cell {action:?} x {entrypoint:?} x {fixture} panicked")
+                    });
+                    if let Some(result) = result {
+                        let (a, b) = result.selection;
+                        assert!(
+                            a <= b && b <= result.content.len(),
+                            "invalid range: {action:?} x {entrypoint:?} x {fixture}"
+                        );
+                        assert!(result.content.is_char_boundary(a));
+                        assert!(result.content.is_char_boundary(b));
+
+                        let before = editor_snapshot(cell_content, cell_target.selection_hint());
+                        let after = editor_snapshot(&result.content, result.selection);
+                        let mut undoer = egui::util::undoer::Undoer::default();
+                        record_programmatic_edit(&mut undoer, before.clone(), after.clone());
+                        assert_eq!(
+                            undoer.undo(&after),
+                            Some(&before),
+                            "undo cell {action:?} x {entrypoint:?} x {fixture}"
+                        );
+                        assert_eq!(
+                            undoer.redo(&before),
+                            Some(&after),
+                            "redo cell {action:?} x {entrypoint:?} x {fixture}"
+                        );
+                    }
+                }
+            }
+        }
+        assert_eq!(cells, 16 * 5 * 8);
+    }
+
+    #[test]
+    fn stale_slash_target_is_a_noop_for_every_action() {
+        for action in MdFormat::ALL {
+            assert_eq!(
+                apply_editor_action("á", EditTarget::Slash(99), action),
+                None,
+                "stale slash cell {action:?}"
+            );
+            assert_eq!(
+                apply_editor_action("á", EditTarget::Slash(1), action),
+                None,
+                "mid-codepoint slash cell {action:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn code_block_inside_existing_fence_is_a_noop() {
+        assert_eq!(
+            apply_editor_action(
+                "```\ncode\n```",
+                EditTarget::Selection(5, 8),
+                MdFormat::CodeBlock,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn consecutive_formats_reuse_the_updated_selection() {
+        let bold =
+            apply_editor_action("word", EditTarget::Selection(0, 4), MdFormat::Bold).unwrap();
+        let italic = apply_editor_action(
+            &bold.content,
+            EditTarget::Selection(bold.selection.0, bold.selection.1),
+            MdFormat::Italic,
+        )
+        .unwrap();
+        assert_eq!(italic.content, "**_word_**");
+        assert_eq!(italic.selection, (3, 7));
+    }
+
+    #[test]
+    fn programmatic_edits_round_trip_through_undo_and_redo() {
+        for action in MdFormat::ALL {
+            let (before_content, target) = if action == MdFormat::Math {
+                ("2+2=", EditTarget::Cursor(4))
+            } else {
+                ("word", EditTarget::Selection(0, 4))
+            };
+            let result = apply_editor_action(before_content, target, action)
+                .unwrap_or_else(|| panic!("{action:?} needs a canonical edit result"));
+            let before = editor_snapshot(before_content, target.selection_hint());
+            let after = editor_snapshot(&result.content, result.selection);
+            let mut undoer = egui::util::undoer::Undoer::default();
+            record_programmatic_edit(&mut undoer, before.clone(), after.clone());
+            assert_eq!(undoer.undo(&after), Some(&before), "undo {action:?}");
+            assert_eq!(undoer.redo(&before), Some(&after), "redo {action:?}");
+        }
+    }
+
+    #[test]
+    fn programmatic_edit_after_undo_discards_the_old_redo_branch() {
+        let before = editor_snapshot("word", (0, 4));
+        let bold =
+            apply_editor_action("word", EditTarget::Selection(0, 4), MdFormat::Bold).unwrap();
+        let bold_snapshot = editor_snapshot(&bold.content, bold.selection);
+        let mut undoer = egui::util::undoer::Undoer::default();
+        record_programmatic_edit(&mut undoer, before.clone(), bold_snapshot.clone());
+        assert_eq!(undoer.undo(&bold_snapshot), Some(&before));
+
+        let italic =
+            apply_editor_action("word", EditTarget::Selection(0, 4), MdFormat::Italic).unwrap();
+        let italic_snapshot = editor_snapshot(&italic.content, italic.selection);
+        record_programmatic_edit(&mut undoer, before, italic_snapshot.clone());
+
+        assert!(!undoer.has_redo(&italic_snapshot));
+        assert_eq!(undoer.redo(&italic_snapshot), None);
+    }
+
+    #[test]
+    fn slash_undo_restores_the_caret_after_the_trigger() {
+        let target = EditTarget::Slash(0);
+        let result = apply_editor_action("/word", target, MdFormat::Bold).unwrap();
+        let before = editor_snapshot("/word", target.selection_hint());
+        let after = editor_snapshot(&result.content, result.selection);
+        let mut undoer = egui::util::undoer::Undoer::default();
+        record_programmatic_edit(&mut undoer, before.clone(), after.clone());
+
+        let restored = undoer.undo(&after).expect("slash edit should be undoable");
+        assert_eq!(restored.0.primary.index, 1);
+        assert_eq!(restored.0.secondary.index, 1);
+        assert_eq!(restored.1, "/word");
+    }
+
+    #[test]
+    fn content_editor_id_is_scoped_to_note() {
+        assert_ne!(content_editor_id("note-a"), content_editor_id("note-b"));
+        assert_eq!(content_editor_id("note-a"), content_editor_id("note-a"));
+    }
+
+    #[test]
+    fn egui_char_index_converts_to_utf8_byte_offset() {
+        let content = "🙂 café";
+        assert_eq!(char_index_to_byte(content, 0), 0);
+        assert_eq!(char_index_to_byte(content, 1), 4);
+        assert_eq!(char_index_to_byte(content, 5), 8);
+        assert_eq!(char_index_to_byte(content, content.chars().count()), 10);
+        assert_eq!(char_index_to_byte(content, usize::MAX), 10);
+    }
+
     #[test]
     fn bold_wraps_selection() {
         assert_eq!(
-            apply_md_format("hello world", (0, 5), MdFormat::Bold),
+            formatted("hello world", (0, 5), MdFormat::Bold),
             "**hello** world"
         );
     }
     #[test]
     fn italic_empty_inserts_markers_at_cursor() {
-        assert_eq!(apply_md_format("ab", (1, 1), MdFormat::Italic), "a__b");
+        assert_eq!(formatted("ab", (1, 1), MdFormat::Italic), "a__b");
     }
     #[test]
     fn link_wraps_selection() {
-        assert_eq!(
-            apply_md_format("site", (0, 4), MdFormat::Link),
-            "[site](url)"
-        );
+        assert_eq!(formatted("site", (0, 4), MdFormat::Link), "[site](url)");
     }
     #[test]
     fn heading_prefixes_current_line() {
-        assert_eq!(
-            apply_md_format("foo\nbar", (4, 7), MdFormat::H2),
-            "foo\n## bar"
-        );
+        assert_eq!(formatted("foo\nbar", (4, 7), MdFormat::H2), "foo\n## bar");
     }
     #[test]
     fn bullet_prefixes_each_line_in_selection() {
-        assert_eq!(
-            apply_md_format("a\nb", (0, 3), MdFormat::Bullet),
-            "- a\n- b"
-        );
+        assert_eq!(formatted("a\nb", (0, 3), MdFormat::Bullet), "- a\n- b");
     }
     #[test]
     fn multibyte_selection_not_split() {
         // "café" is 5 bytes; wrapping the whole word must not panic or split 'é'.
-        assert_eq!(apply_md_format("café", (0, 5), MdFormat::Bold), "**café**");
+        assert_eq!(formatted("café", (0, 5), MdFormat::Bold), "**café**");
     }
     #[test]
     fn range_past_end_is_clamped() {
-        assert_eq!(apply_md_format("hi", (0, 99), MdFormat::InlineCode), "`hi`");
+        assert_eq!(formatted("hi", (0, 99), MdFormat::InlineCode), "`hi`");
     }
     #[test]
     fn line_prefix_selection_ending_in_newline_skips_empty_line() {
         // CAD-25b Slice 4: a selection ending right after a '\n' must NOT prefix
         // the empty trailing line that newline opens.
-        assert_eq!(
-            apply_md_format("a\nb\n", (0, 4), MdFormat::Bullet),
-            "- a\n- b\n"
-        );
+        assert_eq!(formatted("a\nb\n", (0, 4), MdFormat::Bullet), "- a\n- b\n");
         // Single line selected through its trailing newline → only that line.
-        assert_eq!(apply_md_format("foo\n", (0, 4), MdFormat::H2), "## foo\n");
+        assert_eq!(formatted("foo\n", (0, 4), MdFormat::H2), "## foo\n");
     }
 }

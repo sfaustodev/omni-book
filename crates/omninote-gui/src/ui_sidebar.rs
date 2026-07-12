@@ -1,4 +1,5 @@
 use crate::app::OmniNoteApp;
+use crate::ui_a11y::{command_shortcut, icon_button, IconButtonSpec};
 use egui::RichText;
 use omninote_core::types::{ConfirmAction, NoteType};
 use std::path::{Path, PathBuf};
@@ -6,6 +7,9 @@ use std::path::{Path, PathBuf};
 impl OmniNoteApp {
     pub fn show_sidebar(&mut self, ctx: &egui::Context) {
         let theme = self.sidebar_theme();
+        let settings_shortcut = command_shortcut(ctx, egui::Key::Comma, false);
+        let theme_shortcut = command_shortcut(ctx, egui::Key::D, true);
+        let rail_shortcut = command_shortcut(ctx, egui::Key::Backslash, false);
         let resp = egui::SidePanel::left("sidebar")
             .exact_width(280.0)
             .show(ctx, |ui| {
@@ -28,42 +32,52 @@ impl OmniNoteApp {
                             .unwrap_or("vault");
                         ui.label(RichText::new(name).monospace().size(10.0).color(theme.dim));
                     }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .small_button("⚙")
-                            .on_hover_text("Configurações (Cmd+,)")
-                            .clicked()
+                });
+                let header_actions_size =
+                    egui::vec2(ui.available_width(), crate::ui_a11y::ICON_BUTTON_MIN_SIDE);
+                ui.allocate_ui_with_layout(
+                    header_actions_size,
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| {
+                        if icon_button(
+                            ui,
+                            IconButtonSpec::new("⚙", "Configurações")
+                                .shortcut(&settings_shortcut)
+                                .selected(self.show_settings),
+                        )
+                        .clicked()
                         {
                             self.show_settings = true;
                         }
-                        if ui
-                            .small_button("☀/🌙")
-                            .on_hover_text("Tema (Cmd+Shift+D)")
-                            .clicked()
+                        if icon_button(
+                            ui,
+                            IconButtonSpec::new("◐", "Alternar tema").shortcut(&theme_shortcut),
+                        )
+                        .clicked()
                         {
-                            if let Some(v) = &mut self.vault {
-                                crate::app::toggle_light_dark(&mut v.config);
-                                crate::app::theme_for_config(&v.config).apply(ctx);
-                            }
+                            self.toggle_current_theme(ctx);
                         }
-                        if ui
-                            .small_button("📂")
-                            .on_hover_text("Trocar vault")
-                            .clicked()
-                        {
+                        if icon_button(ui, IconButtonSpec::new("📂", "Trocar vault")).clicked() {
                             self.pick_vault_with_ctx(ctx);
                         }
                         let rail_enabled = self.central_overlay == crate::app::CentralOverlay::None;
-                        if ui
-                            .add_enabled(rail_enabled, egui::Button::new("⊟").small())
-                            .on_hover_text("Painel direito (backlinks/outline)")
-                            .on_disabled_hover_text("Painel direito (indisponível em overlay)")
-                            .clicked()
+                        let rail_open = self
+                            .vault
+                            .as_ref()
+                            .is_some_and(|vault| vault.config.right_rail_open);
+                        if icon_button(
+                            ui,
+                            IconButtonSpec::new("⊟", "Painel direito")
+                                .shortcut(&rail_shortcut)
+                                .selected(rail_open)
+                                .enabled(rail_enabled, "Indisponível sobre outro painel"),
+                        )
+                        .clicked()
                         {
                             self.toggle_right_rail();
                         }
-                    });
-                });
+                    },
+                );
                 ui.add_space(4.0);
 
                 // Search: terminal-prompt field — a leading `/` accent glyph and a
@@ -192,23 +206,40 @@ impl OmniNoteApp {
             let folder_clone = folder.clone();
 
             let theme = self.sidebar_theme();
-            let header =
-                egui::CollapsingHeader::new(RichText::new(&name).monospace().color(theme.text))
-                    .id_salt(format!("folder_{}", folder.to_string_lossy()))
-                    .default_open(true)
-                    .icon(move |ui, openness, resp| disclosure_marker(ui, &theme, openness, resp))
-                    .show(ui, |ui| {
-                        self.show_folder_tree(ui, folder_clone.clone());
-                        self.show_notes_in_folder(ui, &folder_clone);
-                    });
+            let text_width =
+                (ui.available_width() - ui.spacing().indent - ui.spacing().button_padding.x)
+                    .max(0.0);
+            let galley = egui::WidgetText::from(RichText::new(&name).monospace().color(theme.text))
+                .into_galley(
+                    ui,
+                    Some(egui::TextWrapMode::Truncate),
+                    text_width,
+                    egui::TextStyle::Button,
+                );
+            let elided = galley.elided;
+            let header = egui::CollapsingHeader::new(galley)
+                .id_salt(format!("folder_{}", folder.to_string_lossy()))
+                .default_open(true)
+                .icon(move |ui, openness, response| {
+                    disclosure_marker(ui, &theme, openness, response);
+                })
+                .show(ui, |ui| {
+                    self.show_folder_tree(ui, folder_clone.clone());
+                    self.show_notes_in_folder(ui, &folder_clone);
+                });
+            let mut header_response = header.header_response;
+            if elided {
+                header_response = header_response.on_hover_text(name.clone());
+            }
 
-            header.header_response.context_menu(|ui| {
+            header_response.context_menu(|ui| {
                 if ui.button("📄+ Nova nota aqui").clicked() {
                     // Creating a note here replaces active_note, so flush the
                     // current buffer first. A pending external-change conflict
                     // blocks the flush — bail so the unsaved edits it protects
                     // aren't dropped (the modal stays up for the user to resolve).
                     if self.flush_active() {
+                        self.clear_editor_transients();
                         if let Some(v) = &mut self.vault {
                             let rel = folder.clone();
                             match v.create_note(Some(&rel), "", NoteType::default()) {
