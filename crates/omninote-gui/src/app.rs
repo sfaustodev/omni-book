@@ -1036,6 +1036,73 @@ mod tests {
     }
 
     #[test]
+    fn long_nested_folder_name_does_not_expand_fixed_sidebar() {
+        let (mut app, _dir) = test_app();
+        let vault = app.vault.as_mut().unwrap();
+        vault.create_folder(None, "Projects").unwrap();
+        vault
+            .create_folder(
+                Some(std::path::Path::new("Projects")),
+                "web3-threat-reports",
+            )
+            .unwrap();
+        vault
+            .create_folder(
+                Some(std::path::Path::new("Projects/web3-threat-reports")),
+                "2026-04-tirios-contagious-interview",
+            )
+            .unwrap();
+        select_theme_preset(
+            &mut vault.config,
+            omninote_core::types::ThemePreset::AlmanacLight,
+        );
+
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        register_custom_fonts(&ctx);
+        app.apply_current_theme_and_style(&ctx);
+        let mut central_left = 0.0;
+        let mut full_name_is_accessible = false;
+        let mut full_name_top = None;
+
+        for frame in 0..3 {
+            let mut input = egui::RawInput {
+                time: Some(f64::from(frame) * 0.2),
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 800.0),
+                )),
+                ..Default::default()
+            };
+            input.focused = true;
+
+            let output = ctx.run(input, |ctx| {
+                app.show_sidebar(ctx);
+                central_left = egui::CentralPanel::default()
+                    .show(ctx, |_| {})
+                    .response
+                    .rect
+                    .left();
+            });
+            if let Some(update) = output.platform_output.accesskit_update {
+                for (_, node) in &update.nodes {
+                    if node.name() == Some("2026-04-tirios-contagious-interview") {
+                        full_name_is_accessible = true;
+                        full_name_top = node.bounds().map(|bounds| bounds.y0);
+                    }
+                }
+            }
+        }
+
+        assert!((central_left - 280.0).abs() < f32::EPSILON);
+        assert!(full_name_is_accessible);
+        assert!(
+            full_name_top.is_some_and(|top| top < 800.0),
+            "folder tree must remain inside the viewport, got y={full_name_top:?}"
+        );
+    }
+
+    #[test]
     fn shortcut_mode_toggle_uses_the_discipline_transition() {
         let (mut app, _dir) = test_app();
         let id = app.vault.as_ref().unwrap().notes[0].frontmatter.id.clone();

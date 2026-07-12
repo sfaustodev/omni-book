@@ -33,45 +33,51 @@ impl OmniNoteApp {
                         ui.label(RichText::new(name).monospace().size(10.0).color(theme.dim));
                     }
                 });
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if icon_button(
-                        ui,
-                        IconButtonSpec::new("⚙", "Configurações")
-                            .shortcut(&settings_shortcut)
-                            .selected(self.show_settings),
-                    )
-                    .clicked()
-                    {
-                        self.show_settings = true;
-                    }
-                    if icon_button(
-                        ui,
-                        IconButtonSpec::new("◐", "Alternar tema").shortcut(&theme_shortcut),
-                    )
-                    .clicked()
-                    {
-                        self.toggle_current_theme(ctx);
-                    }
-                    if icon_button(ui, IconButtonSpec::new("📂", "Trocar vault")).clicked() {
-                        self.pick_vault_with_ctx(ctx);
-                    }
-                    let rail_enabled = self.central_overlay == crate::app::CentralOverlay::None;
-                    let rail_open = self
-                        .vault
-                        .as_ref()
-                        .is_some_and(|vault| vault.config.right_rail_open);
-                    if icon_button(
-                        ui,
-                        IconButtonSpec::new("⊟", "Painel direito")
-                            .shortcut(&rail_shortcut)
-                            .selected(rail_open)
-                            .enabled(rail_enabled, "Indisponível sobre outro painel"),
-                    )
-                    .clicked()
-                    {
-                        self.toggle_right_rail();
-                    }
-                });
+                let header_actions_size =
+                    egui::vec2(ui.available_width(), crate::ui_a11y::ICON_BUTTON_MIN_SIDE);
+                ui.allocate_ui_with_layout(
+                    header_actions_size,
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| {
+                        if icon_button(
+                            ui,
+                            IconButtonSpec::new("⚙", "Configurações")
+                                .shortcut(&settings_shortcut)
+                                .selected(self.show_settings),
+                        )
+                        .clicked()
+                        {
+                            self.show_settings = true;
+                        }
+                        if icon_button(
+                            ui,
+                            IconButtonSpec::new("◐", "Alternar tema").shortcut(&theme_shortcut),
+                        )
+                        .clicked()
+                        {
+                            self.toggle_current_theme(ctx);
+                        }
+                        if icon_button(ui, IconButtonSpec::new("📂", "Trocar vault")).clicked() {
+                            self.pick_vault_with_ctx(ctx);
+                        }
+                        let rail_enabled = self.central_overlay == crate::app::CentralOverlay::None;
+                        let rail_open = self
+                            .vault
+                            .as_ref()
+                            .is_some_and(|vault| vault.config.right_rail_open);
+                        if icon_button(
+                            ui,
+                            IconButtonSpec::new("⊟", "Painel direito")
+                                .shortcut(&rail_shortcut)
+                                .selected(rail_open)
+                                .enabled(rail_enabled, "Indisponível sobre outro painel"),
+                        )
+                        .clicked()
+                        {
+                            self.toggle_right_rail();
+                        }
+                    },
+                );
                 ui.add_space(4.0);
 
                 // Search: terminal-prompt field — a leading `/` accent glyph and a
@@ -200,17 +206,33 @@ impl OmniNoteApp {
             let folder_clone = folder.clone();
 
             let theme = self.sidebar_theme();
-            let header =
-                egui::CollapsingHeader::new(RichText::new(&name).monospace().color(theme.text))
-                    .id_salt(format!("folder_{}", folder.to_string_lossy()))
-                    .default_open(true)
-                    .icon(move |ui, openness, resp| disclosure_marker(ui, &theme, openness, resp))
-                    .show(ui, |ui| {
-                        self.show_folder_tree(ui, folder_clone.clone());
-                        self.show_notes_in_folder(ui, &folder_clone);
-                    });
+            let text_width =
+                (ui.available_width() - ui.spacing().indent - ui.spacing().button_padding.x)
+                    .max(0.0);
+            let galley = egui::WidgetText::from(RichText::new(&name).monospace().color(theme.text))
+                .into_galley(
+                    ui,
+                    Some(egui::TextWrapMode::Truncate),
+                    text_width,
+                    egui::TextStyle::Button,
+                );
+            let elided = galley.elided;
+            let header = egui::CollapsingHeader::new(galley)
+                .id_salt(format!("folder_{}", folder.to_string_lossy()))
+                .default_open(true)
+                .icon(move |ui, openness, response| {
+                    disclosure_marker(ui, &theme, openness, response);
+                })
+                .show(ui, |ui| {
+                    self.show_folder_tree(ui, folder_clone.clone());
+                    self.show_notes_in_folder(ui, &folder_clone);
+                });
+            let mut header_response = header.header_response;
+            if elided {
+                header_response = header_response.on_hover_text(name.clone());
+            }
 
-            header.header_response.context_menu(|ui| {
+            header_response.context_menu(|ui| {
                 if ui.button("📄+ Nova nota aqui").clicked() {
                     // Creating a note here replaces active_note, so flush the
                     // current buffer first. A pending external-change conflict

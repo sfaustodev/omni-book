@@ -1,6 +1,6 @@
 # QA de formatação da OmniNote GUI
 
-Data: 2026-07-11
+Data: 2026-07-11–12
 Branch: `fix/cad-25-gui-polish`
 
 ## Cobertura automatizada
@@ -60,7 +60,7 @@ pelo mesmo registro.
 
 Resultado automatizado:
 
-- `timeout 300 cargo test -p omninote-gui </dev/null`: **PASS — 138/138**.
+- `timeout 300 cargo test -p omninote-gui </dev/null`: **PASS — 140/140**.
 - `timeout 300 cargo test -p omninote-gui formatting_gauntlet_covers_every_action_entrypoint_fixture_cell </dev/null`: **PASS — 1/1**.
 - Matriz: **PASS — 640/640 células cobertas**.
 - Panic nas células: **0**.
@@ -72,7 +72,7 @@ no menu nativo, foco real e ligação do clique à janela AppKit.
 
 ### Menu nativo Editar
 
-- [ ] Com `RUST_BACKTRACE=1`, clicar `Editar → Bloco de código` em nota vazia:
+- [x] Com `RUST_BACKTRACE=1`, clicar `Editar → Bloco de código` em nota vazia:
   item executa e o processo continua vivo.
 - [ ] Repetir bloco de código com seleção multilinha e texto `🙂 café ação`.
 - [ ] Confirmar que as 16 ações da tabela aparecem e que uma ação de cada grupo
@@ -89,7 +89,7 @@ no menu nativo, foco real e ligação do clique à janela AppKit.
 
 ### Affordance e temas
 
-- [ ] `[ Ler | Editar ]` é legível, tem estado ativo inequívoco e tooltip com
+- [x] `[ Ler | Editar ]` é legível, tem estado ativo inequívoco e tooltip com
   `Mod+E` no Almanac Light.
 - [ ] Repetir no High Contrast, incluindo hover, foco por teclado e clique.
 - [ ] Verificar tooltips e alvo dos botões icon-only na titlebar, sidebar, abas,
@@ -101,6 +101,19 @@ no menu nativo, foco real e ligação do clique à janela AppKit.
 
 - Descoberta AX do menu nativo: **PASS** — `Editar` expôs as 16 ações e `Tema`
   expôs os nove presets.
-- Clique real e inspeção visual: **PENDENTE** — a autorização externa do runner
-  para controlar/reabrir a GUI esgotou a cota durante esta sessão. Nenhum PASS
-  manual é inferido do teste automatizado.
+- Crash repro: **PASS** — release aberto com `RUST_BACKTRACE=1`; AX acionou
+  `▦  Bloco de código` duas vezes (incluindo o build final), o processo ficou vivo
+  por mais 5 s após o clique e stderr permaneceu vazio.
+- Almanac Light: **PASS** — nota aberta pelo clique no próprio título; sidebar
+  fixa em 280 px sem faixa vazia, busca/filtros/árvore dentro do viewport,
+  `[ Editar | Ler ]` com `Ler` ativo e tooltip real `Alternar modo (Cmd+E)`.
+- High Contrast: **PASS no escopo executado** — render legível, sidebar sem
+  overflow e clique em `Editar` trocou o segmento ativo para verde sobre preto.
+  Foco por teclado não foi amostrado manualmente; a asserção automatizada de
+  hover/focus/press nos nove temas permaneceu verde.
+- Quick-wins descobertos no smoke e corrigidos por TDD:
+  `long_nested_folder_name_does_not_expand_fixed_sidebar` prende largura,
+  posição vertical e nome AccessKit completo; `clickable_row_activates_when_pointer_clicks_its_text`
+  prende o clique sobre o texto, não apenas no gutter.
+- Os itens ainda desmarcados acima não foram executados manualmente nesta rodada;
+  sua semântica pura continua coberta pela matriz automatizada de 640 células.

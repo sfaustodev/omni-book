@@ -278,6 +278,7 @@ pub fn clickable_row(
     // prompt gutter so every caller's content starts past the `>` marker without
     // each call site knowing about it.
     let inner = ui.horizontal(|ui| {
+        ui.style_mut().interaction.selectable_labels = false;
         ui.add_space(PROMPT_GUTTER_PX);
         content(ui);
     });
@@ -538,6 +539,62 @@ mod tests {
             .find_map(|(_, node)| (node.name() == Some("Editar")).then_some(node))
             .expect("mode segment");
         assert_eq!(node.toggled().map(|state| state as u8), Some(1));
+    }
+
+    #[test]
+    fn clickable_row_activates_when_pointer_clicks_its_text() {
+        let ctx = egui::Context::default();
+        let theme = Theme::almanac_light();
+        theme.apply(&ctx);
+        let label_rect = std::cell::Cell::new(egui::Rect::NOTHING);
+        let render = |input: egui::RawInput| {
+            let mut activated = false;
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let (_, hit) = clickable_row(ui, &theme, "Nota clicável", false, |ui| {
+                        label_rect.set(ui.label("Nota clicável").rect);
+                    });
+                    activated = hit;
+                });
+            });
+            activated
+        };
+        let input = |time, events| egui::RawInput {
+            time: Some(time),
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(400.0, 200.0),
+            )),
+            events,
+            ..Default::default()
+        };
+
+        assert!(!render(input(0.0, vec![])));
+        let pos = label_rect.get().center();
+        assert!(!render(input(
+            0.1,
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+        )));
+        assert!(render(input(
+            0.2,
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+        )));
     }
 
     #[test]
