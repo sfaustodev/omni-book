@@ -234,11 +234,8 @@ pub struct OmniNoteApp {
     /// while the editor has it so the right-click format menu can act on it even
     /// after the menu steals focus.
     pub editor_sel: Option<(usize, usize)>,
-    /// Format command clicked from the native macOS "Editar" menu (`native_menu`),
-    /// consumed by `show_edit_panel` the same way a right-click menu pick is —
-    /// via `editor_sel`, since a native menu click steals focus exactly like the
-    /// in-app context menu does.
-    pub pending_native_format: Option<crate::ui_editor::MdFormat>,
+    /// One-shot formatting command tied to the note and selection that spawned it.
+    pub pending_editor_action: Option<crate::ui_editor::PendingEditorAction>,
     /// The native macOS "Tema"/"Editar" menu bar (`native_menu.rs`). A no-op
     /// stub on non-macOS targets — see that module's doc comment. `Option` so
     /// `update()` can `.take()` it before calling `pump(self, ctx)` — the same
@@ -340,7 +337,7 @@ impl OmniNoteApp {
             calendar_open: false,
             calendar_ym: None,
             editor_sel: None,
-            pending_native_format: None,
+            pending_editor_action: None,
             central_overlay: CentralOverlay::None,
             tickets_filter: TicketFilter::All,
             tickets_query: String::new(),
@@ -462,6 +459,7 @@ impl OmniNoteApp {
                     let theme = theme_for_config(&v.config);
                     self.vault = Some(v);
                     self.active_note = None;
+                    self.clear_editor_transients();
                     // Drop the Timeline cache — it belongs to the old vault root.
                     // (The cache is also root-keyed, but clearing here frees it
                     // promptly and matches the watcher/reload pattern.)
@@ -589,6 +587,7 @@ impl OmniNoteApp {
         if !self.flush_active() {
             return false;
         }
+        self.clear_editor_transients();
         self.active_note = new;
         self.dirty = false;
         true
@@ -618,23 +617,22 @@ impl OmniNoteApp {
         if !self.flush_active() {
             return;
         }
-        if let Some(v) = &self.vault {
-            if let Some(note) = v.notes.iter().find(|n| n.frontmatter.id == id) {
-                self.active_note = Some(note.clone());
-                self.editing = false;
-                self.dirty = false;
-                // A successful selection must surface the editor: clear any
-                // full-panel overlay (Tickets/Timeline) so the chosen note isn't
-                // hidden behind it. Covers every entry point — sidebar, palette,
-                // discipline section, timeline row — and select_note_by_target,
-                // which delegates here. (triad-agy/codex Slice 5.)
-                self.central_overlay = CentralOverlay::None;
-                // Drop any selection carried from the previous note — a stale
-                // byte range must never act on a different buffer. The consumer
-                // also clamps, but resetting at the switch is the real cure.
-                // CAD-25b Slice 4. Covers select_note_by_target too (delegates here).
-                self.editor_sel = None;
-            }
+        let selected = self
+            .vault
+            .as_ref()
+            .and_then(|vault| vault.notes.iter().find(|note| note.frontmatter.id == id))
+            .cloned();
+        if let Some(note) = selected {
+            self.clear_editor_transients();
+            self.active_note = Some(note);
+            self.editing = false;
+            self.dirty = false;
+            // A successful selection must surface the editor: clear any
+            // full-panel overlay (Tickets/Timeline) so the chosen note isn't
+            // hidden behind it. Covers every entry point — sidebar, palette,
+            // discipline section, timeline row — and select_note_by_target,
+            // which delegates here. (triad-agy/codex Slice 5.)
+            self.central_overlay = CentralOverlay::None;
         }
     }
 
@@ -691,6 +689,8 @@ impl OmniNoteApp {
             return;
         }
 
+        // Any cached byte target belongs to the pre-reload buffer.
+        self.clear_editor_transients();
         // Safe to reload silently
         if let Some(v) = &mut self.vault {
             v.reload_notes();
@@ -715,7 +715,7 @@ impl eframe::App for OmniNoteApp {
         use std::time::Duration;
 
         // Drain native "Tema"/"Editar" menu clicks first, before anything else
-        // reads `pending_native_format`/`editor_sel` this frame. Take-then-restore
+        // reads `pending_editor_action`/`editor_sel` this frame. Take-then-restore
         // (mirrors `flush_active`/`active_note`): `pump` needs `&mut self`, which
         // a plain `&mut self.native_menu` field access can't also hold.
         if let Some(mut nm) = self.native_menu.take() {
@@ -963,7 +963,7 @@ mod tests {
             calendar_open: false,
             calendar_ym: None,
             editor_sel: None,
-            pending_native_format: None,
+            pending_editor_action: None,
             // None in the headless test helper: `muda::Menu` can only be built on
             // the real AppKit main thread, and `cargo test` runs each test on its
             // own worker thread. `pump`/`sync_theme_check` are no-ops on `None`.
@@ -1385,10 +1385,19 @@ mod tests {
     }
 
     #[test]
-    fn select_note_resets_stale_editor_selection() {
-        // CAD-25b Slice 4 (review finding): switching notes must clear editor_sel so
-        // a stale byte range from the previous note can't act on a different buffer.
+    fn select_note_resets_stale_editor_actions() {
         let (mut app, _dir) = test_app();
+        let id_a = app
+            .vault
+            .as_ref()
+            .unwrap()
+            .notes
+            .iter()
+            .find(|n| n.title == "A")
+            .unwrap()
+            .frontmatter
+            .id
+            .clone();
         let id_b = app
             .vault
             .as_ref()
@@ -1400,13 +1409,41 @@ mod tests {
             .frontmatter
             .id
             .clone();
+        app.select_note(&id_a);
+        app.editing = true;
         app.editor_sel = Some((5, 10));
+        app.slash_menu_pos = Some(5);
+        app.queue_editor_action(crate::ui_editor::MdFormat::Bold);
+        assert!(app.pending_editor_action.is_some());
         app.select_note(&id_b);
-        assert_eq!(
-            app.editor_sel, None,
-            "select_note deve limpar a seleção stale"
-        );
+        assert_eq!(app.editor_sel, None);
+        assert_eq!(app.slash_menu_pos, None);
+        assert!(app.pending_editor_action.is_none());
         assert!(app.active_note.is_some(), "nota B deve ficar ativa");
+    }
+
+    #[test]
+    fn format_command_in_read_mode_is_dropped_immediately() {
+        let (mut app, _dir) = test_app();
+        let id = app.vault.as_ref().unwrap().notes[0].frontmatter.id.clone();
+        app.select_note(&id);
+        app.editing = false;
+        app.queue_editor_action(crate::ui_editor::MdFormat::Bold);
+        assert!(app.pending_editor_action.is_none());
+    }
+
+    #[test]
+    fn format_command_in_typed_discipline_view_is_dropped_immediately() {
+        let (mut app, _dir) = test_app();
+        let id = app.vault.as_ref().unwrap().notes[0].frontmatter.id.clone();
+        app.select_note(&id);
+        app.active_note.as_mut().unwrap().rel_path = "discipline/SPRINT.md".into();
+        app.editing = true;
+        app.discipline_typed = true;
+
+        app.queue_editor_action(crate::ui_editor::MdFormat::Bold);
+
+        assert!(app.pending_editor_action.is_none());
     }
 
     #[test]

@@ -26,6 +26,7 @@ impl OmniNoteApp {
                 ui.horizontal(|ui| {
                     if ui.button("📥 Recarregar (perde meus edits)").clicked() {
                         self.dirty = false;
+                        self.clear_editor_transients();
                         if let Some(v) = &mut self.vault {
                             v.reload_notes();
                         }
@@ -82,6 +83,7 @@ impl OmniNoteApp {
                                 // modal open and don't switch away — otherwise the
                                 // unsaved edits the conflict protects are lost.
                                 if self.flush_active() {
+                                    self.clear_editor_transients();
                                     if let Some(v) = &mut self.vault {
                                         match v.create_note(None, "", *t) {
                                             Ok(note) => {
@@ -281,6 +283,7 @@ impl OmniNoteApp {
                 ui.separator();
                 ui.horizontal(|ui| {
                     if ui.button("🗑 Sim, deletar").clicked() {
+                        let mut removed_active = false;
                         match &action {
                             ConfirmAction::DeleteNote(id) => {
                                 if let Some(v) = &mut self.vault {
@@ -301,6 +304,7 @@ impl OmniNoteApp {
                                             self.active_note = None;
                                             self.dirty = false;
                                             self.external_change_pending = false;
+                                            removed_active = true;
                                         }
                                     }
                                 }
@@ -319,9 +323,13 @@ impl OmniNoteApp {
                                         self.active_note = None;
                                         self.dirty = false;
                                         self.external_change_pending = false;
+                                        removed_active = true;
                                     }
                                 }
                             }
+                        }
+                        if removed_active {
+                            self.clear_editor_transients();
                         }
                         self.confirm_action = None;
                     }
@@ -398,6 +406,7 @@ impl OmniNoteApp {
         if !self.flush_active() {
             return;
         }
+        self.clear_editor_transients();
         let content = match omninote_core::pdf::extract_text(path) {
             Ok(t) => t,
             Err(e) => {
@@ -438,6 +447,7 @@ impl OmniNoteApp {
         if !self.flush_active() {
             return;
         }
+        self.clear_editor_transients();
         let content = match omninote_core::import::import_claude_chat(path) {
             Ok(c) => c,
             Err(e) => {
@@ -475,6 +485,7 @@ impl OmniNoteApp {
         if !self.flush_active() {
             return;
         }
+        self.clear_editor_transients();
         let content = match omninote_core::import::import_claude_artifact(path) {
             Ok(c) => c,
             Err(e) => {

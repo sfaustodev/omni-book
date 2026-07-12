@@ -22,9 +22,8 @@
 //! bespoke undo/redo content-snapshot stack — real new scope nobody asked
 //! for. Selecionar tudo/Copiar are included (safe, cheap) but deliberately
 //! carry **no accelerator**: egui's `TextEdit` already owns Cmd+A/Cmd+C when
-//! focused, and double-binding those keys risks a double-fire no one can
-//! observe without a real device. Bold/Italic get Cmd+B/Cmd+I because nothing
-//! else claims those keys today — pure addition, zero collision risk.
+//! focused, and double-binding those keys risks a double-fire. Formatting
+//! shortcuts stay owned by the focused egui editor; native items are click-only.
 
 /// RGBA bytes whose dimensions are safe to hand to a native menu backend.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,7 +62,7 @@ pub fn select_all_range(len: usize) -> (usize, usize) {
 }
 
 /// Char-boundary-safe substring extraction for "Copiar" — same snapping
-/// technique `apply_md_format` (`ui_editor.rs`) uses, so a selection ending
+/// technique the editor formatter uses, so a selection ending
 /// mid-multibyte-char never panics. Pure and platform-independent; same
 /// scoped allow as [`select_all_range`] (caller compiled out off macOS).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -84,11 +83,14 @@ pub fn copy_slice(content: &str, sel: (usize, usize)) -> String {
 
 #[cfg(target_os = "macos")]
 mod macos {
-    use super::{copy_slice, select_all_range};
+    use super::{copy_slice, select_all_range, validated_menu_icon_rgba};
     use crate::app::OmniNoteApp;
-    use crate::ui_editor::MdFormat;
-    use muda::accelerator::{Accelerator, Code, Modifiers};
-    use muda::{CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu};
+    use crate::ui_editor::{editor_actions_for, EditorEntryPoint, MdFormat};
+    use muda::accelerator::Accelerator;
+    use muda::{
+        CheckMenuItem, IconMenuItem, IsMenuItem, Menu, MenuEvent, MenuId, MenuItem,
+        PredefinedMenuItem, Submenu,
+    };
     use omninote_core::types::ThemePreset;
     use std::collections::HashMap;
     use std::sync::mpsc::{self, Receiver};
@@ -101,6 +103,41 @@ mod macos {
         NewNote,
         Settings,
         Close,
+    }
+
+    enum FallibleIconMenuItem {
+        Plain(MenuItem),
+        Icon(IconMenuItem),
+    }
+
+    impl FallibleIconMenuItem {
+        fn new(
+            text: &str,
+            accelerator: Option<Accelerator>,
+            raw_icon: Option<(Vec<u8>, u32, u32)>,
+        ) -> Self {
+            let icon = raw_icon
+                .and_then(|(rgba, width, height)| validated_menu_icon_rgba(rgba, width, height))
+                .and_then(|data| muda::Icon::from_rgba(data.rgba, data.width, data.height).ok());
+            match icon {
+                Some(icon) => Self::Icon(IconMenuItem::new(text, true, Some(icon), accelerator)),
+                None => Self::Plain(MenuItem::new(text, true, accelerator)),
+            }
+        }
+
+        fn id(&self) -> &MenuId {
+            match self {
+                Self::Plain(item) => item.id(),
+                Self::Icon(item) => item.id(),
+            }
+        }
+
+        fn as_menu_item(&self) -> &dyn IsMenuItem {
+            match self {
+                Self::Plain(item) => item,
+                Self::Icon(item) => item,
+            }
+        }
     }
 
     pub struct NativeMenu {
@@ -183,65 +220,33 @@ mod macos {
             Ok(file_menu)
         }
 
-        // Editar — Selecionar tudo/Copiar, then the same `MdFormat` set and
-        // grouping the right-click context menu and `/` slash menu expose
-        // (`ui_editor.rs`), so all three surfaces stay in lockstep.
         fn build_edit_menu(actions: &mut HashMap<MenuId, Action>) -> Result<Submenu, String> {
             let edit_menu = Submenu::new("Editar", true);
 
-            let select_all = MenuItem::new("Selecionar tudo", true, None);
-            let copy = MenuItem::new("Copiar", true, None);
+            let select_all = FallibleIconMenuItem::new("Selecionar tudo", None, None);
+            let copy = FallibleIconMenuItem::new("Copiar", None, None);
             actions.insert(select_all.id().clone(), Action::SelectAll);
             actions.insert(copy.id().clone(), Action::Copy);
             edit_menu
-                .append_items(&[&select_all, &copy, &PredefinedMenuItem::separator()])
-                .map_err(|error| format!("muda: append Editar select-all/copy items: {error}"))?;
-
-            let bold = MenuItem::new(
-                MdFormat::Bold.label(),
-                true,
-                Some(Accelerator::new(Some(Modifiers::META), Code::KeyB)),
-            );
-            let italic = MenuItem::new(
-                MdFormat::Italic.label(),
-                true,
-                Some(Accelerator::new(Some(Modifiers::META), Code::KeyI)),
-            );
-            actions.insert(bold.id().clone(), Action::Format(MdFormat::Bold));
-            actions.insert(italic.id().clone(), Action::Format(MdFormat::Italic));
+                .append(select_all.as_menu_item())
+                .map_err(|error| format!("muda: append Editar select-all item: {error}"))?;
             edit_menu
-                .append_items(&[&bold, &italic])
-                .map_err(|error| format!("muda: append Editar bold/italic items: {error}"))?;
-
-            for fmt in [
-                MdFormat::Strike,
-                MdFormat::InlineCode,
-                MdFormat::Link,
-                MdFormat::CodeBlock,
-            ] {
-                let item = MenuItem::new(fmt.label(), true, None);
-                actions.insert(item.id().clone(), Action::Format(fmt));
-                edit_menu
-                    .append(&item)
-                    .map_err(|error| format!("muda: append format item: {error}"))?;
-            }
-
+                .append(copy.as_menu_item())
+                .map_err(|error| format!("muda: append Editar copy item: {error}"))?;
             edit_menu
                 .append(&PredefinedMenuItem::separator())
                 .map_err(|error| format!("muda: append Editar separator: {error}"))?;
-            for fmt in [
-                MdFormat::H1,
-                MdFormat::H2,
-                MdFormat::H3,
-                MdFormat::Bullet,
-                MdFormat::Numbered,
-                MdFormat::Todo,
-                MdFormat::Quote,
-            ] {
-                let item = MenuItem::new(fmt.label(), true, None);
-                actions.insert(item.id().clone(), Action::Format(fmt));
+
+            for format in editor_actions_for(EditorEntryPoint::NativeMenu) {
+                if matches!(format, MdFormat::H1 | MdFormat::Math) {
+                    edit_menu
+                        .append(&PredefinedMenuItem::separator())
+                        .map_err(|error| format!("muda: append Editar separator: {error}"))?;
+                }
+                let item = FallibleIconMenuItem::new(format.label(), None, None);
+                actions.insert(item.id().clone(), Action::Format(format));
                 edit_menu
-                    .append(&item)
+                    .append(item.as_menu_item())
                     .map_err(|error| format!("muda: append format item: {error}"))?;
             }
 
@@ -294,7 +299,7 @@ mod macos {
 
         /// Drain queued native menu clicks and apply them to `app`. Call once
         /// per frame, before the panels render, so a format click lands in
-        /// `pending_native_format` before `show_edit_panel` consumes it this
+        /// `pending_editor_action` before `show_edit_panel` consumes it this
         /// same frame (`ui_editor.rs`).
         pub fn pump(&mut self, app: &mut OmniNoteApp, ctx: &egui::Context) {
             while let Ok(event) = self.events.try_recv() {
@@ -312,7 +317,7 @@ mod macos {
                         }
                         self.sync_theme_check(preset);
                     }
-                    Action::Format(fmt) => app.pending_native_format = Some(*fmt),
+                    Action::Format(format) => app.queue_editor_action(*format),
                     Action::SelectAll => {
                         if let Some(note) = &app.active_note {
                             app.editor_sel = Some(select_all_range(note.content.len()));

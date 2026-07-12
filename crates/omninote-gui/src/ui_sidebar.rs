@@ -209,6 +209,7 @@ impl OmniNoteApp {
                     // blocks the flush — bail so the unsaved edits it protects
                     // aren't dropped (the modal stays up for the user to resolve).
                     if self.flush_active() {
+                        self.clear_editor_transients();
                         if let Some(v) = &mut self.vault {
                             let rel = folder.clone();
                             match v.create_note(Some(&rel), "", NoteType::default()) {

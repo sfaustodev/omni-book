@@ -3,6 +3,7 @@
 //! popup (Ctrl+Shift+Space → append to Inbox.md). Anchored center-top overlay.
 
 use crate::app::OmniNoteApp;
+use crate::ui_editor::{editor_actions_for, EditorEntryPoint, MdFormat};
 use egui::RichText;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
@@ -14,7 +15,7 @@ pub enum PaletteItem {
     Note { id: String, title: String },
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cmd {
     NewNote,
     Settings,
@@ -25,6 +26,7 @@ pub enum Cmd {
     QuickCapture,
     Tickets,
     Timeline,
+    Format(MdFormat),
 }
 
 impl PaletteItem {
@@ -39,7 +41,7 @@ impl PaletteItem {
 /// The fixed command set, always available.
 fn commands() -> Vec<PaletteItem> {
     use Cmd::*;
-    [
+    let mut items: Vec<_> = [
         ("➕ Nova nota", NewNote),
         ("⚙ Configurações", Settings),
         ("📥 Importar", Import),
@@ -52,7 +54,16 @@ fn commands() -> Vec<PaletteItem> {
     ]
     .into_iter()
     .map(|(label, action)| PaletteItem::Command { label, action })
-    .collect()
+    .collect();
+    items.extend(
+        editor_actions_for(EditorEntryPoint::CommandPalette)
+            .into_iter()
+            .map(|format| PaletteItem::Command {
+                label: format.label(),
+                action: Cmd::Format(format),
+            }),
+    );
+    items
 }
 
 /// Rank items against `query` with a fuzzy matcher; empty query keeps order.
@@ -84,6 +95,17 @@ impl OmniNoteApp {
                     it,
                     PaletteItem::Command {
                         action: Cmd::ToggleRail,
+                        ..
+                    }
+                )
+            });
+        }
+        if !self.content_editor_active() {
+            items.retain(|item| {
+                !matches!(
+                    item,
+                    PaletteItem::Command {
+                        action: Cmd::Format(_),
                         ..
                     }
                 )
@@ -189,6 +211,7 @@ impl OmniNoteApp {
                 }
                 Cmd::Tickets => self.toggle_central_overlay(crate::app::CentralOverlay::Tickets),
                 Cmd::Timeline => self.toggle_central_overlay(crate::app::CentralOverlay::Timeline),
+                Cmd::Format(format) => self.queue_editor_action(format),
             },
         }
     }
@@ -240,6 +263,7 @@ impl OmniNoteApp {
         if !self.flush_active() {
             return Err("conflito externo pendente — resolva o modal antes de capturar".into());
         }
+        self.clear_editor_transients();
         let v = self.vault.as_mut().ok_or("sem vault")?;
         v.append_inbox_line(line)?;
         v.reload_notes();
@@ -303,5 +327,52 @@ mod tests {
     #[test]
     fn rank_no_match_returns_empty() {
         assert!(rank(&items(), "zzzzxxq").is_empty());
+    }
+
+    #[test]
+    fn palette_format_commands_follow_the_editor_registry() {
+        let formats: Vec<_> = commands()
+            .into_iter()
+            .filter_map(|item| match item {
+                PaletteItem::Command {
+                    action: Cmd::Format(format),
+                    ..
+                } => Some(format),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            formats,
+            editor_actions_for(EditorEntryPoint::CommandPalette)
+        );
+    }
+
+    #[test]
+    fn formatting_commands_are_hidden_while_an_overlay_owns_the_center() {
+        use crate::app::CentralOverlay;
+        assert!(crate::ui_editor::content_editor_active_state(
+            true,
+            true,
+            CentralOverlay::None,
+            false,
+        ));
+        assert!(!crate::ui_editor::content_editor_active_state(
+            true,
+            true,
+            CentralOverlay::Tickets,
+            false,
+        ));
+        assert!(!crate::ui_editor::content_editor_active_state(
+            true,
+            true,
+            CentralOverlay::Timeline,
+            false,
+        ));
+        assert!(!crate::ui_editor::content_editor_active_state(
+            true,
+            true,
+            CentralOverlay::None,
+            true,
+        ));
     }
 }

@@ -571,6 +571,19 @@ pub fn discipline_file_of(rel_path: &Path) -> Option<DisciplineFile> {
     .find(|df| df.filename() == name)
 }
 
+pub(crate) fn has_typed_discipline_view(rel_path: &Path) -> bool {
+    matches!(
+        discipline_file_of(rel_path),
+        Some(
+            DisciplineFile::Sprint
+                | DisciplineFile::Diary
+                | DisciplineFile::Human
+                | DisciplineFile::Plan
+                | DisciplineFile::Eternal
+        )
+    )
+}
+
 // ──────────────────────── render methods (thin egui) ────────────────────────
 
 impl OmniNoteApp {
@@ -1077,6 +1090,7 @@ impl OmniNoteApp {
         if self.dirty && !self.flush_active() {
             return Err("não foi possível salvar edições pendentes".into());
         }
+        self.clear_editor_transients();
         let active_id = self.active_note.as_ref().map(|n| n.frontmatter.id.clone());
         let root = self
             .vault
