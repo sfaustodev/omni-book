@@ -57,7 +57,7 @@
 | ID | Title | Status | Prio | Size | Est | Depende | Notion URL |
 |------|-------|--------|------|------|-----|---------|------------|
 | CAD-22 | Phase 3 — Daily notes + templates + discipline CLI/MCP | 👀 Revisão | ⚡ | 🐎 L | 18h | CAD-21 | [36673ac79ddb81719384cbc41c959717](https://www.notion.so/36673ac79ddb81719384cbc41c959717) |
-| CAD-25 (Fase B) | UI Design v2 — implementação egui | 👀 Em testes | ⚡ | 🐘 XL | 22h | CAD-20 + análise A | slices 1-5 merged (#23-#26, #30) + ui-polish #28; falta Slice 6 (ui_chat/ui_dictation). Slice 7 + crash-proofing/formatação/polish prontos na branch `fix/cad-25-gui-polish`; gates locais + smoke macOS/visual verdes, sem PR por gate humano; evidência em `QA_FORMATTING.md`. |
+| CAD-25 (Fase B) | UI Design v2 — implementação egui | 👀 Em testes | ⚡ | 🐘 XL | 22h | CAD-20 + análise A | slices 1-5 merged (#23-#26, #30) + ui-polish #28; falta Slice 6 (ui_chat/ui_dictation). Slice 7 + crash-proofing/formatação/polish no PR #35; gates locais + smoke macOS/visual verdes; fix Linux cfg `e6fb448`, auto-squash após CI verde; evidência em `QA_FORMATTING.md`. |
 
 ### Sprint v1.3 (2026-06-17 → 2026-07-01) · AI + Power
 

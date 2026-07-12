@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-07-12 — [ci-red-triage] [linux-cfg] [crash-menu-icon] CAD-25 · PR #35
+
+**Publicação:** branch enviada e PR #35 aberto ready-for-review por autorização explícita do Fausto. Repositório não oferece auto-merge nativo; regra operacional adotada: observar CI e executar squash merge imediatamente após verde. CAD-25 permanece 👀 Em testes até confirmação humana específica de fechamento.
+
+**CI red:** run #100 falhou apenas no Clippy Linux: `MenuIconRgba`/`validated_menu_icon_rgba` e `EditorEntryPoint::NativeMenu` tinham consumidores reais no macOS e em `cfg(test)`, mas ficavam mortos no binário Linux. Root cause `5029de1` + `beed80b`, ambos `sfaustodev@gmail.com`; Case A aplicado e fix autorizado pelo humano.
+
+**Fix `e6fb448`:** `#[cfg(any(target_os = "macos", test))]` nos símbolos exclusivos do menu nativo + match condicionado; zero `#[allow]` novo, engine crates intocadas. O helper de RGBA e a matriz NativeMenu continuam compilados/testados em qualquer runner de testes, mas somem do binário Linux de produção.
+
+**Verificação local pós-fix:** fmt 0; Clippy exato do workflow `--all-targets -D warnings` 0; GUI **140 passed**; workspace **593 passed / 1 ignored / 0 failed**; `git diff --check` 0. Próximo gate definitivo: CI Linux do commit final; verde → squash merge automático operacional.
+
+**HUMAN sweep:** nenhuma pergunta nova — `cfg` é correção mecânica de portabilidade, sem decisão de produto/contrato. Q-12/Q-13/Q-14 seguem abertas.
+
+---
+
 ## 2026-07-12 — [crash-menu-icon] [gui-smoke] [sidebar-overflow] [clickable-row] CAD-25
 
 **Branch:** `fix/cad-25-gui-polish` · continuação do polimento · engine crates intocadas · sem PR (gate humano).

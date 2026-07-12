@@ -280,3 +280,12 @@ Fausto autorizou explicitamente push, abertura do PR e auto-merge condicionado a
 ### Next single-step
 
 Rodar preflight Git/GitHub + suíte workspace fresca.
+
+### Status 2026-07-12 · PR #35
+
+- [x] Branch publicada e PR ready-for-review aberto.
+- [x] Run #100 triado: Clippy Linux viu três símbolos macOS/test-only como dead code.
+- [x] Fix mínimo `e6fb448`: cfg macOS/test, sem `#[allow]`; fmt + Clippy + GUI 140 + workspace 593/1 verdes localmente.
+- [ ] Push dos registros finais + CI Linux verde + squash merge.
+
+**Next single-step atual:** commitar discipline explicitamente, push e observar o novo run até merge terminal.
