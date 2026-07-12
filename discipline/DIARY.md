@@ -6,7 +6,7 @@
 
 ## 2026-07-11 — [crash-menu-icon] [formatting-gauntlet] [gui-polish] CAD-25
 
-**Branch:** `fix/cad-25-gui-polish` · commits `5029de1`, `beed80b`, `642e173` · sem PR (gate humano).
+**Branch:** `fix/cad-25-gui-polish` · commits de código `5029de1`, `beed80b`, `642e173` · sem PR (gate humano).
 
 **P0:** backtrace `muda::macos::icon ZeroWidth` veio de lifetime inválido: `Menu` era local, `init_for_nsapp()` instalava ponteiros nativos e o wrapper Rust caía ao fim de `build`. `NativeMenu` agora retém `menu_bar`; `Drop` remove do NSApp + limpa handler. Build inteiro virou `Result`; erro degrada para GUI sem menu. Handler global só instala após todos builders/appends falíveis. Defense adicional TDD: `validated_menu_icon_rgba` rejeita `w==0`, `h==0`, overflow e `len != w*h*4`; `FallibleIconMenuItem` tenta `Icon::from_rgba` sem unwrap e cai para `MenuItem` textual. Todos itens Editar passam pelo wrapper; Tema usa `CheckMenuItem` (API sem bitmap). Regression zero-width/vazio verde.
 

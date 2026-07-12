@@ -1,6 +1,6 @@
 # QA de formatação da OmniNote GUI
 
-Data: 2026-07-11  
+Data: 2026-07-11
 Branch: `fix/cad-25-gui-polish`
 
 ## Cobertura automatizada
