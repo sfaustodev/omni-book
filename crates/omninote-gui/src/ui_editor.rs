@@ -24,6 +24,7 @@ pub enum MdFormat {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EditorEntryPoint {
+    #[cfg(any(target_os = "macos", test))]
     NativeMenu,
     SlashMenu,
     CommandPalette,
@@ -107,9 +108,9 @@ impl MdFormat {
 
     pub fn supports(self, entrypoint: EditorEntryPoint) -> bool {
         match entrypoint {
-            EditorEntryPoint::NativeMenu
-            | EditorEntryPoint::CommandPalette
-            | EditorEntryPoint::UiButton => true,
+            #[cfg(any(target_os = "macos", test))]
+            EditorEntryPoint::NativeMenu => true,
+            EditorEntryPoint::CommandPalette | EditorEntryPoint::UiButton => true,
             EditorEntryPoint::SlashMenu => self != Self::Math,
             EditorEntryPoint::Keyboard => {
                 matches!(self, Self::Bold | Self::Italic | Self::Math)

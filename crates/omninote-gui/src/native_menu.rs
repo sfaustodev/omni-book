@@ -26,6 +26,7 @@
 //! shortcuts stay owned by the focused egui editor; native items are click-only.
 
 /// RGBA bytes whose dimensions are safe to hand to a native menu backend.
+#[cfg(any(target_os = "macos", test))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MenuIconRgba {
     rgba: Vec<u8>,
@@ -34,6 +35,7 @@ pub struct MenuIconRgba {
 }
 
 /// Rejects zero-area or malformed images before a platform encoder sees them.
+#[cfg(any(target_os = "macos", test))]
 pub fn validated_menu_icon_rgba(rgba: Vec<u8>, width: u32, height: u32) -> Option<MenuIconRgba> {
     if width == 0 || height == 0 {
         return None;
