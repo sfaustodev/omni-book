@@ -35,6 +35,16 @@ Todos os comandos headless usam `timeout N` + `</dev/null`. Gate final: testes f
 
 Rodar baseline completo no worktree e concluir a investigação read-only dos três eixos antes do primeiro teste vermelho.
 
+### Status 2026-07-11
+
+- [x] P0: lifetime do `Menu` corrigido + icon RGBA falível + regression test zero-width/vazio.
+- [x] P1: matriz 16×5×8 = 640/640 células cobertas; 528 suportadas, 112 N/A; undo/redo e UTF-8.
+- [x] P2: `[ Ler | Editar ]`, 18 icon-only auditados, contraste 9 temas, layout/atalhos/Raw corrigidos.
+- [x] Gates: fmt, clippy strict, 591 passed/1 ignored, release build; engine diff vazio; 3 commits; sem PR.
+- [ ] Smoke real `Editar → Bloco de código` com `RUST_BACKTRACE=1` + inspeção visual Almanac Light/High Contrast. Bloqueado por cota de autorização do runner; `QA_FORMATTING.md` honesto como PENDENTE.
+
+**Next single-step atual:** humano autoriza controle externo da GUI ou executa checklist; registrar resultado antes de aceitar CAD-25.
+
 ## 2026-07-10 — CAD-25 Slice 7 — theme gallery + native macOS menu bar
 
 ### Contexto

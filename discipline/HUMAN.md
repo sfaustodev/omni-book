@@ -7,6 +7,22 @@
 
 ## Open questions
 
+### Q-14 · Manter largura mínima de 960 px na GUI · raised 2026-07-11 · context: CAD-25 polish
+**Por que eu perguntei:** o chrome atual pode ter sidebar 280 px + rail 320 px + fonte até 24 pt. Com o mínimo antigo de 600 px, ações e editor inevitavelmente se sobrepunham; isso apareceu na auditoria visual do polish. É uma decisão de layout persistente não cravada no spec.
+**Options que considerei:**
+- (a) Mínimo 960 px — **o que apliquei**. Mantém pelo menos 300 px centrais com os dois rails e evita esconder ações; em telas menores o sistema limita a janela ao espaço disponível.
+- (b) Voltar a 600 px e auto-colapsar sidebar/rail conforme largura. É a solução responsiva mais completa, mas vira redesign de estado/navegação e teste, fora do quick-win pedido.
+- (c) Voltar a 600 px sem colapso. Mantém redimensionamento livre, mas aceita controles cortados/sobrepostos.
+**Minha recomendação:** (a) agora; (b) só se uso real em tela pequena justificar uma tarefa de responsividade. Você confirma?
+
+### Q-13 · Bloco de código dentro de fence existente vira no-op · raised 2026-07-11 · context: CAD-25 formatting gauntlet
+**Por que eu perguntei:** o spec exigiu testar o edge case, mas não definiu a transformação. Envolver uma seleção que já está dentro de uma fence de três backticks cria Markdown ambíguo ou fecha a fence antes da hora.
+**Options que considerei:**
+- (a) No-op seguro — **o que apliquei**. Não altera o texto e nunca panica; o teste fixa esse contrato em todos os entrypoints suportados.
+- (b) Inserir fence mais longa/alternativa (`~~~~`) ao redor da seleção. Permite nesting visual, mas muda semântica e exige parser/renderer-aware escaping.
+- (c) Remover a fence externa e reestruturar o bloco inteiro. É destrutivo e surpreendente para uma ação local.
+**Minha recomendação:** (a). Se você quiser blocos aninhados, tratar como feature própria com regra explícita. Confirma?
+
 ### Q-12 · Ignorar RUSTSEC-2026-0194/0195 (quick-xml DoS, transitiva do egui 0.29) no cargo audit · raised 2026-07-10 · context: CI red pós-merge PR #32
 **Por que eu perguntei:** decisão de segurança (filtro (c)) tomada em modo decide-and-flag (rule #7) pra destravar o CI de main, que ficou vermelho quando o advisory DB atualizou. As duas cópias vulneráveis de quick-xml (<0.41) são transitivas do stack egui 0.29 pinado, Linux-only, e nunca veem XML de atacante (uma é proc-macro compile-time via wayland-scanner; outra parseia D-Bus local via atspi/accesskit). Nenhum pai aceita ≥0.41 sem bump major do egui (0.29→0.32+), que o CLAUDE.md pina de propósito (egui_commonmark 0.18 ↔ egui 0.29).
 **Options que considerei:**
