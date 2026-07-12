@@ -26,6 +26,33 @@
 //! observe without a real device. Bold/Italic get Cmd+B/Cmd+I because nothing
 //! else claims those keys today — pure addition, zero collision risk.
 
+/// RGBA bytes whose dimensions are safe to hand to a native menu backend.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MenuIconRgba {
+    rgba: Vec<u8>,
+    width: u32,
+    height: u32,
+}
+
+/// Rejects zero-area or malformed images before a platform encoder sees them.
+pub fn validated_menu_icon_rgba(rgba: Vec<u8>, width: u32, height: u32) -> Option<MenuIconRgba> {
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let expected_len = usize::try_from(width)
+        .ok()?
+        .checked_mul(usize::try_from(height).ok()?)?
+        .checked_mul(4)?;
+    if rgba.len() != expected_len {
+        return None;
+    }
+    Some(MenuIconRgba {
+        rgba,
+        width,
+        height,
+    })
+}
+
 /// The byte range covering the whole note (used by "Selecionar tudo"). Pure
 /// and platform-independent so it's unit-tested on every CI runner, not just
 /// macOS. Off macOS the only non-test caller (`macos::pump`) is compiled out,
@@ -77,6 +104,7 @@ mod macos {
     }
 
     pub struct NativeMenu {
+        menu_bar: Menu,
         actions: HashMap<MenuId, Action>,
         theme_items: Vec<(ThemePreset, CheckMenuItem)>,
         events: Receiver<MenuEvent>,
@@ -88,7 +116,7 @@ mod macos {
         /// `request_repaint()` — a native menu click doesn't originate from
         /// egui's own input polling, so without this the next frame could be
         /// delayed until unrelated window input woke the event loop back up.
-        pub fn build(ctx: &egui::Context, current: ThemePreset) -> Self {
+        pub fn build(ctx: &egui::Context, current: ThemePreset) -> Result<Self, String> {
             let (tx, rx) = mpsc::channel::<MenuEvent>();
             let repaint_ctx = ctx.clone();
             MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
@@ -106,34 +134,37 @@ mod macos {
                     &PredefinedMenuItem::separator(),
                     &PredefinedMenuItem::quit(None),
                 ])
-                .expect("muda: append App submenu items");
-            menu_bar.append(&app_menu).expect("muda: append App menu");
+                .map_err(|error| format!("muda: append App submenu items: {error}"))?;
+            menu_bar
+                .append(&app_menu)
+                .map_err(|error| format!("muda: append App menu: {error}"))?;
 
             menu_bar
-                .append(&Self::build_file_menu(&mut actions))
-                .expect("muda: append Arquivo menu");
+                .append(&Self::build_file_menu(&mut actions)?)
+                .map_err(|error| format!("muda: append Arquivo menu: {error}"))?;
             menu_bar
-                .append(&Self::build_edit_menu(&mut actions))
-                .expect("muda: append Editar menu");
-            let (theme_menu, theme_items) = Self::build_theme_menu(&mut actions, current);
+                .append(&Self::build_edit_menu(&mut actions)?)
+                .map_err(|error| format!("muda: append Editar menu: {error}"))?;
+            let (theme_menu, theme_items) = Self::build_theme_menu(&mut actions, current)?;
             menu_bar
                 .append(&theme_menu)
-                .expect("muda: append Tema menu");
+                .map_err(|error| format!("muda: append Tema menu: {error}"))?;
 
             menu_bar.init_for_nsapp();
 
-            Self {
+            Ok(Self {
+                menu_bar,
                 actions,
                 theme_items,
                 events: rx,
-            }
+            })
         }
 
         // Arquivo — no accelerators: the existing egui-level shortcuts
         // (Cmd+N/,/W, `app.rs`'s `consume_app_shortcut` loop) already own
         // these keys; these items are click-only affordances, not a second
         // owner of the binding.
-        fn build_file_menu(actions: &mut HashMap<MenuId, Action>) -> Submenu {
+        fn build_file_menu(actions: &mut HashMap<MenuId, Action>) -> Result<Submenu, String> {
             let file_menu = Submenu::new("Arquivo", true);
             let new_note = MenuItem::new("Nova nota", true, None);
             let settings = MenuItem::new("Configurações", true, None);
@@ -148,14 +179,14 @@ mod macos {
                     &PredefinedMenuItem::separator(),
                     &close,
                 ])
-                .expect("muda: append Arquivo items");
-            file_menu
+                .map_err(|error| format!("muda: append Arquivo items: {error}"))?;
+            Ok(file_menu)
         }
 
         // Editar — Selecionar tudo/Copiar, then the same `MdFormat` set and
         // grouping the right-click context menu and `/` slash menu expose
         // (`ui_editor.rs`), so all three surfaces stay in lockstep.
-        fn build_edit_menu(actions: &mut HashMap<MenuId, Action>) -> Submenu {
+        fn build_edit_menu(actions: &mut HashMap<MenuId, Action>) -> Result<Submenu, String> {
             let edit_menu = Submenu::new("Editar", true);
 
             let select_all = MenuItem::new("Selecionar tudo", true, None);
@@ -164,7 +195,7 @@ mod macos {
             actions.insert(copy.id().clone(), Action::Copy);
             edit_menu
                 .append_items(&[&select_all, &copy, &PredefinedMenuItem::separator()])
-                .expect("muda: append Editar select-all/copy items");
+                .map_err(|error| format!("muda: append Editar select-all/copy items: {error}"))?;
 
             let bold = MenuItem::new(
                 MdFormat::Bold.label(),
@@ -180,7 +211,7 @@ mod macos {
             actions.insert(italic.id().clone(), Action::Format(MdFormat::Italic));
             edit_menu
                 .append_items(&[&bold, &italic])
-                .expect("muda: append Editar bold/italic items");
+                .map_err(|error| format!("muda: append Editar bold/italic items: {error}"))?;
 
             for fmt in [
                 MdFormat::Strike,
@@ -190,12 +221,14 @@ mod macos {
             ] {
                 let item = MenuItem::new(fmt.label(), true, None);
                 actions.insert(item.id().clone(), Action::Format(fmt));
-                edit_menu.append(&item).expect("muda: append format item");
+                edit_menu
+                    .append(&item)
+                    .map_err(|error| format!("muda: append format item: {error}"))?;
             }
 
             edit_menu
                 .append(&PredefinedMenuItem::separator())
-                .expect("muda: append Editar separator");
+                .map_err(|error| format!("muda: append Editar separator: {error}"))?;
             for fmt in [
                 MdFormat::H1,
                 MdFormat::H2,
@@ -207,10 +240,12 @@ mod macos {
             ] {
                 let item = MenuItem::new(fmt.label(), true, None);
                 actions.insert(item.id().clone(), Action::Format(fmt));
-                edit_menu.append(&item).expect("muda: append format item");
+                edit_menu
+                    .append(&item)
+                    .map_err(|error| format!("muda: append format item: {error}"))?;
             }
 
-            edit_menu
+            Ok(edit_menu)
         }
 
         // Tema — one `CheckMenuItem` per `ThemePreset::all()`, one per line,
@@ -220,7 +255,7 @@ mod macos {
         fn build_theme_menu(
             actions: &mut HashMap<MenuId, Action>,
             current: ThemePreset,
-        ) -> (Submenu, Vec<(ThemePreset, CheckMenuItem)>) {
+        ) -> Result<(Submenu, Vec<(ThemePreset, CheckMenuItem)>), String> {
             let theme_menu = Submenu::new("Tema", true);
             let mut theme_items = Vec::new();
             let groups: [&[ThemePreset]; 6] = [
@@ -235,16 +270,18 @@ mod macos {
                 if gi > 0 {
                     theme_menu
                         .append(&PredefinedMenuItem::separator())
-                        .expect("muda: append Tema separator");
+                        .map_err(|error| format!("muda: append Tema separator: {error}"))?;
                 }
                 for &preset in *group {
                     let item = CheckMenuItem::new(preset.label(), true, preset == current, None);
                     actions.insert(item.id().clone(), Action::Theme(preset));
-                    theme_menu.append(&item).expect("muda: append Tema item");
+                    theme_menu
+                        .append(&item)
+                        .map_err(|error| format!("muda: append Tema item: {error}"))?;
                     theme_items.push((preset, item));
                 }
             }
-            (theme_menu, theme_items)
+            Ok((theme_menu, theme_items))
         }
 
         /// Refresh the Tema checkmarks after a preset change from ANY source —
@@ -297,6 +334,13 @@ mod macos {
             }
         }
     }
+
+    impl Drop for NativeMenu {
+        fn drop(&mut self) {
+            self.menu_bar.remove_for_nsapp();
+            MenuEvent::set_event_handler(None::<fn(MenuEvent)>);
+        }
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -313,8 +357,8 @@ mod stub {
     pub struct NativeMenu;
 
     impl NativeMenu {
-        pub fn build(_ctx: &egui::Context, _current: ThemePreset) -> Self {
-            Self
+        pub fn build(_ctx: &egui::Context, _current: ThemePreset) -> Result<Self, String> {
+            Ok(Self)
         }
         pub fn sync_theme_check(&self, _current: ThemePreset) {}
         pub fn pump(&mut self, _app: &mut OmniNoteApp, _ctx: &egui::Context) {}
@@ -327,6 +371,24 @@ pub use stub::NativeMenu;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn menu_icon_validation_rejects_zero_dimensions_and_empty_rgba() {
+        assert!(validated_menu_icon_rgba(Vec::new(), 0, 16).is_none());
+        assert!(validated_menu_icon_rgba(Vec::new(), 16, 0).is_none());
+        assert!(validated_menu_icon_rgba(Vec::new(), 0, 0).is_none());
+    }
+
+    #[test]
+    fn menu_icon_validation_accepts_exact_non_empty_rgba() {
+        assert!(validated_menu_icon_rgba(vec![255; 2 * 3 * 4], 2, 3).is_some());
+    }
+
+    #[test]
+    fn menu_icon_validation_rejects_mismatched_rgba_length() {
+        assert!(validated_menu_icon_rgba(vec![0; 4], 2, 2).is_none());
+        assert!(validated_menu_icon_rgba(vec![0; 16], 1, 1).is_none());
+    }
 
     #[test]
     fn select_all_range_covers_whole_content() {

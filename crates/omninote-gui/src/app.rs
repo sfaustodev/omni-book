@@ -303,7 +303,13 @@ impl OmniNoteApp {
             .as_ref()
             .map(|v| v.config.theme_preset)
             .unwrap_or_default();
-        let native_menu = Some(native_menu::NativeMenu::build(&cc.egui_ctx, current_preset));
+        let native_menu = match native_menu::NativeMenu::build(&cc.egui_ctx, current_preset) {
+            Ok(menu) => Some(menu),
+            Err(error) => {
+                eprintln!("omninote: native menu unavailable ({error})");
+                None
+            }
+        };
 
         let app = Self {
             vault,

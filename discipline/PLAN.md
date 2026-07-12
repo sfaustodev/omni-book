@@ -4,6 +4,37 @@
 
 ---
 
+## 2026-07-11 — fix/cad-25-gui-polish — crash-proofing + formatting gauntlet + UI polish
+
+### Contexto
+
+Missão Fausto: corrigir o panic macOS de `muda` ao clicar em "criar bloco de código", provar a correção por TDD, fechar a matriz de formatação em todos os entrypoints/fixtures perversos e tornar os controles da GUI legíveis e acessíveis. Ticket guarda-chuva: CAD-25. Engine crates (`omninote-core`, `omninote-ai`, `omninote-cli`, `omninote-mcp`) são gabarito read-only.
+
+### Escopo
+
+1. P0: rastrear o RGBA/dimensões que chegam a `muda::Icon`, escrever regression test vermelho para zero-width/vazio e tornar o helper de ícone falível; qualquer input inválido resulta em item nativo sem ícone.
+2. P1: inventariar ações × entrypoints; consolidar mutações no helper puro existente ou num chokepoint GUI puro; cobrir nota/cursor/seleção/multibyte/code-block/undo-redo por testes; registrar células somente interativas em `crates/omninote-gui/QA_FORMATTING.md` e executar uma vez.
+3. P2: aplicar `/impeccable polish` no toggle Ler/Editar; auditar controles icon-only para alvo mínimo 28 px, tooltip/nome acessível e estados hover/active/focus nos 9 temas; validar especialmente AlmanacLight e HighContrast; quick wins pequenos apenas.
+4. Fechamento: `/impeccable audit`, fmt, clippy `-D warnings`, suíte workspace (baseline >=553), build release e smoke macOS com `RUST_BACKTRACE=1`; atualizar DIARY/HUMAN; deixar branch pronta sem abrir PR.
+
+### Arquivos críticos
+
+- `crates/omninote-gui/src/native_menu.rs`
+- `crates/omninote-gui/src/ui_editor.rs`
+- `crates/omninote-gui/src/ui_palette.rs`
+- `crates/omninote-gui/src/app.rs`
+- `crates/omninote-gui/src/theme.rs`
+- `crates/omninote-gui/QA_FORMATTING.md` (novo)
+- `discipline/{PLAN,DIARY,HUMAN}.md`
+
+### Verificação
+
+Todos os comandos headless usam `timeout N` + `</dev/null`. Gate final: testes focados RED→GREEN por hunk; `cargo fmt --check`; `cargo clippy --workspace --all-targets -- -D warnings`; `cargo test --workspace`; `cargo build --release`; diff confirma zero mudança em engine crates; smoke real do menu com backtrace e checklist QA anotado.
+
+### Next single-step
+
+Rodar baseline completo no worktree e concluir a investigação read-only dos três eixos antes do primeiro teste vermelho.
+
 ## 2026-07-10 — CAD-25 Slice 7 — theme gallery + native macOS menu bar
 
 ### Contexto
