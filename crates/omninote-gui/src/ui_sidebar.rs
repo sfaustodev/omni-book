@@ -1,4 +1,5 @@
 use crate::app::OmniNoteApp;
+use crate::ui_a11y::{command_shortcut, icon_button, IconButtonSpec};
 use egui::RichText;
 use omninote_core::types::{ConfirmAction, NoteType};
 use std::path::{Path, PathBuf};
@@ -6,6 +7,9 @@ use std::path::{Path, PathBuf};
 impl OmniNoteApp {
     pub fn show_sidebar(&mut self, ctx: &egui::Context) {
         let theme = self.sidebar_theme();
+        let settings_shortcut = command_shortcut(ctx, egui::Key::Comma, false);
+        let theme_shortcut = command_shortcut(ctx, egui::Key::D, true);
+        let rail_shortcut = command_shortcut(ctx, egui::Key::Backslash, false);
         let resp = egui::SidePanel::left("sidebar")
             .exact_width(280.0)
             .show(ctx, |ui| {
@@ -28,41 +32,45 @@ impl OmniNoteApp {
                             .unwrap_or("vault");
                         ui.label(RichText::new(name).monospace().size(10.0).color(theme.dim));
                     }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .small_button("⚙")
-                            .on_hover_text("Configurações (Cmd+,)")
-                            .clicked()
-                        {
-                            self.show_settings = true;
-                        }
-                        if ui
-                            .small_button("☀/🌙")
-                            .on_hover_text("Tema (Cmd+Shift+D)")
-                            .clicked()
-                        {
-                            if let Some(v) = &mut self.vault {
-                                crate::app::toggle_light_dark(&mut v.config);
-                                crate::app::theme_for_config(&v.config).apply(ctx);
-                            }
-                        }
-                        if ui
-                            .small_button("📂")
-                            .on_hover_text("Trocar vault")
-                            .clicked()
-                        {
-                            self.pick_vault_with_ctx(ctx);
-                        }
-                        let rail_enabled = self.central_overlay == crate::app::CentralOverlay::None;
-                        if ui
-                            .add_enabled(rail_enabled, egui::Button::new("⊟").small())
-                            .on_hover_text("Painel direito (backlinks/outline)")
-                            .on_disabled_hover_text("Painel direito (indisponível em overlay)")
-                            .clicked()
-                        {
-                            self.toggle_right_rail();
-                        }
-                    });
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if icon_button(
+                        ui,
+                        IconButtonSpec::new("⚙", "Configurações")
+                            .shortcut(&settings_shortcut)
+                            .selected(self.show_settings),
+                    )
+                    .clicked()
+                    {
+                        self.show_settings = true;
+                    }
+                    if icon_button(
+                        ui,
+                        IconButtonSpec::new("◐", "Alternar tema").shortcut(&theme_shortcut),
+                    )
+                    .clicked()
+                    {
+                        self.toggle_current_theme(ctx);
+                    }
+                    if icon_button(ui, IconButtonSpec::new("📂", "Trocar vault")).clicked() {
+                        self.pick_vault_with_ctx(ctx);
+                    }
+                    let rail_enabled = self.central_overlay == crate::app::CentralOverlay::None;
+                    let rail_open = self
+                        .vault
+                        .as_ref()
+                        .is_some_and(|vault| vault.config.right_rail_open);
+                    if icon_button(
+                        ui,
+                        IconButtonSpec::new("⊟", "Painel direito")
+                            .shortcut(&rail_shortcut)
+                            .selected(rail_open)
+                            .enabled(rail_enabled, "Indisponível sobre outro painel"),
+                    )
+                    .clicked()
+                    {
+                        self.toggle_right_rail();
+                    }
                 });
                 ui.add_space(4.0);
 

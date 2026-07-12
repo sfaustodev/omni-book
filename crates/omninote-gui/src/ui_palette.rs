@@ -198,12 +198,7 @@ impl OmniNoteApp {
                 Cmd::Settings => self.show_settings = true,
                 Cmd::Import => self.show_import = true,
                 Cmd::ToggleRail => self.toggle_right_rail(),
-                Cmd::ToggleTheme => {
-                    if let Some(v) = &mut self.vault {
-                        crate::app::toggle_light_dark(&mut v.config);
-                        crate::app::theme_for_config(&v.config).apply(ctx);
-                    }
-                }
+                Cmd::ToggleTheme => self.toggle_current_theme(ctx),
                 Cmd::SwitchVault => self.pick_vault_with_ctx(ctx),
                 Cmd::QuickCapture => {
                     self.capture_open = true;

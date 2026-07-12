@@ -73,6 +73,163 @@ pub fn kbd_hint(ui: &mut Ui, theme: &Theme, keys: &str) {
     );
 }
 
+pub const ICON_BUTTON_MIN_SIDE: f32 = 28.0;
+pub const MODE_SEGMENT_MIN_WIDTH: f32 = 56.0;
+
+pub fn command_shortcut(ctx: &egui::Context, key: egui::Key, shift: bool) -> String {
+    let modifiers = if shift {
+        egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT)
+    } else {
+        egui::Modifiers::COMMAND
+    };
+    ctx.format_shortcut(&egui::KeyboardShortcut::new(modifiers, key))
+}
+
+#[derive(Clone, Copy)]
+pub struct IconButtonSpec<'a> {
+    glyph: &'a str,
+    label: &'a str,
+    shortcut: Option<&'a str>,
+    selected: bool,
+    enabled: bool,
+    disabled_reason: Option<&'a str>,
+}
+
+impl<'a> IconButtonSpec<'a> {
+    pub const fn new(glyph: &'a str, label: &'a str) -> Self {
+        Self {
+            glyph,
+            label,
+            shortcut: None,
+            selected: false,
+            enabled: true,
+            disabled_reason: None,
+        }
+    }
+
+    pub const fn shortcut(mut self, shortcut: &'a str) -> Self {
+        self.shortcut = Some(shortcut);
+        self
+    }
+
+    pub const fn selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
+        self
+    }
+
+    pub const fn enabled(mut self, enabled: bool, disabled_reason: &'a str) -> Self {
+        self.enabled = enabled;
+        self.disabled_reason = if enabled { None } else { Some(disabled_reason) };
+        self
+    }
+
+    fn tooltip_text(self) -> String {
+        if let Some(reason) = self.disabled_reason {
+            format!("{} — {reason}", self.label)
+        } else if let Some(shortcut) = self.shortcut {
+            format!("{} ({shortcut})", self.label)
+        } else {
+            self.label.to_owned()
+        }
+    }
+}
+
+fn configure_framed_control(ui: &mut Ui, selected: bool, text_control: bool) {
+    let normal_ink = ui.visuals().widgets.inactive.fg_stroke.color;
+    let visuals = &mut ui.style_mut().visuals;
+    visuals.selection.stroke = egui::Stroke::new(1.0_f32, normal_ink);
+    visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0_f32, normal_ink);
+    visuals.widgets.active.bg_stroke = egui::Stroke::new(2.0_f32, normal_ink);
+    if selected {
+        visuals.widgets.hovered.fg_stroke.color = normal_ink;
+        visuals.widgets.active.fg_stroke.color = normal_ink;
+    } else if text_control {
+        visuals.widgets.hovered.fg_stroke.color = normal_ink;
+    }
+}
+
+fn selected_emphasis_width(
+    selected: bool,
+    hovered: bool,
+    focused: bool,
+    pointer_down: bool,
+) -> f32 {
+    if selected && (hovered || focused || pointer_down) {
+        2.0
+    } else {
+        0.0
+    }
+}
+
+fn paint_selected_emphasis(ui: &Ui, response: &Response, selected: bool) {
+    let width = selected_emphasis_width(
+        selected,
+        response.hovered(),
+        response.has_focus(),
+        response.is_pointer_button_down_on(),
+    );
+    if width > 0.0 {
+        let ink = ui.visuals().widgets.inactive.fg_stroke.color;
+        ui.painter().rect_stroke(
+            response.rect,
+            egui::Rounding::ZERO,
+            egui::Stroke::new(width, ink),
+        );
+    }
+}
+
+pub fn icon_button(ui: &mut Ui, spec: IconButtonSpec<'_>) -> Response {
+    let side = ICON_BUTTON_MIN_SIDE;
+    let response = ui
+        .scope(|ui| {
+            configure_framed_control(ui, spec.selected, false);
+            let response = ui.add_enabled(
+                spec.enabled,
+                egui::Button::new(spec.glyph)
+                    .frame(true)
+                    .selected(spec.selected)
+                    .min_size(egui::Vec2::splat(side)),
+            );
+            response.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::Button,
+                    spec.enabled,
+                    spec.selected,
+                    spec.label,
+                )
+            });
+            response
+        })
+        .inner;
+    paint_selected_emphasis(ui, &response, spec.selected);
+    let tooltip = spec.tooltip_text();
+    if spec.enabled {
+        response.on_hover_text(tooltip)
+    } else {
+        response.on_disabled_hover_text(tooltip)
+    }
+}
+
+pub fn mode_segment_button(ui: &mut Ui, label: &str, selected: bool, tooltip: &str) -> Response {
+    let response = ui
+        .scope(|ui| {
+            configure_framed_control(ui, selected, true);
+            let response = ui.add(
+                egui::Button::new(label)
+                    .frame(true)
+                    .selected(selected)
+                    .min_size(egui::vec2(MODE_SEGMENT_MIN_WIDTH, ICON_BUTTON_MIN_SIDE)),
+            );
+            response.widget_info(|| {
+                egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, label)
+            });
+            response
+        })
+        .inner;
+    paint_selected_emphasis(ui, &response, selected);
+    response.on_hover_text(tooltip)
+}
+
 /// Paint the `>` prompt marker centred in a row's left gutter. Color encodes the
 /// row state: `accent` when selected or keyboard-focused (the loud signal),
 /// `border_strong`/`accent` on hover, otherwise hidden (the default row has no
@@ -231,5 +388,204 @@ mod tests {
     #[test]
     fn spaced_caps_handles_empty() {
         assert_eq!(spaced_caps(""), "");
+    }
+
+    #[test]
+    fn icon_button_target_never_smaller_than_28() {
+        let size = std::cell::Cell::new(egui::Vec2::ZERO);
+        egui::__run_test_ui(|ui| {
+            size.set(
+                icon_button(ui, IconButtonSpec::new("⚙", "Configurações"))
+                    .rect
+                    .size(),
+            );
+        });
+        let size = size.get();
+        assert!(size.x >= ICON_BUTTON_MIN_SIDE);
+        assert!(size.y >= ICON_BUTTON_MIN_SIDE);
+    }
+
+    #[test]
+    fn icon_button_fits_fixed_chrome_at_maximum_font_size() {
+        let size = std::cell::Cell::new(egui::Vec2::ZERO);
+        egui::__run_test_ui(|ui| {
+            ui.style_mut().text_styles.insert(
+                egui::TextStyle::Body,
+                egui::FontId::new(23.0, egui::FontFamily::Monospace),
+            );
+            ui.style_mut().text_styles.insert(
+                egui::TextStyle::Button,
+                egui::FontId::new(21.0, egui::FontFamily::Monospace),
+            );
+            size.set(
+                icon_button(ui, IconButtonSpec::new("⚙", "Configurações"))
+                    .rect
+                    .size(),
+            );
+        });
+        assert!(size.get().y <= 34.0, "maximum font must fit the titlebar");
+    }
+
+    #[test]
+    fn selected_control_keeps_readable_ink_in_hover_and_focus_states() {
+        for preset in omninote_core::types::ThemePreset::all() {
+            let theme = Theme::from_preset(preset, [0x6b, 0xff, 0x9a]);
+            let ctx = egui::Context::default();
+            theme.apply(&ctx);
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.scope(|ui| {
+                        configure_framed_control(ui, true, true);
+                        assert_eq!(
+                            ui.visuals().widgets.hovered.fg_stroke.color,
+                            theme.text,
+                            "selected hover ink in {preset:?}"
+                        );
+                        assert_eq!(
+                            ui.visuals().widgets.active.fg_stroke.color,
+                            theme.text,
+                            "selected focus ink in {preset:?}"
+                        );
+                    });
+                });
+            });
+        }
+    }
+
+    #[test]
+    fn selected_control_emphasizes_hover_focus_and_press() {
+        assert_eq!(selected_emphasis_width(true, false, false, false), 0.0);
+        assert_eq!(selected_emphasis_width(true, true, false, false), 2.0);
+        assert_eq!(selected_emphasis_width(true, false, true, false), 2.0);
+        assert_eq!(selected_emphasis_width(true, false, false, true), 2.0);
+        assert_eq!(selected_emphasis_width(false, true, true, true), 0.0);
+    }
+
+    #[test]
+    fn icon_button_exposes_selected_human_accessibility_name() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let output = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                icon_button(
+                    ui,
+                    IconButtonSpec::new("⊞", "Painel direito")
+                        .shortcut("Ctrl+\\")
+                        .selected(true),
+                );
+            });
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("accessibility tree");
+        let node = update
+            .nodes
+            .iter()
+            .find_map(|(_, node)| (node.name() == Some("Painel direito")).then_some(node))
+            .expect("human-labelled button");
+        assert_eq!(node.toggled().map(|state| state as u8), Some(1));
+
+        let spec = IconButtonSpec::new("⊞", "Painel direito").shortcut("Ctrl+\\");
+        assert_eq!(spec.tooltip_text(), "Painel direito (Ctrl+\\)");
+    }
+
+    #[test]
+    fn disabled_icon_button_retains_name_and_reason() {
+        let spec = IconButtonSpec::new("🎙", "Ditado").enabled(false, "Em breve");
+        assert_eq!(spec.tooltip_text(), "Ditado — Em breve");
+
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let output = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                icon_button(ui, spec);
+            });
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("accessibility tree");
+        let node = update
+            .nodes
+            .iter()
+            .find_map(|(_, node)| (node.name() == Some("Ditado")).then_some(node))
+            .expect("disabled human-labelled button");
+        assert!(node.is_disabled());
+    }
+
+    #[test]
+    fn mode_segment_target_and_selected_semantics_are_accessible() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let mut size = egui::Vec2::ZERO;
+        let output = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                size = mode_segment_button(ui, "Editar", true, "Alternar modo (Ctrl+E)")
+                    .rect
+                    .size();
+            });
+        });
+        assert!(size.x >= MODE_SEGMENT_MIN_WIDTH);
+        assert!(size.y >= ICON_BUTTON_MIN_SIDE);
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("accessibility tree");
+        let node = update
+            .nodes
+            .iter()
+            .find_map(|(_, node)| (node.name() == Some("Editar")).then_some(node))
+            .expect("mode segment");
+        assert_eq!(node.toggled().map(|state| state as u8), Some(1));
+    }
+
+    #[test]
+    fn audited_icon_only_callsites_use_the_shared_helper() {
+        let sources = [
+            include_str!("ui_titlebar.rs"),
+            include_str!("ui_sidebar.rs"),
+            include_str!("ui_tabs.rs"),
+            include_str!("ui_breadcrumb.rs"),
+            include_str!("ui_calendar.rs"),
+            include_str!("ui_discipline.rs"),
+        ]
+        .join("\n");
+        for forbidden in [
+            ".small_button(\"⚙\")",
+            ".small_button(\"☀/🌙\")",
+            ".small_button(\"📂\")",
+            "Button::new(\"⊟\").small()",
+            ".button(\"⚙\")",
+            ".button(\"◐\")",
+            ".button(\"📅\")",
+            ".button(\"⌘P\")",
+            "Button::new(\"🎙\")",
+            ".small_button(\"×\")",
+            "SelectableLabel::new(open, \"⊞\")",
+            "Button::new(\"↷\").small()",
+            "Button::new(\"↶\").small()",
+            ".button(\"🗑\")",
+            ".small_button(\"‹\")",
+            ".small_button(\"›\")",
+            "Button::new(\"⤴\")",
+            "Button::new(\"⟲\")",
+        ] {
+            assert!(
+                !sources.contains(forbidden),
+                "icon-only control bypasses shared helper: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn visible_shortcut_hints_are_platform_aware() {
+        let sources = [include_str!("ui_calendar.rs"), include_str!("ui_editor.rs")].join("\n");
+        for forbidden in ["RichText::new(\"• Cmd+", "RichText::new(\"Cmd+"] {
+            assert!(
+                !sources.contains(forbidden),
+                "visible shortcut bypasses Context::format_shortcut: {forbidden}"
+            );
+        }
     }
 }

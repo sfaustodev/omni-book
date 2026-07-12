@@ -1,16 +1,9 @@
-//! Typed views over the discipline (sacred) files — CAD-25 Slice 5 §3.4.
-//!
-//! When a discipline file (`SPRINT.md`, `DIARY.md`, `HUMAN.md`, `PLAN.md`, …) is
-//! the active note, [`OmniNoteApp::show_editor`] forks to a structured renderer
-//! instead of the generic markdown editor. The parsing is **pure free functions**
-//! (tested headless, no egui `Context`) sitting on top of
-//! [`omninote_core::discipline`], which already reads/resolves the files.
-//!
-//! Views are read-only in v1.2 — the one exception is DIARY's `+ Append entry`,
-//! which reuses [`omninote_core::discipline::diary_quick`]. Mutating sacred files
-//! from the UI is out of scope (discipline rules #6/#7).
+//! Structured views over discipline notes. Parsing stays in pure helpers over
+//! [`omninote_core::discipline`]; the UI only mutates the supported diary append
+//! path.
 
 use crate::app::OmniNoteApp;
+use crate::ui_a11y::{icon_button, IconButtonSpec};
 use egui::RichText;
 use omninote_core::discipline::{self, DisciplineFile};
 use omninote_core::types::Note;
@@ -931,11 +924,14 @@ impl OmniNoteApp {
             ui.label(crate::ui_a11y::scaled_text(ui, "◧", 18.0).color(theme.accent));
             ui.label(crate::ui_a11y::scaled_text(ui, "Tickets", 18.0).strong());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // Sync controls are visible-but-disabled stubs (titlebar precedent).
-                ui.add_enabled(false, egui::Button::new("⤴"))
-                    .on_disabled_hover_text("Sync push (em breve)");
-                ui.add_enabled(false, egui::Button::new("⟲"))
-                    .on_disabled_hover_text("Sync pull (em breve)");
+                icon_button(
+                    ui,
+                    IconButtonSpec::new("⤴", "Enviar sincronização").enabled(false, "Em breve"),
+                );
+                icon_button(
+                    ui,
+                    IconButtonSpec::new("⟲", "Receber sincronização").enabled(false, "Em breve"),
+                );
             });
         });
 

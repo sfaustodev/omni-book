@@ -19,6 +19,9 @@ mod ui_titlebar;
 mod ui_toasts;
 mod watcher;
 
+const MIN_WINDOW_WIDTH: f32 = 960.0;
+const _: () = assert!(MIN_WINDOW_WIDTH - 280.0 - 320.0 >= 300.0);
+
 fn main() -> eframe::Result<()> {
     // Surface the real panic message, location, and a backtrace even in release
     // builds (eframe otherwise swallows them behind a generic abort).
@@ -39,7 +42,7 @@ fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1200.0, 800.0])
-            .with_min_inner_size([600.0, 400.0])
+            .with_min_inner_size([MIN_WINDOW_WIDTH, 400.0])
             .with_title("OmniNote"),
         ..Default::default()
     };

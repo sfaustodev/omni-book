@@ -155,12 +155,6 @@ mod macos {
         /// delayed until unrelated window input woke the event loop back up.
         pub fn build(ctx: &egui::Context, current: ThemePreset) -> Result<Self, String> {
             let (tx, rx) = mpsc::channel::<MenuEvent>();
-            let repaint_ctx = ctx.clone();
-            MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
-                let _ = tx.send(event);
-                repaint_ctx.request_repaint();
-            }));
-
             let mut actions = HashMap::new();
             let menu_bar = Menu::new();
 
@@ -187,6 +181,11 @@ mod macos {
                 .append(&theme_menu)
                 .map_err(|error| format!("muda: append Tema menu: {error}"))?;
 
+            let repaint_ctx = ctx.clone();
+            MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
+                let _ = tx.send(event);
+                repaint_ctx.request_repaint();
+            }));
             menu_bar.init_for_nsapp();
 
             Ok(Self {
@@ -310,11 +309,10 @@ mod macos {
                     Action::Theme(preset) => {
                         let preset = *preset;
                         if let Some(v) = &mut app.vault {
-                            v.config.theme_preset = preset;
-                            v.config.dark_mode = crate::app::theme_for_config(&v.config).dark;
-                            crate::app::theme_for_config(&v.config).apply(ctx);
+                            crate::app::select_theme_preset(&mut v.config, preset);
                             let _ = v.save_config();
                         }
+                        app.apply_current_theme_and_style(ctx);
                         self.sync_theme_check(preset);
                     }
                     Action::Format(format) => app.queue_editor_action(*format),

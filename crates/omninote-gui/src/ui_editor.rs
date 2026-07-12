@@ -400,12 +400,30 @@ impl OmniNoteApp {
             if self.active_note.is_none() {
                 ui.centered_and_justified(|ui| {
                     ui.vertical_centered(|ui| {
+                        let new_shortcut =
+                            crate::ui_a11y::command_shortcut(ctx, egui::Key::N, false);
+                        let search_shortcut =
+                            crate::ui_a11y::command_shortcut(ctx, egui::Key::K, false);
+                        let settings_shortcut =
+                            crate::ui_a11y::command_shortcut(ctx, egui::Key::Comma, false);
                         ui.add_space(100.0);
                         ui.label(RichText::new("📓 OmniNote").size(24.0).weak());
                         ui.add_space(16.0);
-                        ui.label(RichText::new("Cmd+N  Nova nota").size(12.0).weak());
-                        ui.label(RichText::new("Cmd+K  Buscar").size(12.0).weak());
-                        ui.label(RichText::new("Cmd+,  Configurações").size(12.0).weak());
+                        ui.label(
+                            RichText::new(format!("{new_shortcut}  Nova nota"))
+                                .size(12.0)
+                                .weak(),
+                        );
+                        ui.label(
+                            RichText::new(format!("{search_shortcut}  Buscar"))
+                                .size(12.0)
+                                .weak(),
+                        );
+                        ui.label(
+                            RichText::new(format!("{settings_shortcut}  Configurações"))
+                                .size(12.0)
+                                .weak(),
+                        );
                     });
                 });
                 return;
@@ -422,7 +440,7 @@ impl OmniNoteApp {
             // structured view is the Tickets panel, not a per-note fork), so they
             // fall through to the generic markdown body instead of a blank editor.
             if let Some(note) = self.active_note.clone() {
-                if self.discipline_typed && self.show_discipline_typed(ui, &note) {
+                if !self.editing && self.discipline_typed && self.show_discipline_typed(ui, &note) {
                     self.pending_editor_action = None;
                     return;
                 }

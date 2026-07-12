@@ -124,23 +124,18 @@ impl OmniNoteApp {
                     // Tema
                     ui.horizontal(|ui| {
                         ui.label("Tema:");
-                        let current = v.config.theme_preset;
+                        let current = crate::app::effective_theme_preset(&v.config);
                         egui::ComboBox::from_id_salt("theme_preset_combo")
                             .selected_text(current.label())
                             .show_ui(ui, |ui| {
                                 for preset in omninote_core::types::ThemePreset::all() {
                                     if ui
-                                        .selectable_label(
-                                            v.config.theme_preset == preset,
-                                            preset.label(),
-                                        )
+                                        .selectable_label(current == preset, preset.label())
                                         .clicked()
-                                        && v.config.theme_preset != preset
+                                        && current != preset
                                     {
-                                        v.config.theme_preset = preset;
-                                        v.config.dark_mode =
-                                            crate::app::theme_for_config(&v.config).dark;
-                                        crate::app::theme_for_config(&v.config).apply(ctx);
+                                        crate::app::select_theme_preset(&mut v.config, preset);
+                                        style_dirty = true;
                                         picked_preset = Some(preset);
                                     }
                                 }
@@ -152,7 +147,7 @@ impl OmniNoteApp {
                             let mut rgb = v.config.accent_color;
                             if ui.color_edit_button_srgb(&mut rgb).changed() {
                                 v.config.accent_color = rgb;
-                                crate::app::theme_for_config(&v.config).apply(ctx);
+                                style_dirty = true;
                             }
                         });
                     }
@@ -237,7 +232,7 @@ impl OmniNoteApp {
             });
 
         if style_dirty {
-            self.apply_style(ctx);
+            self.apply_current_theme_and_style(ctx);
         }
         // Keep the native "Tema" menu's checkmarks in lockstep when the pick
         // came from this Settings ComboBox instead of the native menu itself.

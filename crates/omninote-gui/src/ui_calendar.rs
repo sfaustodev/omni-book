@@ -3,6 +3,7 @@
 //! that daily note. Onboarding fires once on an empty vault (Q-15).
 
 use crate::app::OmniNoteApp;
+use crate::ui_a11y::{icon_button, IconButtonSpec};
 use chrono::{Datelike, Local, NaiveDate};
 use egui::RichText;
 
@@ -64,7 +65,7 @@ impl OmniNoteApp {
             .anchor(egui::Align2::RIGHT_TOP, [-16.0, 48.0])
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    if ui.small_button("‹").clicked() {
+                    if icon_button(ui, IconButtonSpec::new("‹", "Mês anterior")).clicked() {
                         nav = Some(if month == 1 {
                             (year - 1, 12)
                         } else {
@@ -75,7 +76,7 @@ impl OmniNoteApp {
                         RichText::new(format!("{} {year}", MONTHS_PT[(month - 1) as usize]))
                             .strong(),
                     );
-                    if ui.small_button("›").clicked() {
+                    if icon_button(ui, IconButtonSpec::new("›", "Próximo mês")).clicked() {
                         nav = Some(if month == 12 {
                             (year + 1, 1)
                         } else {
@@ -142,7 +143,7 @@ impl OmniNoteApp {
         }
     }
 
-    /// First-run onboarding: a one-shot welcome on an empty vault (Q-15).
+    /// First-run onboarding: a one-shot welcome on an empty vault.
     pub fn show_onboarding(&mut self, ctx: &egui::Context) {
         if self.onboarding_done {
             return;
@@ -161,10 +162,14 @@ impl OmniNoteApp {
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
+                let new_shortcut = crate::ui_a11y::command_shortcut(ctx, egui::Key::N, false);
+                let palette_shortcut = crate::ui_a11y::command_shortcut(ctx, egui::Key::P, false);
                 ui.label("Seu vault está vazio. Pra começar:");
                 ui.add_space(6.0);
-                ui.label(RichText::new("• Cmd+N — criar a primeira nota").weak());
-                ui.label(RichText::new("• Cmd+P — paleta de comandos").weak());
+                ui.label(RichText::new(format!("• {new_shortcut} — criar a primeira nota")).weak());
+                ui.label(
+                    RichText::new(format!("• {palette_shortcut} — paleta de comandos")).weak(),
+                );
                 ui.label(RichText::new("• Compatível com Obsidian e Claude Desktop").weak());
                 ui.add_space(8.0);
                 if ui.button("Começar").clicked() {

@@ -45,18 +45,28 @@ const JETBRAINS_MONO_TTF: &[u8] = include_bytes!("../assets/fonts/JetBrainsMono-
 /// Space Grotesk SemiBold (OFL) — the display face used for headings, bundled in.
 const SPACE_GROTESK_TTF: &[u8] = include_bytes!("../assets/fonts/SpaceGrotesk-SemiBold.ttf");
 
-/// Register bundled custom fonts. Call once before applying theme/styles.
-/// Resolve a config to its concrete theme. While `theme_preset` is still at its
-/// default (no settings panel writes it yet — that's Slice 4), honour the legacy
-/// `dark_mode` flag so a v1.0 user in light mode isn't silently flipped to dark.
-/// An explicitly-chosen preset (light/high-contrast/custom) always wins.
-pub(crate) fn theme_for_config(cfg: &omninote_core::types::AppConfig) -> theme::Theme {
+/// Resolve the compatibility state used by legacy configs that predate presets.
+pub(crate) fn effective_theme_preset(
+    cfg: &omninote_core::types::AppConfig,
+) -> omninote_core::types::ThemePreset {
     use omninote_core::types::ThemePreset;
     if cfg.theme_preset == ThemePreset::ObsidianDark && !cfg.dark_mode {
-        theme::Theme::obsidian_light()
+        ThemePreset::ObsidianLight
     } else {
-        theme::Theme::from_preset(cfg.theme_preset, cfg.accent_color)
+        cfg.theme_preset
     }
+}
+
+pub(crate) fn theme_for_config(cfg: &omninote_core::types::AppConfig) -> theme::Theme {
+    theme::Theme::from_preset(effective_theme_preset(cfg), cfg.accent_color)
+}
+
+pub(crate) fn select_theme_preset(
+    cfg: &mut omninote_core::types::AppConfig,
+    preset: omninote_core::types::ThemePreset,
+) {
+    cfg.theme_preset = preset;
+    cfg.dark_mode = theme::Theme::from_preset(preset, cfg.accent_color).dark;
 }
 
 /// Flip light↔dark in-place, preserving an accessibility/custom preset. Keeps
@@ -298,7 +308,7 @@ impl OmniNoteApp {
         let watcher = vault.as_ref().and_then(|v| VaultWatcher::new(&v.root).ok());
         let current_preset = vault
             .as_ref()
-            .map(|v| v.config.theme_preset)
+            .map(|v| effective_theme_preset(&v.config))
             .unwrap_or_default();
         let native_menu = match native_menu::NativeMenu::build(&cc.egui_ctx, current_preset) {
             Ok(menu) => Some(menu),
@@ -436,6 +446,29 @@ impl OmniNoteApp {
         ctx.set_style(style);
     }
 
+    pub(crate) fn apply_current_theme_and_style(&self, ctx: &egui::Context) {
+        let Some(vault) = &self.vault else {
+            return;
+        };
+        theme_for_config(&vault.config).apply(ctx);
+        self.apply_style(ctx);
+    }
+
+    pub(crate) fn toggle_current_theme(&mut self, ctx: &egui::Context) {
+        if let Some(vault) = &mut self.vault {
+            toggle_light_dark(&mut vault.config);
+            let _ = vault.save_config();
+        }
+        self.apply_current_theme_and_style(ctx);
+        let preset = self
+            .vault
+            .as_ref()
+            .map(|vault| effective_theme_preset(&vault.config));
+        if let (Some(native_menu), Some(preset)) = (&self.native_menu, preset) {
+            native_menu.sync_theme_check(preset);
+        }
+    }
+
     pub fn pick_vault_with_ctx(&mut self, ctx: &egui::Context) {
         if let Some(path) = rfd::FileDialog::new()
             .set_title("Escolha (ou crie) uma pasta pra ser seu vault")
@@ -456,7 +489,6 @@ impl OmniNoteApp {
                         .map(|s| s.to_string_lossy().into_owned())
                         .unwrap_or_default();
                     let count = v.notes.len();
-                    let theme = theme_for_config(&v.config);
                     self.vault = Some(v);
                     self.active_note = None;
                     self.clear_editor_transients();
@@ -465,10 +497,15 @@ impl OmniNoteApp {
                     // promptly and matches the watcher/reload pattern.)
                     self.timeline_cache = None;
                     self.save_last_vault();
-                    // Re-apply style + full theme (preset-aware) from the new vault's
-                    // config so font and theme take effect immediately, not next toggle.
-                    self.apply_style(ctx);
-                    theme.apply(ctx);
+                    self.apply_current_theme_and_style(ctx);
+                    if let (Some(native_menu), Some(preset)) = (
+                        &self.native_menu,
+                        self.vault
+                            .as_ref()
+                            .map(|vault| effective_theme_preset(&vault.config)),
+                    ) {
+                        native_menu.sync_theme_check(preset);
+                    }
                     self.watcher = VaultWatcher::new(&root).ok();
                     self.toast_info(format!("Vault “{name}” · {count} notas"));
                 }
@@ -630,8 +667,7 @@ impl OmniNoteApp {
             // A successful selection must surface the editor: clear any
             // full-panel overlay (Tickets/Timeline) so the chosen note isn't
             // hidden behind it. Covers every entry point — sidebar, palette,
-            // discipline section, timeline row — and select_note_by_target,
-            // which delegates here. (triad-agy/codex Slice 5.)
+            // discipline section, timeline row — and select_note_by_target.
             self.central_overlay = CentralOverlay::None;
         }
     }
@@ -816,16 +852,13 @@ impl eframe::App for OmniNoteApp {
             self.show_new = true;
         }
         if toggle_edit && self.active_note.is_some() {
-            self.editing = !self.editing;
+            self.toggle_read_edit_mode();
         }
         if settings {
             self.show_settings = true;
         }
         if toggle_dark {
-            if let Some(v) = &mut self.vault {
-                toggle_light_dark(&mut v.config);
-                theme_for_config(&v.config).apply(ctx);
-            }
+            self.toggle_current_theme(ctx);
         }
 
         // Error window is rendered before the no-vault early return below, so a
@@ -986,6 +1019,93 @@ mod tests {
         assert_eq!(app.central_overlay, CentralOverlay::None);
         assert!(app.discipline_typed, "typed view on by default");
         assert_eq!(app.timeline_since, "7d");
+    }
+
+    #[test]
+    fn applying_a_theme_preserves_the_configured_line_height() {
+        let (mut app, _dir) = test_app();
+        let config = &mut app.vault.as_mut().unwrap().config;
+        config.font_size = 18.0;
+        config.line_height = 1.8;
+        let ctx = egui::Context::default();
+
+        app.apply_current_theme_and_style(&ctx);
+
+        let expected = 3.0 + 18.0 * 0.8;
+        assert!((ctx.style().spacing.item_spacing.y - expected).abs() < 0.0001);
+    }
+
+    #[test]
+    fn shortcut_mode_toggle_uses_the_discipline_transition() {
+        let (mut app, _dir) = test_app();
+        let id = app.vault.as_ref().unwrap().notes[0].frontmatter.id.clone();
+        app.select_note(&id);
+        app.active_note.as_mut().unwrap().rel_path = "discipline/SPRINT.md".into();
+
+        app.toggle_read_edit_mode();
+        assert!(app.editing);
+        assert!(app.discipline_typed);
+
+        app.toggle_read_edit_mode();
+        assert!(!app.editing);
+        assert!(app.discipline_typed);
+    }
+
+    #[test]
+    fn shortcut_mode_toggle_restores_the_raw_read_preference() {
+        let (mut app, _dir) = test_app();
+        let id = app.vault.as_ref().unwrap().notes[0].frontmatter.id.clone();
+        app.select_note(&id);
+        app.active_note.as_mut().unwrap().rel_path = "discipline/SPRINT.md".into();
+        app.discipline_typed = false;
+
+        app.toggle_read_edit_mode();
+        assert!(app.editing);
+        assert!(!app.discipline_typed);
+
+        app.toggle_read_edit_mode();
+        assert!(!app.editing);
+        assert!(!app.discipline_typed);
+    }
+
+    #[test]
+    fn selecting_the_active_read_mode_is_idempotent() {
+        let (mut app, _dir) = test_app();
+        let id = app.vault.as_ref().unwrap().notes[0].frontmatter.id.clone();
+        app.select_note(&id);
+        app.editing = false;
+        app.discipline_typed = false;
+        app.editor_sel = Some((1, 2));
+
+        app.set_read_edit_mode(crate::ui_breadcrumb::ReadEditMode::Read);
+
+        assert!(!app.discipline_typed);
+        assert_eq!(app.editor_sel, Some((1, 2)));
+    }
+
+    #[test]
+    fn explicit_dark_selection_escapes_the_legacy_light_fallback() {
+        let mut config = omninote_core::types::AppConfig {
+            theme_preset: omninote_core::types::ThemePreset::ObsidianDark,
+            dark_mode: false,
+            ..Default::default()
+        };
+        assert_eq!(
+            effective_theme_preset(&config),
+            omninote_core::types::ThemePreset::ObsidianLight
+        );
+
+        select_theme_preset(&mut config, omninote_core::types::ThemePreset::ObsidianDark);
+
+        assert!(config.dark_mode);
+        assert_eq!(
+            effective_theme_preset(&config),
+            omninote_core::types::ThemePreset::ObsidianDark
+        );
+        assert_eq!(
+            theme_for_config(&config),
+            crate::theme::Theme::obsidian_dark()
+        );
     }
 
     #[test]
