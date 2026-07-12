@@ -259,3 +259,24 @@ Graph view, canvas, sync+mobile, web clipper, plugin system, E2E encryption.
 ### Next single-step
 
 Spawnar `frontend-design` subagent em sessão dedicada com prompt em `~/.claude/plans/greedy-napping-castle.md` seção "Brief para Claude design subagent". Em paralelo, começar CAD-20 (Phase 1 link parity) — sequencial blocker.
+
+---
+
+## 2026-07-12 — fix/cad-25-gui-polish — publicar PR + auto-merge
+
+### Contexto
+
+Fausto autorizou explicitamente push, abertura do PR e auto-merge condicionado ao CI verde. Código/review/smoke/gates locais já concluídos; CAD-25 permanece 👀 Em testes mesmo após merge até confirmação humana escrita.
+
+### Plano
+
+1. Confirmar worktree limpo, `gh` autenticado, base `main` e suíte workspace verde.
+2. Commitar este registro discipline, fazer `git push -u origin fix/cad-25-gui-polish`.
+3. Abrir PR ready-for-review em pt-BR com resumo, root cause, matriz/QA, riscos e comandos de verificação.
+4. Armar squash auto-merge; monitorar checks até estado terminal.
+5. Se CI falhar, invocar `ci-red-triage` antes de qualquer fix; se verde, confirmar merge sem fechar CAD-25 no Notion.
+6. Atualizar DIARY/NOTION local com PR/merge e manter o worktree para eventual feedback.
+
+### Next single-step
+
+Rodar preflight Git/GitHub + suíte workspace fresca.
