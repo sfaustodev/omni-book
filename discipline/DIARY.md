@@ -4,6 +4,26 @@
 
 ---
 
+## 2026-07-12 — [crash-menu-icon] [gui-smoke] [sidebar-overflow] [clickable-row] CAD-25
+
+**Branch:** `fix/cad-25-gui-polish` · continuação do polimento · engine crates intocadas · sem PR (gate humano).
+
+**Smoke P0 macOS:** release final aberto com `RUST_BACKTRACE=1`; AX encontrou Editar 16 ações + Tema 9 presets e acionou `▦  Bloco de código` (resultado 0). Processo permaneceu vivo >5 s, stderr vazio, zero panic/backtrace. Critério crash-menu-icon PASS real, não inferido.
+
+**Findings visuais + TDD:** Almanac revelou faixa preta entre sidebar/editor. Diagnóstico provou `CollapsingHeader` com `TextWrapMode::Extend`: pasta `Projects/web3-threat-reports/2026-04-tirios-contagious-interview` alargava resposta do painel para 346 px. Teste app-level RED (`central_left=311`) → galley pré-truncado na largura disponível; mantém full path como ID, nome completo no AccessKit/tooltip e semântica nativa do header. Mesmo teste depois prendeu segundo bug RED (`folder y=968.48` numa tela 800): `with_layout(right_to_left, Center)` consumia a altura restante; faixa de ações agora aloca 28 px e árvore fica visível. Smoke achou terceiro quick-win: clique sobre texto selecionável da nota não ativava a linha, só gutter; teste de pointer down/up RED → `clickable_row` desliga seleção textual apenas dentro do botão compartilhado. Todos GREEN.
+
+**P2 manual:** Almanac 1200×800 sem gap/overflow, busca/filtros/árvore visíveis; clique direto no título abriu nota; `[ Editar | Ler ]` mostrou `Ler` ativo + tooltip real `Alternar modo (Cmd+E)`. High Contrast legível; clique em `Editar` trocou estado ativo para verde sobre preto. Itens manuais não executados seguem desmarcados em `QA_FORMATTING.md`; matriz pura permanece 640/640.
+
+**Verificação fresca:** fmt check 0; clippy workspace/all-targets `-D warnings` 0; `cargo test --workspace` = **593 passed / 1 ignored / 0 failed** (GUI 140); release build 0; `git diff --check` 0; engine diff vazio. CodeRabbit CLI ausente; reviewer independente do diff deu **APPROVE**, zero Critical/Important/Minor.
+
+**Sacred files:** QA/PLAN/SPRINT/NOTION sincronizados. Varredura HUMAN: nenhum Q novo — truncamento seguro, faixa de 28 px e clique em linhas são quick-wins reversíveis pedidos, sem contrato externo/segurança/redesign. Q-12/Q-13/Q-14 continuam abertas. CAD-25 permanece 👀 Em testes; confirmação humana ainda é necessária antes de fechar ticket/abrir PR.
+
+**Memória:** Cortex progress #111; Mycorrhiza elo #300; chain_status 300/300 íntegra.
+
+**Next:** branch limpa e pronta localmente; parar sem push/PR para o gate humano.
+
+---
+
 ## 2026-07-11 — [crash-menu-icon] [formatting-gauntlet] [gui-polish] CAD-25
 
 **Branch:** `fix/cad-25-gui-polish` · commits de código `5029de1`, `beed80b`, `642e173` · sem PR (gate humano).

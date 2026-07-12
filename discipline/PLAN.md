@@ -45,6 +45,17 @@ Rodar baseline completo no worktree e concluir a investigação read-only dos tr
 
 **Next single-step atual:** humano autoriza controle externo da GUI ou executa checklist; registrar resultado antes de aceitar CAD-25.
 
+### Status 2026-07-12
+
+- [x] Smoke P0 real no release final: `RUST_BACKTRACE=1`, AX press em `▦ Bloco de código`, processo vivo + stderr vazio.
+- [x] Almanac Light + High Contrast renderizados; modo Ler/Editar legível, tooltip `Cmd+E`, clique troca estado ativo.
+- [x] Regressões achadas pelo smoke: pasta longa expandia a sidebar; ações da sidebar consumiam o viewport; label selecionável bloqueava clique no texto. Três fixes GUI-only, dois testes RED→GREEN.
+- [x] Gates frescos: fmt 0; clippy workspace strict 0; workspace 593 passed/1 ignored/0 failed; release build 0; engine diff vazio.
+- [x] `QA_FORMATTING.md` anotado sem promover itens manuais não executados.
+- [x] Commit final explícito + branch pronta; sem abrir PR.
+
+**Next single-step atual:** parar; o gate humano decide push/abertura do PR.
+
 ## 2026-07-10 — CAD-25 Slice 7 — theme gallery + native macOS menu bar
 
 ### Contexto
