@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-11T23:37:12-03:00",
+  "title": "Design System: OmniNote GUI",
+  "extensions": {
+    "colorMeta": {
+      "terminal-accent": {
+        "role": "primary",
+        "displayName": "Terminal Phosphor",
+        "canonical": "#6bff9a",
+        "tonalRamp": ["#071a0d", "#0f351b", "#175129", "#206d38", "#2b8a47", "#3eaf5e", "#6bff9a", "#d8ffe4"]
+      },
+      "terracotta-accent": {
+        "role": "primary",
+        "displayName": "Editorial Terracotta",
+        "canonical": "#bf4d26",
+        "tonalRamp": ["#25100a", "#4a1f10", "#702f17", "#963e1f", "#bf4d26", "#d77855", "#e9aa92", "#f8ddd2"]
+      },
+      "high-contrast-accent": {
+        "role": "primary",
+        "displayName": "Signal Green",
+        "canonical": "#00ff00",
+        "tonalRamp": ["#002600", "#004d00", "#007300", "#009900", "#00bf00", "#00e600", "#66ff66", "#ccffcc"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Títulos de nota e painel." },
+      "body": { "displayName": "Markdown Body", "purpose": "Leitura e edição mono-forward." },
+      "label": { "displayName": "Control Label", "purpose": "Comandos, hints e metadados." }
+    },
+    "shadows": [],
+    "motion": [
+      { "name": "mechanical-state", "value": "50ms linear", "purpose": "Feedback curto de hover e active; sem coreografia." }
+    ],
+    "breakpoints": []
+  },
+  "components": [
+    {
+      "name": "Icon Button",
+      "kind": "button",
+      "refersTo": "icon-button",
+      "description": "Controle quadrado de 28 px com nome acessível e tooltip.",
+      "html": "<button class=\"ds-icon-button\" aria-label=\"Configurações\" title=\"Configurações (Cmd+,)\">⚙</button>",
+      "css": ".ds-icon-button { width:28px; height:28px; border:0; border-radius:0; background:transparent; color:#3ce06f; } .ds-icon-button:hover,.ds-icon-button:focus-visible { background:#6bff9a22; color:#6bff9a; outline:1px solid #6bff9a; } .ds-icon-button:active { background:#6bff9a; color:#001609; }"
+    },
+    {
+      "name": "Read Edit Segmented Control",
+      "kind": "custom",
+      "refersTo": "segmented-active",
+      "description": "Modo binário com Ler e Editar sempre visíveis.",
+      "html": "<div class=\"ds-segment\" role=\"group\" aria-label=\"Modo da nota\"><button aria-pressed=\"true\">Ler</button><button aria-pressed=\"false\">Editar</button></div>",
+      "css": ".ds-segment { display:inline-flex; border:1px solid #1d7a45; } .ds-segment button { min-height:28px; border:0; border-radius:0; padding:4px 8px; background:transparent; color:#3ce06f; } .ds-segment button[aria-pressed=true] { background:#6bff9a; color:#001609; } .ds-segment button:focus-visible { outline:1px solid #6bff9a; outline-offset:-2px; }"
+    },
+    {
+      "name": "Focusable Navigation Row",
+      "kind": "nav",
+      "description": "Linha selecionável indicada por prompt e barra lateral.",
+      "html": "<button class=\"ds-nav-row\" aria-selected=\"true\"><span>&gt;</span> Nota ativa</button>",
+      "css": ".ds-nav-row { width:100%; min-height:28px; border:0; border-left:2px solid #6bff9a; border-radius:0; background:transparent; color:#3ce06f; text-align:left; font-family:monospace; } .ds-nav-row:hover,.ds-nav-row:focus-visible { background:#6bff9a14; outline:1px solid #6bff9a; }"
+    },
+    {
+      "name": "Markdown Input",
+      "kind": "input",
+      "description": "Editor plano, mono e focado no arquivo real.",
+      "html": "<textarea class=\"ds-editor\" aria-label=\"Conteúdo Markdown\"># Nota</textarea>",
+      "css": ".ds-editor { min-height:120px; padding:8px; border:1px solid #0e3a22; border-radius:0; background:#04120b; color:#3ce06f; font:13.5px/1.4 monospace; } .ds-editor:focus-visible { border-color:#6bff9a; outline:1px solid #6bff9a; }"
+    },
+    {
+      "name": "Terminal Section Label",
+      "kind": "custom",
+      "description": "Divisor tipográfico sem cartão ou regra ornamental.",
+      "html": "<div class=\"ds-section-label\">N O T A S</div>",
+      "css": ".ds-section-label { padding:4px 2px; color:#1f9b4d; background:transparent; font:10px monospace; letter-spacing:.12em; text-transform:uppercase; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Terminal / Mechanical",
+    "overview": "OmniNote combina a precisão de uma ferramenta de terminal com a legibilidade de um caderno. A interface é plana, rápida e mono-forward; o estado aparece por contraste, tinta, prompt e ritmo, nunca por decoração gratuita.",
+    "keyCharacteristics": [
+      "Controles quadrados, compactos e com feedback imediato.",
+      "Hierarquia por tipografia, espaçamento e tinta sem elevação cosmética.",
+      "Modos e ações destrutivas sempre explícitos em linguagem humana.",
+      "Keyboard-first sem sacrificar mouse, leitor de tela ou alvo de toque."
+    ],
+    "rules": [
+      { "name": "The Role-Stability Rule", "body": "Trocar tema muda os valores, nunca o significado.", "section": "colors" },
+      { "name": "The Contrast-Pair Rule", "body": "Texto sobre accent usa accent_ink do próprio tema.", "section": "colors" },
+      { "name": "The Accessibility Scale Rule", "body": "Troca de tema não pode apagar line_height.", "section": "typography" },
+      { "name": "The Flat-By-Default Rule", "body": "Estado interativo, não decoração, cria separação temporária.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do manter alvos icon-only com pelo menos 28 × 28 px, tooltip e nome acessível.",
+      "Do mostrar as duas metades de um modo binário como Ler | Editar.",
+      "Do degradar adornos inválidos para uma versão textual segura."
+    ],
+    "donts": [
+      "Don't criar dashboard genérico de SaaS ou AI workspace.",
+      "Don't usar glassmorphism, gradientes decorativos ou sombras cosméticas.",
+      "Don't publicar ícones-enigma sem rótulo acessível ou tooltip."
+    ]
+  }
+}

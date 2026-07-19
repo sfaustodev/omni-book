@@ -4,6 +4,60 @@
 
 ---
 
+## 2026-07-12 — [ci-red-triage] [linux-cfg] [crash-menu-icon] CAD-25 · PR #35
+
+**Publicação:** branch enviada e PR #35 aberto ready-for-review por autorização explícita do Fausto. Repositório não oferece auto-merge nativo; regra operacional adotada: observar CI e executar squash merge imediatamente após verde. CAD-25 permanece 👀 Em testes até confirmação humana específica de fechamento.
+
+**CI red:** run #100 falhou apenas no Clippy Linux: `MenuIconRgba`/`validated_menu_icon_rgba` e `EditorEntryPoint::NativeMenu` tinham consumidores reais no macOS e em `cfg(test)`, mas ficavam mortos no binário Linux. Root cause `5029de1` + `beed80b`, ambos `sfaustodev@gmail.com`; Case A aplicado e fix autorizado pelo humano.
+
+**Fix `e6fb448`:** `#[cfg(any(target_os = "macos", test))]` nos símbolos exclusivos do menu nativo + match condicionado; zero `#[allow]` novo, engine crates intocadas. O helper de RGBA e a matriz NativeMenu continuam compilados/testados em qualquer runner de testes, mas somem do binário Linux de produção.
+
+**Verificação local pós-fix:** fmt 0; Clippy exato do workflow `--all-targets -D warnings` 0; GUI **140 passed**; workspace **593 passed / 1 ignored / 0 failed**; `git diff --check` 0. Próximo gate definitivo: CI Linux do commit final; verde → squash merge automático operacional.
+
+**HUMAN sweep:** nenhuma pergunta nova — `cfg` é correção mecânica de portabilidade, sem decisão de produto/contrato. Q-12/Q-13/Q-14 seguem abertas.
+
+---
+
+## 2026-07-12 — [crash-menu-icon] [gui-smoke] [sidebar-overflow] [clickable-row] CAD-25
+
+**Branch:** `fix/cad-25-gui-polish` · continuação do polimento · engine crates intocadas · sem PR (gate humano).
+
+**Smoke P0 macOS:** release final aberto com `RUST_BACKTRACE=1`; AX encontrou Editar 16 ações + Tema 9 presets e acionou `▦  Bloco de código` (resultado 0). Processo permaneceu vivo >5 s, stderr vazio, zero panic/backtrace. Critério crash-menu-icon PASS real, não inferido.
+
+**Findings visuais + TDD:** Almanac revelou faixa preta entre sidebar/editor. Diagnóstico provou `CollapsingHeader` com `TextWrapMode::Extend`: pasta `Projects/web3-threat-reports/2026-04-tirios-contagious-interview` alargava resposta do painel para 346 px. Teste app-level RED (`central_left=311`) → galley pré-truncado na largura disponível; mantém full path como ID, nome completo no AccessKit/tooltip e semântica nativa do header. Mesmo teste depois prendeu segundo bug RED (`folder y=968.48` numa tela 800): `with_layout(right_to_left, Center)` consumia a altura restante; faixa de ações agora aloca 28 px e árvore fica visível. Smoke achou terceiro quick-win: clique sobre texto selecionável da nota não ativava a linha, só gutter; teste de pointer down/up RED → `clickable_row` desliga seleção textual apenas dentro do botão compartilhado. Todos GREEN.
+
+**P2 manual:** Almanac 1200×800 sem gap/overflow, busca/filtros/árvore visíveis; clique direto no título abriu nota; `[ Editar | Ler ]` mostrou `Ler` ativo + tooltip real `Alternar modo (Cmd+E)`. High Contrast legível; clique em `Editar` trocou estado ativo para verde sobre preto. Itens manuais não executados seguem desmarcados em `QA_FORMATTING.md`; matriz pura permanece 640/640.
+
+**Verificação fresca:** fmt check 0; clippy workspace/all-targets `-D warnings` 0; `cargo test --workspace` = **593 passed / 1 ignored / 0 failed** (GUI 140); release build 0; `git diff --check` 0; engine diff vazio. CodeRabbit CLI ausente; reviewer independente do diff deu **APPROVE**, zero Critical/Important/Minor.
+
+**Sacred files:** QA/PLAN/SPRINT/NOTION sincronizados. Varredura HUMAN: nenhum Q novo — truncamento seguro, faixa de 28 px e clique em linhas são quick-wins reversíveis pedidos, sem contrato externo/segurança/redesign. Q-12/Q-13/Q-14 continuam abertas. CAD-25 permanece 👀 Em testes; confirmação humana ainda é necessária antes de fechar ticket/abrir PR.
+
+**Memória:** Cortex progress #111; Mycorrhiza elo #300; chain_status 300/300 íntegra.
+
+**Next:** branch limpa e pronta localmente; parar sem push/PR para o gate humano.
+
+---
+
+## 2026-07-11 — [crash-menu-icon] [formatting-gauntlet] [gui-polish] CAD-25
+
+**Branch:** `fix/cad-25-gui-polish` · commits de código `5029de1`, `beed80b`, `642e173` · sem PR (gate humano).
+
+**P0:** backtrace `muda::macos::icon ZeroWidth` veio de lifetime inválido: `Menu` era local, `init_for_nsapp()` instalava ponteiros nativos e o wrapper Rust caía ao fim de `build`. `NativeMenu` agora retém `menu_bar`; `Drop` remove do NSApp + limpa handler. Build inteiro virou `Result`; erro degrada para GUI sem menu. Handler global só instala após todos builders/appends falíveis. Defense adicional TDD: `validated_menu_icon_rgba` rejeita `w==0`, `h==0`, overflow e `len != w*h*4`; `FallibleIconMenuItem` tenta `Icon::from_rgba` sem unwrap e cai para `MenuItem` textual. Todos itens Editar passam pelo wrapper; Tema usa `CheckMenuItem` (API sem bitmap). Regression zero-width/vazio verde.
+
+**P1:** 16 `MdFormat` × 5 entrypoints × 8 fixtures = 640 células; 528 suportadas + 112 N/A validadas como não expostas. `apply_editor_action` é chokepoint puro; seleção egui CHAR→BYTE, ranges UTF-8 normalizados, slash stale no-op, code-block dentro de fence no-op, estado/ação escopados por nota. Cada mutação da gauntlet executa undo+redo; ramo redo stale invalidado. Menu nativo, slash, palette, contexto e B/I/Math teclado usam o mesmo registry. `QA_FORMATTING.md` contém matriz + checklist manual.
+
+**P2:** olho ambíguo substituído por `[ Ler | Editar ]` (56×28 por segmento, tooltip `Mod+E`, AccessKit selected); preferência Raw sobrevive Editar→Ler. 18 controles icon-only migrados para helper comum com alvo físico ≥28px, tooltip/nome acessível, disabled reason e estados hover/focus/press. Contraste automatizado nos 9 temas (incl. Almanac Light/High Contrast + Custom adversarial); line-height preservado ao trocar tema. Sidebar/breadcrumb/titlebar refluídos; vault longo trunca e janela mínima 960 mantém chrome. Atalhos visíveis vêm de `Context::format_shortcut`.
+
+**Review:** `/impeccable audit` final 18/20 sem P0/P1/P2; duas passadas lógicas acharam titlebar longo, hints Cmd hardcoded e perda de Raw — todos corrigidos. CodeRabbit CLI ausente; revisão independente manual final aprovou sem finding. Comentários novos atemporais; zero `#[allow]` novo.
+
+**Verificação fresca:** `cargo fmt --all -- --check` 0; `cargo clippy --workspace --all-targets -- -D warnings` 0; `cargo test --workspace` = **591 passed / 1 ignored / 0 failed** (GUI 138); `cargo build --release -p omninote-gui` 0. Diff engine (`core/ai/cli/mcp`) vazio. GitHub: sem PR da branch.
+
+**Pendente/bloqueio:** AX confirmou Editar 16 ações + Tema 9 presets, mas clique real `Editar → Bloco de código` com `RUST_BACKTRACE=1` e inspeção visual Almanac/High Contrast NÃO foram concluídos: runner negou nova automação externa por cota de autorização. `QA_FORMATTING.md` registra PENDENTE, sem inferir PASS. CAD-25 permanece aberto/em teste. Q-13/Q-14 abertas para decisões postmaiden.
+
+**Next:** autorização humana explícita para reabrir/controlar a GUI ou execução humana do checklist; anotar resultados, corrigir qualquer panic com regression test primeiro e só então declarar os critérios manuais aceitos.
+
+---
+
 ## 2026-07-10 (3) — main verde: triage encerrado em 3 PRs
 
 Desfecho do triage abaixo: #33 (clippy 1.97 + audit ignores) matou Lint-quase-todo e Security Audit, mas revelou um 2º resto Linux-only — `select_all_range`/`copy_slice` do `native_menu.rs` viram `dead_code` no runner Linux (caller `macos::pump` compilado fora). #34 (`cfg_attr(not(macos), allow(dead_code))` escopado, doc inline) fechou. **CI main @ `237e9a5`: success — 4/4 jobs.** Merge do #34 autorizado explicitamente pelo Fausto ("da logo auto merge em tudo"). App em `/Applications` (build do `7cf7dfe`) permanece equivalente — o fix é atributo-only fora do macOS. Q-12 (audit ignore vs upgrade egui) segue aberta.

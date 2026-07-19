@@ -4,6 +4,58 @@
 
 ---
 
+## 2026-07-11 — fix/cad-25-gui-polish — crash-proofing + formatting gauntlet + UI polish
+
+### Contexto
+
+Missão Fausto: corrigir o panic macOS de `muda` ao clicar em "criar bloco de código", provar a correção por TDD, fechar a matriz de formatação em todos os entrypoints/fixtures perversos e tornar os controles da GUI legíveis e acessíveis. Ticket guarda-chuva: CAD-25. Engine crates (`omninote-core`, `omninote-ai`, `omninote-cli`, `omninote-mcp`) são gabarito read-only.
+
+### Escopo
+
+1. P0: rastrear o RGBA/dimensões que chegam a `muda::Icon`, escrever regression test vermelho para zero-width/vazio e tornar o helper de ícone falível; qualquer input inválido resulta em item nativo sem ícone.
+2. P1: inventariar ações × entrypoints; consolidar mutações no helper puro existente ou num chokepoint GUI puro; cobrir nota/cursor/seleção/multibyte/code-block/undo-redo por testes; registrar células somente interativas em `crates/omninote-gui/QA_FORMATTING.md` e executar uma vez.
+3. P2: aplicar `/impeccable polish` no toggle Ler/Editar; auditar controles icon-only para alvo mínimo 28 px, tooltip/nome acessível e estados hover/active/focus nos 9 temas; validar especialmente AlmanacLight e HighContrast; quick wins pequenos apenas.
+4. Fechamento: `/impeccable audit`, fmt, clippy `-D warnings`, suíte workspace (baseline >=553), build release e smoke macOS com `RUST_BACKTRACE=1`; atualizar DIARY/HUMAN; deixar branch pronta sem abrir PR.
+
+### Arquivos críticos
+
+- `crates/omninote-gui/src/native_menu.rs`
+- `crates/omninote-gui/src/ui_editor.rs`
+- `crates/omninote-gui/src/ui_palette.rs`
+- `crates/omninote-gui/src/app.rs`
+- `crates/omninote-gui/src/theme.rs`
+- `crates/omninote-gui/QA_FORMATTING.md` (novo)
+- `discipline/{PLAN,DIARY,HUMAN}.md`
+
+### Verificação
+
+Todos os comandos headless usam `timeout N` + `</dev/null`. Gate final: testes focados RED→GREEN por hunk; `cargo fmt --check`; `cargo clippy --workspace --all-targets -- -D warnings`; `cargo test --workspace`; `cargo build --release`; diff confirma zero mudança em engine crates; smoke real do menu com backtrace e checklist QA anotado.
+
+### Next single-step
+
+Rodar baseline completo no worktree e concluir a investigação read-only dos três eixos antes do primeiro teste vermelho.
+
+### Status 2026-07-11
+
+- [x] P0: lifetime do `Menu` corrigido + icon RGBA falível + regression test zero-width/vazio.
+- [x] P1: matriz 16×5×8 = 640/640 células cobertas; 528 suportadas, 112 N/A; undo/redo e UTF-8.
+- [x] P2: `[ Ler | Editar ]`, 18 icon-only auditados, contraste 9 temas, layout/atalhos/Raw corrigidos.
+- [x] Gates: fmt, clippy strict, 591 passed/1 ignored, release build; engine diff vazio; 3 commits; sem PR.
+- [ ] Smoke real `Editar → Bloco de código` com `RUST_BACKTRACE=1` + inspeção visual Almanac Light/High Contrast. Bloqueado por cota de autorização do runner; `QA_FORMATTING.md` honesto como PENDENTE.
+
+**Next single-step atual:** humano autoriza controle externo da GUI ou executa checklist; registrar resultado antes de aceitar CAD-25.
+
+### Status 2026-07-12
+
+- [x] Smoke P0 real no release final: `RUST_BACKTRACE=1`, AX press em `▦ Bloco de código`, processo vivo + stderr vazio.
+- [x] Almanac Light + High Contrast renderizados; modo Ler/Editar legível, tooltip `Cmd+E`, clique troca estado ativo.
+- [x] Regressões achadas pelo smoke: pasta longa expandia a sidebar; ações da sidebar consumiam o viewport; label selecionável bloqueava clique no texto. Três fixes GUI-only, dois testes RED→GREEN.
+- [x] Gates frescos: fmt 0; clippy workspace strict 0; workspace 593 passed/1 ignored/0 failed; release build 0; engine diff vazio.
+- [x] `QA_FORMATTING.md` anotado sem promover itens manuais não executados.
+- [x] Commit final explícito + branch pronta; sem abrir PR.
+
+**Next single-step atual:** parar; o gate humano decide push/abertura do PR.
+
 ## 2026-07-10 — CAD-25 Slice 7 — theme gallery + native macOS menu bar
 
 ### Contexto
@@ -207,3 +259,33 @@ Graph view, canvas, sync+mobile, web clipper, plugin system, E2E encryption.
 ### Next single-step
 
 Spawnar `frontend-design` subagent em sessão dedicada com prompt em `~/.claude/plans/greedy-napping-castle.md` seção "Brief para Claude design subagent". Em paralelo, começar CAD-20 (Phase 1 link parity) — sequencial blocker.
+
+---
+
+## 2026-07-12 — fix/cad-25-gui-polish — publicar PR + auto-merge
+
+### Contexto
+
+Fausto autorizou explicitamente push, abertura do PR e auto-merge condicionado ao CI verde. Código/review/smoke/gates locais já concluídos; CAD-25 permanece 👀 Em testes mesmo após merge até confirmação humana escrita.
+
+### Plano
+
+1. Confirmar worktree limpo, `gh` autenticado, base `main` e suíte workspace verde.
+2. Commitar este registro discipline, fazer `git push -u origin fix/cad-25-gui-polish`.
+3. Abrir PR ready-for-review em pt-BR com resumo, root cause, matriz/QA, riscos e comandos de verificação.
+4. Armar squash auto-merge; monitorar checks até estado terminal.
+5. Se CI falhar, invocar `ci-red-triage` antes de qualquer fix; se verde, confirmar merge sem fechar CAD-25 no Notion.
+6. Atualizar DIARY/NOTION local com PR/merge e manter o worktree para eventual feedback.
+
+### Next single-step
+
+Rodar preflight Git/GitHub + suíte workspace fresca.
+
+### Status 2026-07-12 · PR #35
+
+- [x] Branch publicada e PR ready-for-review aberto.
+- [x] Run #100 triado: Clippy Linux viu três símbolos macOS/test-only como dead code.
+- [x] Fix mínimo `e6fb448`: cfg macOS/test, sem `#[allow]`; fmt + Clippy + GUI 140 + workspace 593/1 verdes localmente.
+- [ ] Push dos registros finais + CI Linux verde + squash merge.
+
+**Next single-step atual:** commitar discipline explicitamente, push e observar o novo run até merge terminal.
