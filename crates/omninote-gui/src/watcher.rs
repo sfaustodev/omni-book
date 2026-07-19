@@ -1,65 +1,46 @@
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use std::path::Path;
-use std::sync::mpsc::{channel, Receiver};
+// Filesystem watcher (feature #8): reflect edits made to the vault outside the
+// app (Obsidian, a text editor, `git pull`). A background `notify` watcher flips
+// an atomic flag; the app drains it each frame and offers a reload.
 
-/// Wraps a notify watcher + its receiver. Keeping the watcher alive in
-/// the struct is important — dropping it stops events.
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
 pub struct VaultWatcher {
     _watcher: RecommendedWatcher,
-    pub rx: Receiver<notify::Result<notify::Event>>,
+    flag: Arc<AtomicBool>,
 }
 
 impl VaultWatcher {
-    pub fn new(root: &Path) -> Result<Self, String> {
-        let (tx, rx) = channel();
-        let mut watcher = notify::recommended_watcher(move |res| {
-            let _ = tx.send(res);
+    pub fn spawn(root: &Path) -> Option<Self> {
+        let flag = Arc::new(AtomicBool::new(false));
+        let sink = flag.clone();
+        let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+            if let Ok(ev) = res {
+                let touches_md = ev
+                    .paths
+                    .iter()
+                    .any(|p| p.extension().map(|e| e == "md").unwrap_or(false));
+                let relevant = matches!(
+                    ev.kind,
+                    EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+                );
+                if touches_md && relevant {
+                    sink.store(true, Ordering::Relaxed);
+                }
+            }
         })
-        .map_err(|e| e.to_string())?;
-        watcher
-            .watch(root, RecursiveMode::Recursive)
-            .map_err(|e| e.to_string())?;
-        Ok(Self {
+        .ok()?;
+        watcher.watch(root, RecursiveMode::Recursive).ok()?;
+        Some(Self {
             _watcher: watcher,
-            rx,
+            flag,
         })
     }
 
-    /// Drain pending events. Returns Vec of paths that changed (Create/Modify/Remove)
-    /// filtered to .md files only, excluding paths inside .omninote/ and _attachments/.
-    pub fn drain_md_changes(&self) -> Vec<std::path::PathBuf> {
-        let mut paths = Vec::new();
-        while let Ok(res) = self.rx.try_recv() {
-            if let Ok(event) = res {
-                use notify::EventKind;
-                let interesting = matches!(
-                    event.kind,
-                    EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
-                );
-                if !interesting {
-                    continue;
-                }
-                for p in event.paths {
-                    let s = p.to_string_lossy();
-                    // Skip OmniNote internals, attachments, and heavy build/VCS
-                    // trees (a vault containing a code project churns target/ etc.).
-                    if s.contains("/.omninote/")
-                        || s.contains("\\.omninote\\")
-                        || s.contains("/_attachments/")
-                        || s.contains("\\_attachments\\")
-                        || s.contains("/target/")
-                        || s.contains("/node_modules/")
-                        || s.contains("/.git/")
-                    {
-                        continue;
-                    }
-                    if p.extension().and_then(|e| e.to_str()) != Some("md") {
-                        continue;
-                    }
-                    paths.push(p);
-                }
-            }
-        }
-        paths
+    /// True if ≥1 `.md` change landed since the last call; resets the flag.
+    pub fn drain(&self) -> bool {
+        self.flag.swap(false, Ordering::Relaxed)
     }
 }
