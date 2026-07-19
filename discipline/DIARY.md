@@ -4,6 +4,78 @@
 
 ---
 
+## 2026-07-10 (3) — main verde: triage encerrado em 3 PRs
+
+Desfecho do triage abaixo: #33 (clippy 1.97 + audit ignores) matou Lint-quase-todo e Security Audit, mas revelou um 2º resto Linux-only — `select_all_range`/`copy_slice` do `native_menu.rs` viram `dead_code` no runner Linux (caller `macos::pump` compilado fora). #34 (`cfg_attr(not(macos), allow(dead_code))` escopado, doc inline) fechou. **CI main @ `237e9a5`: success — 4/4 jobs.** Merge do #34 autorizado explicitamente pelo Fausto ("da logo auto merge em tudo"). App em `/Applications` (build do `7cf7dfe`) permanece equivalente — o fix é atributo-only fora do macOS. Q-12 (audit ignore vs upgrade egui) segue aberta.
+
+---
+
+## 2026-07-10 (2) — [ci-red-triage] main vermelho pós-merge #32: clippy 1.97 drift + advisory DB quick-xml
+
+**Contexto:** CI de main quebrou no merge do PR #32 (Lint + Security Audit; Tests/Build skipped). NENHUMA das causas era o código novo do Slice 7 — as duas eram drift de ambiente que o merge só revelou: (a) CI usa `dtolnay/rust-toolchain@stable` = rust 1.97 (2026-07-07), local estava em 1.96 — lints novos; (b) advisory DB do rustsec atualizou desde 28/jun (mesmo padrão do lopdf/quinn no #27).
+
+**Done:**
+- **Clippy 1.97:** `pdf.rs:8` `for_kv_map` (código pré-existente de v0.1!) + **9 sites** do lint novo `float_literal_f32_fallback` em `egui::Stroke::new(1.0, …)` (theme/app/ui_a11y/ui_sidebar — o CI só mostrou o PRIMEIRO erro porque abortou em core; rodar local em 1.97 revelou o resto). Fix: `rustup update stable` local (1.96→1.97, agora = CI) + `cargo clippy --fix` (sufixos `_f32` machine-applicable) + fix manual do `pages.keys()`.
+- **Audit:** os 4 erros eram TODOS quick-xml <0.41 (RUSTSEC-2026-0194/0195 × 2 versões), transitiva Linux-only do stack egui 0.29 pinado (zbus_xml/atspi runtime local D-Bus; wayland-scanner é PROC-MACRO = só compile-time). Nenhum pai aceita ≥0.41 sem bump major do egui. Decisão decide-and-flag (rule #7): `.cargo/audit.toml` novo com ignore documentado por-ID + **Q-12 aberta no HUMAN.md** (ratificar o ignore vs priorizar upgrade do egui). Lockfile local também estava stale (quinn-proto 0.11.14 < bump do #27! Cargo.lock gitignored = cada máquina deriva) — `cargo update -p crossbeam-epoch -p quinn-proto` limpou o audit local.
+- Verificação em 1.97: clippy `-D warnings` exit 0, fmt limpo, suite inteira verde (14 suítes, 0 failed), `cargo audit` 0 vulnerabilidades (6 warnings allowed: unmaintained bincode/paste/ttf-parser — não falham o job).
+
+**Lição [toolchain-drift-ci-stable-flutuante]:** CI em `@stable` flutuante + dev local parado numa stable antiga = bomba-relógio que detona no merge mais inocente. O clippy local verde de HOJE não prova nada sobre o clippy do CI de AMANHÃ. Trava mecânica candidata (rule #31): pin de toolchain versionado (`rust-toolchain.toml` commitado, CI e local lêem o MESMO arquivo) — decide sozinho quando atualizar em vez de o crates.io decidir por nós. Segunda opção: job noturno de canary em stable-next. Não apliquei o pin agora (mudança de contrato de build — vai pra Q-12/follow-up junto da discussão do egui).
+
+**Files changed:** `crates/omninote-core/src/pdf.rs`, `crates/omninote-gui/src/{theme,app,ui_a11y,ui_sidebar}.rs` (sufixos `_f32`), `.cargo/audit.toml` (novo), `discipline/{HUMAN,DIARY}.md`.
+
+**Next:** PR de fix → auto-merge → confirmar main verde. Q-12 aguarda Fausto.
+
+---
+
+## 2026-07-10 — CAD-25 Slice 7: theme gallery (Almanac/Blueprint/Swiss) + menu nativo macOS (Tema/Editar)
+
+**Tickets touched:** CAD-25 (Fase B, Slice 7 — nova, não estava no plano original)
+
+**Contexto:** Fausto pediu pra recuperar o "bocado de front end" feito em sessões anteriores — os 3 arms do experimento córtex (`cortex/off-1` "Almanac", `off-2` "Blueprint", `off-3` redescoberta cega do Almanac) + um stash nunca commitado (`omninote-swiss-theme`, handoff Claude Design "OmniNote Swiss.html") — e torná-los temas trocáveis via dropdown "Tema" na barra de menus nativa do macOS, com "Editar" expondo os mesmos comandos de formatação do right-click/slash. Trabalho em plan mode (`~/.claude/plans/memoized-splashing-corbato.md`), aprovado antes de codar.
+
+**Done:**
+- **`ThemePreset` 4→9** (aditivo, wire names originais preservados): `AlmanacLight`/`AlmanacDark` (parchment `#EFE7D3`/night `#1B1813`, accent terracotta `#BF4D26`, cores exatas de `cortex/off-1`), `Blueprint`/`BlueprintLight` (navy `#0E1A2B`/draft-on-white `#F2F6FB`, accent cyan `#4FC3F7`/blue técnico `#006DA6`, de `cortex/off-2`), `Swiss` (Bauhaus `#0E0E0E` + laranja `#FF5A1F`, do stash — dark-only, nunca existiu variante clara). `off-3` **não** virou tema próprio — o próprio relatório do experimento documenta "blind convergence" no Almanac do `off-1` (mesmo nome, mesma paleta, redescoberto às cegas); só a diferença de layout (backlinks inline) não é escopo de `Theme` (que é só paleta, não arquitetura de painel).
+- **Fidelidade deliberadamente parcial:** `Theme::apply()` (rounding=ZERO, sem sombra, botões sem frame, scroll flutuante) ficou universal — não criei campos estruturais por-tema. As origens (Almanac rounding=7, Blueprint rounding=2 "técnico") tinham cantos arredondados; mantive tudo flat pra não fragmentar o gate `no_egui_defaults_remain` (que já cobre as 9) nem regredir a identidade "Terminal/Mechanical" já testada. Identidade de cada tema vem 100% da paleta.
+- **Settings modal:** checkbox único "🌙 Modo escuro" → ComboBox completo sobre `ThemePreset::all()` — fechou um órfão pré-existente (`HighContrast`/`Custom` não tinham NENHUM controle de UI antes desta sessão, só alcançáveis via teste/código). Color picker de accent aparece só sob "Personalizado".
+- **`native_menu.rs` novo** (crate `muda` 0.19.3, só 1 dep transitiva nova — `keyboard-types`, já compatível com `raw-window-handle 0.6.2` já travado no lockfile via egui-winit). `#[cfg(target_os = "macos")]` real + stub no-op nas outras plataformas com a MESMA API pública — `app.rs` não precisou de nenhum `#[cfg]` próprio. Menu **Tema** (9 `CheckMenuItem`, radio manual — muda não tem radio-group nativo) + **Editar** (mesmo `MdFormat`/`apply_md_format` do right-click via `editor_sel`, ⌘B/⌘I novos — chaves livres, sem risco de dupla-disparada — + Selecionar tudo/Copiar SEM accelerator, já que `TextEdit` do egui já trata ⌘A/⌘C nativamente) + **Arquivo** mínimo sem accelerators (não duplicar os shortcuts egui já existentes de N/,/W).
+- **463→~490 testes** (contagem exata no relatório de coverage), fmt/clippy `-D warnings`/`build --release` verdes.
+
+**Lição [muda-menu-precisa-thread-principal]:** `test_app()` (helper headless dos testes de `app.rs`) originalmente construía um `NativeMenu` real — `muda::Menu::new()` panica fora da main thread, e `cargo test` roda cada teste na sua própria thread. 18 testes preexistentes (nada a ver com tema/menu) quebraram em cascata. Fix: `native_menu: None` no helper de teste (o campo é `Option<NativeMenu>` justamente pelo padrão take-then-restore que `pump()` precisa — `None` é um estado válido e seguro em qualquer teste que não exercite o menu nativo).
+
+**Lição [pump-precisa-de-self-e-e-campo-de-self]:** `NativeMenu::pump(&mut self, app: &mut OmniNoteApp, ...)` não pode ser chamado como `self.native_menu.pump(self, ctx)` de dentro de `OmniNoteApp::update()` — duplo empréstimo mutável do mesmo `self`. Resolvido com o MESMO idioma take-then-restore que `flush_active`/`active_note` já usam neste código (documentado no CLAUDE.md do projeto): `if let Some(mut nm) = self.native_menu.take() { nm.pump(self, ctx); self.native_menu = Some(nm); }`.
+
+**Escopo deliberadamente cortado:** Cut/Paste/Undo/Redo como itens clicáveis do menu nativo — já funcionam hoje via teclado (⌘X/C/V/Z, o `egui-winit` já traz `arboard` embutido). Torná-los clicáveis exigiria ou `PredefinedMenuItem` (que provavelmente não alcança o buffer custom-rendered do egui — sem responder chain NSTextView pra receber `copy:`/`paste:`/`undo:`, não verificado sem spike real) ou uma pilha própria de undo/redo — escopo novo real que ninguém pediu. Documentado no doc comment do módulo, não decidido em silêncio.
+
+**Verificação:** computer-use pra smoke visual foi negado nesta sessão (`request_access` retornou `user_denied`) — build/test/lint 100% automatizados e verdes, mas o menu nativo em si (a parte visual/interativa) **ainda não foi visto rodando** por ninguém.
+
+**[override-gates-por-ordem-explícita]** Fausto ordenou na mesma sessão: "sobe o pr mergeia" — PR aberto e auto-merge armado SEM o trio pré-PR (rule #26) e SEM smoke humano prévio (rule #13). Override individual, explícito, desta vez só (rule #12) — logado aqui em vez de silenciosamente pulado. O ticket Notion continua em 👀 Revisão (não ✅) até ele testar o app de verdade; o checklist segue em `MANUAL_TEST_PLAN.md`.
+
+**Packaging (mesma sessão):** `cargo-bundle` instalado; `[package.metadata.bundle]` no gui Cargo.toml (`dev.sfausto.omninote`); `scripts/make-dmg.sh` novo (cargo bundle → staging com symlink /Applications → `hdiutil` UDZO) → `dist/OmniNote-0.1.0.dmg` (5.6M, gitignored) e `OmniNote.app` **instalado em /Applications** (arm64, LSMinimumSystemVersion 11.0).
+
+**Files changed:** `omninote-core/types.rs` (`ThemePreset`), `omninote-gui/{theme,app,main,ui_editor,ui_modals}.rs`, `omninote-gui/src/native_menu.rs` (novo), `omninote-gui/Cargo.toml` (+ muda macOS-only + bundle metadata), `scripts/make-dmg.sh` (novo), `.gitignore` (`.claude/`, `dist/`), `SPECS/CAD-25.md`, `discipline/{SPRINT,NOTION,PLAN,MANUAL_TEST_PLAN}.md`.
+
+**Next:** smoke humano no `/Applications/OmniNote.app` (`discipline/MANUAL_TEST_PLAN.md` — CAD-25 Slice 7); coverage/review adversarial vira follow-up pós-merge (consequência do override acima).
+
+---
+
+## 2026-06-30 — Córtex experiment (Livro II): OmniNote GUI como cobaia, baseline OFF ×2
+
+**Contexto:** experimento-piloto do "córtex" (working-memory MCP — Mycorrhiza #236-#239). OmniNote é a COBAIA: refazer a crate `omninote-gui` do ZERO contra checklist fixa de 14 features. Engine (`core/ai/cli/mcp`) CONGELADA = gabarito. Tudo em worktrees descartáveis (`.claude/worktrees/cortex-off-{1,2}`), tag `cortex-baseline`@ea6a911. **Main + WIP intocados; nada vira PR** (experimento, não feature ship). Aparato reusável em `.cortex-experiment/` (gitignored via `.git/info/exclude`).
+
+**Done:**
+- **OFF #1 (design "Almanac", pergaminho/oxblood, painel de conexões à direita):** 14/14 features alcançáveis (auditor independente, evidência file:line), engine verde (fmt/clippy `--workspace --all-targets -D warnings`/test `--workspace`), engine byte-idêntico ao baseline. Continuidade 0 eventos duros + 1 churn menor (5 campos de estado especulativos, 3 removidos). **50 tool-calls de build.** Técnica: skeleton-first (compila mínimo → 1 feature/compile) evitou cascata de erros egui.
+- **OFF #2 (design "Blueprint", navy/cyan drafting, headings mono, dock de referências no rodapé):** 14/14 alcançáveis, engine verde, engine frozen. Continuidade 0 + **0 churn. 11 tool-calls de build, compilou verde de PRIMEIRA** (0 ciclos de erro vs ~5 na #1). Mesma sessão da #1 (Juan NÃO limpou o contexto) → lições carregadas.
+
+**Lição [contexto-retido-confunde-continuidade]:** OFF#2 caiu de 50→11 tool-calls e ~5→0 ciclos-de-erro porque eu LEMBRAVA a API do core + as armadilhas egui da #1 (Window::open borrow, cursor-range, dnd, ordem do test-module, estado enxuto). MAS memória-de-trabalho de lições É exatamente o que um córtex entregaria. Logo um baseline em MESMO contexto JÁ captura o benefício do córtex (a janela de contexto do modelo É a memória de trabalho). Pra ISOLAR o valor do córtex tem que comparar contexto-FRESCO sem-córtex vs contexto-fresco com-córtex (o design "contaminação zero" do #238). O atalho "mesmo contexto" infla o OFF em continuidade/eficiência → viés conservador contra o córtex, mas o 11 da #2 NÃO compara com um ON de contexto fresco. Régua falsificável (cf. #236 "caça-níquel com gráfico").
+
+**Lição [skills-stack-mismatched-no-repo-rust]:** button-remember/baseline-ui são scoped pro projeto Flutter/Blade → no repo Rust egui os MECANISMOS não dispararam, só o PRINCÍPIO (sem feature órfã) aplicado à mão. "Full stack" aqui = modelo + CLAUDE.md + Mycorrhiza + princípios, não skills mecânicas. Daí órfãs = 0/14 nos dois runs (chão do star metric, esperado).
+
+**Files:** `.claude/worktrees/cortex-off-{1,2}/crates/omninote-gui/src/*` (descartável); `.cortex-experiment/{PROMPT,RUNBOOK}.md` + `audit/*` + `results/off-{1,2}.md`. Engine intocada (diff vs baseline = vazio).
+
+**Next:** OFF #3 (mesma sessão, design novo). Depois decidir se roda OFF×3 em contexto FRESCO pra ter o braço comparável ao ON. Construir o córtex → ON×3. 3×3 = piloto (sinal, não prova). Mycorrhiza #239→#240.
+
+---
+
 ## 2026-06-28 — CAD-25b Slice 5 + CAD-24 Layer A: dois PRs mergeados via trio (5 rounds)
 
 **Tickets touched:** CAD-25 Fase B Slice 5, CAD-24 Layer A

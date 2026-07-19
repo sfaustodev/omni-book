@@ -35,3 +35,15 @@ open.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 proptest.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+muda = { version = "0.19.3", default-features = false }
+
+# `cargo bundle --release` → OmniNote.app (see scripts/make-dmg.sh for the .dmg).
+[package.metadata.bundle]
+name = "OmniNote"
+identifier = "dev.sfausto.omninote"
+category = "public.app-category.productivity"
+short_description = "Native Rust notebook over a filesystem vault of Markdown notes."
+copyright = "Copyright © 2026 Juan Fausto. MIT."
+osx_minimum_system_version = "11.0"
