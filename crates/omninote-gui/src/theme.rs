@@ -88,7 +88,9 @@ impl Theme {
             ThemePreset::HighContrast => Palette::high_contrast(cfg.dark_mode),
             ThemePreset::ObsidianLight => Palette::light(accent),
             ThemePreset::ObsidianDark => Palette::dark(accent),
-            ThemePreset::Custom => {
+            // Presets herdados da galeria de temas da main sem paleta própria
+            // neste rebuild caem no par light/dark padrão.
+            _ => {
                 if cfg.dark_mode {
                     Palette::dark(accent)
                 } else {
@@ -113,19 +115,19 @@ impl Theme {
         v.panel_fill = p.bg;
         v.faint_bg_color = p.panel;
         v.extreme_bg_color = p.surface;
-        v.window_stroke = Stroke::new(1.0, p.rule);
+        v.window_stroke = Stroke::new(1.0_f32, p.rule);
         let rounding = Rounding::same(7.0);
         v.window_rounding = rounding;
         v.menu_rounding = rounding;
         v.selection.bg_fill =
             Color32::from_rgba_unmultiplied(p.accent.r(), p.accent.g(), p.accent.b(), 64);
-        v.selection.stroke = Stroke::new(1.0, p.accent);
+        v.selection.stroke = Stroke::new(1.0_f32, p.accent);
 
         let set = |w: &mut egui::style::WidgetVisuals, fill: Color32, fg: Color32| {
             w.bg_fill = fill;
             w.weak_bg_fill = fill;
-            w.bg_stroke = Stroke::new(1.0, p.rule);
-            w.fg_stroke = Stroke::new(1.0, fg);
+            w.bg_stroke = Stroke::new(1.0_f32, p.rule);
+            w.fg_stroke = Stroke::new(1.0_f32, fg);
             w.rounding = rounding;
         };
         set(&mut v.widgets.noninteractive, p.panel, p.ink_soft);
@@ -137,7 +139,7 @@ impl Theme {
             p.ink,
         );
         set(&mut v.widgets.open, p.surface, p.ink);
-        v.widgets.hovered.bg_stroke = Stroke::new(1.0, p.accent);
+        v.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, p.accent);
 
         ctx.set_visuals(v);
 

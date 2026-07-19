@@ -22,6 +22,7 @@ fn theme_preset_label(p: ThemePreset) -> &'static str {
         ThemePreset::ObsidianLight => "Almanac · pergaminho",
         ThemePreset::HighContrast => "Alto contraste",
         ThemePreset::Custom => "Personalizado",
+        other => other.label(),
     }
 }
 
