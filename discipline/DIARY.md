@@ -672,3 +672,19 @@ CAD-25 Fase B desbloqueada (Q-01..Q-30 resolvidas em batch, doc §10). Implement
 **Valor do trio comprovado de novo:** eu (autor) validei compat MECÂNICA do serde e dei ✅; os outros 2 acharam a compat SEMÂNTICA (tema invertido) que eu não vi. Autor normaliza próprias suposições — gate pega.
 
 **Pendente:** PR da Slice 1 (+ Phase 0 docs encaixado). Slices 2-6 seguem, cada uma com seu gate.
+
+---
+
+### [housekeeping] [worktree-cleanup] [gc-1G→1.4M] [PR#36-almanac-merged]
+
+**Cleanup pedido pelo Fausto (projeto 1.1G).** Diagnóstico: peso NÃO era working tree — `.git/objects` tinha 1.0G, sendo 9.339 blobs órfãos (3.3GB inflado) de experimentos GUI descartados, vivos só por reflog. `dist/`+`/target` já gitignorados.
+
+**Worktrees 5→1:** peaceful-moore (limpa) e cortex-off-3 (no origin) removidas direto; off-1/off-2 pushadas pro origin ANTES de remover (auth Fausto); confident-lamport PRESERVADA (CAD-23 uncommitted). Externa (`~/Documents/Codex/.../caderno-gui-polish`) intocada.
+
+**gc agressivo (auth Fausto):** `reflog expire --expire-unreachable=now` + `gc --prune=now` → `.git` 1.0G→**1.4M**. fsck full limpo (removido `.DS_Store` que o Finder enfiou em `.git/refs/`). Todas as 6 branches resolvem, worktree viva intacta.
+
+**PRs (auth Fausto — "abre pr e da automerge"):** off-1/off-2 são rebuilds RIVAIS da mesma crate (19 arquivos overlap) — surfaced antes de agir (rule #4); Fausto escolheu: #36 Almanac com automerge, #37 Blueprint draft de comparação. #36 conflitava com main (2×: main local ≠ origin/main — #35 gui-polish entrou no meio). Merge resolvido "rebuild wins" em worktree temp: `--ours` nos UU, `git rm` nos DU (modify/delete = confirmar deleção). Pós-merge: E0004 (main já tinha COLHIDO os presets Almanac/Blueprint pro enum ThemePreset!) → matches exaustivos com fallback + clippy 1.97 `_f32`. Gate local verde (fmt/clippy/464 testes) ANTES do push.
+
+**[automerge-precondition] lição:** `gh pr merge --auto` exige branch protection na main — `allow_auto_merge` no repo NÃO basta. Sem protection: papel de automerge é manual (watch CI → merge no verde). CI #36 4/4 verde → merged `--merge --delete-branch` (rule #30).
+
+**Estado final:** projeto 1.1G→140M; main = 2cbbc7b (Almanac na main); #37 aberto como draft-referência (NÃO mergear — conflita by design).
